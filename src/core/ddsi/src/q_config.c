@@ -149,9 +149,7 @@ DU(ipv4);
 DUPF(allow_multicast);
 DUPF(boolean);
 DU(boolean_default);
-#if 0
 PF(boolean_default);
-#endif
 DUPF(string);
 DU(tracingOutputFileName);
 DU(verbosity);
@@ -387,7 +385,7 @@ static const struct cfgelem thread_properties_cfgattrs[] = {
 <li><i>tev</i>: general timed-event handling, retransmits and discovery;</li>\n\
 <li><i>xmit.CHAN</i>: transmit thread for channel CHAN;</li>\n\
 <li><i>dq.CHAN</i>: delivery thread for channel CHAN;</li>\n\
-<li><i>tev.CHAN</i>: timed-even thread for channel CHAN.</li></ul>") },
+<li><i>tev.CHAN</i>: timed-event thread for channel CHAN.</li></ul>") },
   END_MARKER
 };
 
@@ -423,13 +421,13 @@ static const struct cfgelem compatibility_cfgelems[] = {
   END_MARKER
 };
 
-static const struct cfgelem unsupp_test_cfgelems[] = {
+static const struct cfgelem internal_test_cfgelems[] = {
   { LEAF("XmitLossiness"), 1, "0", ABSOFF(xmit_lossiness), 0, uf_int, 0, pf_int,
     BLURB("<p>This element controls the fraction of outgoing packets to drop, specified as samples per thousand.</p>") },
   END_MARKER
 };
 
-static const struct cfgelem unsupp_watermarks_cfgelems[] = {
+static const struct cfgelem internal_watermarks_cfgelems[] = {
   { LEAF("WhcLow"), 1, "1 kB", ABSOFF(whc_lowwater_mark), 0, uf_memsize, 0, pf_memsize,
     BLURB("<p>This element sets the low-water mark for the DDSI2E WHCs, expressed in bytes. A suspended writer resumes transmitting when its DDSI2E WHC shrinks to this size.</p>") },
   { LEAF("WhcHigh"), 1, "100 kB", ABSOFF(whc_highwater_mark), 0, uf_memsize, 0, pf_memsize,
@@ -487,7 +485,7 @@ static const struct cfgelem multiple_recv_threads_attrs[] = {
   END_MARKER
 };
 
-static const struct cfgelem unsupp_cfgelems[] = {
+static const struct cfgelem internal_cfgelems[] = {
   { MOVED("MaxMessageSize", "CycloneDDS/General/MaxMessageSize") },
   { MOVED("FragmentSize", "CycloneDDS/General/FragmentSize") },
   { LEAF("DeliveryQueueMaxSamples"), 1, "256", ABSOFF(delivery_queue_maxsamples), 0, uf_uint, 0, pf_uint,
@@ -584,13 +582,13 @@ static const struct cfgelem unsupp_cfgelems[] = {
     BLURB("<p>This element controls whether the actual sending of packets occurs on the same thread that prepares them, or is done asynchronously by another thread.</p>") },
   { LEAF_W_ATTRS("RediscoveryBlacklistDuration", rediscovery_blacklist_duration_attrs), 1, "10s", ABSOFF(prune_deleted_ppant.delay), 0, uf_duration_inf, 0, pf_duration,
     BLURB("<p>This element controls for how long a remote participant that was previously deleted will remain on a blacklist to prevent rediscovery, giving the software on a node time to perform any cleanup actions it needs to do. To some extent this delay is required internally by DDSI2E, but in the default configuration with the 'enforce' attribute set to false, DDSI2E will reallow rediscovery as soon as it has cleared its internal administration. Setting it to too small a value may result in the entry being pruned from the blacklist before DDSI2E is ready, it is therefore recommended to set it to at least several seconds.</p>") },
-  { LEAF_W_ATTRS("MultipleReceiveThreads", multiple_recv_threads_attrs), 1, "true", ABSOFF(multiple_recv_threads), 0, uf_boolean, 0, pf_boolean,
-    BLURB("<p>This element controls whether all traffic is handled by a single receive thread or whether multiple receive threads may be used to improve latency. Currently multiple receive threads are only used for connectionless transport (e.g., UDP) and ManySocketsMode not set to single (the default).</p>") },
+  { LEAF_W_ATTRS("MultipleReceiveThreads", multiple_recv_threads_attrs), 1, "default", ABSOFF(multiple_recv_threads), 0, uf_boolean_default, 0, pf_boolean_default,
+    BLURB("<p>This element controls whether all traffic is handled by a single receive thread (false) or whether multiple receive threads may be used to improve latency (true). By default it is disabled on Windows because it appears that one cannot count on being able to send packets to oneself, which is necessary to stop the thread during shutdown. Currently multiple receive threads are only used for connectionless transport (e.g., UDP) and ManySocketsMode not set to single (the default).</p>") },
   { MGROUP("ControlTopic", control_topic_cfgelems, control_topic_cfgattrs), 1, 0, 0, 0, 0, 0, 0, 0,
     BLURB("<p>The ControlTopic element allows configured whether DDSI2E provides a special control interface via a predefined topic or not.<p>") },
-  { GROUP("Test", unsupp_test_cfgelems),
+  { GROUP("Test", internal_test_cfgelems),
     BLURB("<p>Testing options.</p>") },
-  { GROUP("Watermarks", unsupp_watermarks_cfgelems),
+  { GROUP("Watermarks", internal_watermarks_cfgelems),
     BLURB("<p>Watermarks for flow-control.</p>") },
   { LEAF("EnableExpensiveChecks"), 1, "", ABSOFF(enabled_xchecks), 0, uf_xcheck, 0, pf_xcheck,
     BLURB("<p>This element enables expensive checks in builds with assertions enabled and is ignored otherwise. Recognised categories are:</p>\n\
@@ -794,7 +792,7 @@ static const struct cfgelem domain_cfgelems[] = {
     BLURB("<p>The Discovery element allows specifying various parameters related to the discovery of peers.</p>") },
   { GROUP("Tracing", tracing_cfgelems),
     BLURB("<p>The Tracing element controls the amount and type of information that is written into the tracing log by the DDSI service. This is useful to track the DDSI service during application development.</p>") },
-  { GROUP("Internal|Unsupported", unsupp_cfgelems),
+  { GROUP("Internal|Unsupported", internal_cfgelems),
     BLURB("<p>The Internal elements deal with a variety of settings that evolving and that are not necessarily fully supported. For the vast majority of the Internal settings, the functionality per-se is supported, but the right to change the way the options control the functionality is reserved. This includes renaming or moving options.</p>") },
   { GROUP("TCP", tcp_cfgelems),
     BLURB("<p>The TCP element allows specifying various parameters related to running DDSI over TCP.</p>") },
@@ -1166,7 +1164,7 @@ static int64_t lookup_multiplier (struct cfgst *cfgst, const struct unit *unitta
          always allow 0 to be specified without a unit */
       return 1;
     } else if (def_mult == 0 && err_on_unrecognised) {
-      cfg_error (cfgst, "%s: unit is required", value);
+      (void) cfg_error (cfgst, "%s: unit is required", value);
       return 0;
     } else {
       cfg_warning (cfgst, "%s: use of default unit is deprecated", value);
@@ -1179,7 +1177,7 @@ static int64_t lookup_multiplier (struct cfgst *cfgst, const struct unit *unitta
       if (strcmp(unittab[i].name, value + unit_pos) == 0)
         return unittab[i].multiplier;
     if (err_on_unrecognised)
-      cfg_error(cfgst, "%s: unrecognised unit", value + unit_pos);
+      (void) cfg_error(cfgst, "%s: unrecognised unit", value + unit_pos);
     return 0;
   }
 }
@@ -1456,7 +1454,7 @@ GENERIC_ENUM_CTYPE (boolean, int)
 
 static const char *en_boolean_default_vs[] = { "default", "false", "true", NULL };
 static const enum boolean_default en_boolean_default_ms[] = { BOOLDEF_DEFAULT, BOOLDEF_FALSE, BOOLDEF_TRUE, 0 };
-GENERIC_ENUM_UF (boolean_default)
+GENERIC_ENUM (boolean_default)
 
 static const char *en_besmode_vs[] = { "full", "writers", "minimal", NULL };
 static const enum besmode en_besmode_ms[] = { BESMODE_FULL, BESMODE_WRITERS, BESMODE_MINIMAL, 0 };
@@ -2072,7 +2070,7 @@ static int set_default (struct cfgst *cfgst, void *parent, struct cfgelem const 
   enum update_result res;
   if (cfgelem->defvalue == NULL)
   {
-    cfg_error (cfgst, "element missing in configuration");
+    (void) cfg_error (cfgst, "element missing in configuration");
     return 0;
   }
   res = do_update (cfgst, cfgelem->update, parent, cfgelem, cfgelem->defvalue, 0);
@@ -2402,7 +2400,7 @@ static int proc_elem_open (void *varg, UNUSED_ARG (uintptr_t parentinfo), UNUSED
       cfg_subelem = partial_match;
     else
     {
-      cfg_error (cfgst, "%s: unknown element", name);
+      (void) cfg_error (cfgst, "%s: unknown element", name);
       cfgst_push (cfgst, 0, NULL, NULL);
       return 0;
     }
@@ -2516,7 +2514,7 @@ static int proc_attr (void *varg, UNUSED_ARG (uintptr_t eleminfo), const char *n
     return proc_update_cfgelem (cfgst, cfg_attr, value, true);
   else
   {
-    cfg_error (cfgst, "%s: unknown attribute", name);
+    (void) cfg_error (cfgst, "%s: unknown attribute", name);
     return 0;
   }
 }
@@ -2533,7 +2531,7 @@ static int proc_elem_data (void *varg, UNUSED_ARG (uintptr_t eleminfo), const ch
     return proc_update_cfgelem (cfgst, cfgelem, value, isattr);
   else
   {
-    cfg_error (cfgst, "%s: no data expected", value);
+    (void) cfg_error (cfgst, "%s: no data expected", value);
     return 0;
   }
 }
@@ -2560,7 +2558,7 @@ static int proc_elem_close (void *varg, UNUSED_ARG (uintptr_t eleminfo), int lin
 static void proc_error (void *varg, const char *msg, int line)
 {
   struct cfgst * const cfgst = varg;
-  cfg_error (cfgst, "parser error %s at line %d", msg, line);
+  (void) cfg_error (cfgst, "parser error %s at line %d", msg, line);
 }
 
 static int cfgst_node_cmp (const void *va, const void *vb)
@@ -2722,7 +2720,7 @@ struct cfgst *config_init (const char *config, struct config *cfg, uint32_t domi
       qx = ddsrt_xmlp_new_string (tok, cfgst, &cb);
       ddsrt_xmlp_set_options (qx, DDSRT_XMLP_ANONYMOUS_CLOSE_TAG | DDSRT_XMLP_MISSING_CLOSE_AS_EOF);
       fp = NULL;
-      snprintf (env_input, sizeof (env_input), "CYCLONEDDS_URI+%u", (unsigned) (tok - copy));
+      (void) snprintf (env_input, sizeof (env_input), "CYCLONEDDS_URI+%u", (unsigned) (tok - copy));
       cfgst->input = env_input;
       cfgst->line = 1;
     }
@@ -2902,7 +2900,7 @@ static char *get_partition_search_pattern (const char *partition, const char *to
 {
   size_t sz = strlen (partition) + strlen (topic) + 2;
   char *pt = ddsrt_malloc (sz);
-  snprintf (pt, sz, "%s.%s", partition, topic);
+  (void) snprintf (pt, sz, "%s.%s", partition, topic);
   return pt;
 }
 
