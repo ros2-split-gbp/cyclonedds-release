@@ -24,7 +24,7 @@
 #include "dds__entity.h"
 #include "dds/ddsi/q_config.h"
 #include "dds/ddsi/q_bswap.h"
-#include "dds/ddsi/q_globals.h"
+#include "dds/ddsi/ddsi_domaingv.h"
 #include "dds/ddsi/q_radmin.h"
 #include "dds/ddsi/q_entity.h"
 #include "dds/ddsi/q_gc.h"
@@ -33,6 +33,9 @@
 #include "dds/ddsc/dds_rhc.h"
 #include "dds__rhc_default.h"
 #include "dds/ddsi/ddsi_iid.h"
+#ifdef DDSI_INCLUDE_LIFESPAN
+#include "dds/ddsi/ddsi_lifespan.h"
+#endif
 
 #include "RhcTypes.h"
 
@@ -70,7 +73,7 @@ static char *print_tstamp (char *buf, size_t sz, dds_time_t t)
   if (d / 1000000000 != 0)
     pos += (size_t) snprintf (buf + pos, sz - pos, "%+ds", (int) (d / 1000000000));
   if (d % 1000000000 != 0)
-    snprintf (buf + pos, sz - pos, "%+dns", (int) (d % 1000000000));
+	(void) snprintf (buf + pos, sz - pos, "%+dns", (int) (d % 1000000000));
   return buf;
 }
 
@@ -104,8 +107,27 @@ static struct ddsi_serdata *mkkeysample (int32_t keyval, unsigned statusinfo)
   return sd;
 }
 
-static uint64_t store (struct ddsi_tkmap *tkmap, struct dds_rhc *rhc, struct proxy_writer *wr, struct ddsi_serdata *sd, bool print)
+#if defined(DDSI_INCLUDE_LIFESPAN) || defined (DDSI_INCLUDE_DEADLINE_MISSED)
+static nn_mtime_t rand_texp ()
 {
+  nn_mtime_t ret = now_mt();
+  ret.v -= DDS_MSECS(500) + (int64_t) (ddsrt_prng_random (&prng) % DDS_MSECS(1500));
+  return ret;
+}
+#endif
+
+#ifdef DDSI_INCLUDE_DEADLINE_MISSED
+static dds_duration_t rand_deadline ()
+{
+  return (dds_duration_t) (ddsrt_prng_random (&prng) % DDS_MSECS(500));
+}
+#endif
+
+static uint64_t store (struct ddsi_tkmap *tkmap, struct dds_rhc *rhc, struct proxy_writer *wr, struct ddsi_serdata *sd, bool print, bool lifespan_expiry)
+{
+#ifndef DDSI_INCLUDE_LIFESPAN
+  DDSRT_UNUSED_ARG (lifespan_expiry);
+#endif
   /* beware: unrefs sd */
   struct ddsi_tkmap_instance *tk;
   struct ddsi_writer_info pwr_info;
@@ -132,6 +154,12 @@ static uint64_t store (struct ddsi_tkmap *tkmap, struct dds_rhc *rhc, struct pro
   pwr_info.guid = wr->e.guid;
   pwr_info.iid = wr->e.iid;
   pwr_info.ownership_strength = wr->c.xqos->ownership_strength.value;
+#ifdef DDSI_INCLUDE_LIFESPAN
+  if (lifespan_expiry && (sd->statusinfo & (NN_STATUSINFO_UNREGISTER | NN_STATUSINFO_DISPOSE)) == 0)
+    pwr_info.lifespan_exp = rand_texp();
+  else
+    pwr_info.lifespan_exp = NN_MTIME_NEVER;
+#endif
   dds_rhc_store (rhc, &pwr_info, sd, tk);
   ddsi_tkmap_instance_unref (tkmap, tk);
   thread_state_asleep (lookup_thread_state ());
@@ -139,7 +167,7 @@ static uint64_t store (struct ddsi_tkmap *tkmap, struct dds_rhc *rhc, struct pro
   return iid;
 }
 
-static struct proxy_writer *mkwr (const struct q_globals *gv, bool auto_dispose)
+static struct proxy_writer *mkwr (const struct ddsi_domaingv *gv, bool auto_dispose)
 {
   struct proxy_writer *pwr;
   struct dds_qos *xqos;
@@ -148,8 +176,8 @@ static struct proxy_writer *mkwr (const struct q_globals *gv, bool auto_dispose)
   xqos = ddsrt_malloc (sizeof (*xqos));
   wr_iid = ddsi_iid_gen ();
   memset (pwr, 0, sizeof (*pwr));
-  nn_xqos_init_empty (xqos);
-  nn_xqos_mergein_missing (xqos, &gv->default_xqos_wr, ~(uint64_t)0);
+  ddsi_xqos_init_empty (xqos);
+  ddsi_xqos_mergein_missing (xqos, &gv->default_xqos_wr, ~(uint64_t)0);
   xqos->ownership_strength.value = 0;
   xqos->writer_data_lifecycle.autodispose_unregistered_instances = auto_dispose;
   pwr->e.iid = wr_iid;
@@ -163,16 +191,16 @@ static void fwr (struct proxy_writer *wr)
   free (wr);
 }
 
-static struct dds_rhc *mkrhc (struct q_globals *gv, dds_reader *rd, dds_history_kind_t hk, int32_t hdepth, dds_destination_order_kind_t dok)
+static struct dds_rhc *mkrhc (struct ddsi_domaingv *gv, dds_reader *rd, dds_history_kind_t hk, int32_t hdepth, dds_destination_order_kind_t dok)
 {
   struct dds_rhc *rhc;
   dds_qos_t rqos;
-  nn_xqos_init_empty (&rqos);
+  ddsi_xqos_init_empty (&rqos);
   rqos.present |= QP_HISTORY | QP_DESTINATION_ORDER;
   rqos.history.kind = hk;
   rqos.history.depth = hdepth;
   rqos.destination_order.kind = dok;
-  nn_xqos_mergein_missing (&rqos, &gv->default_xqos_rd, ~(uint64_t)0);
+  ddsi_xqos_mergein_missing (&rqos, &gv->default_xqos_rd, ~(uint64_t)0);
   thread_state_awake_domain_ok (lookup_thread_state ());
   rhc = dds_rhc_default_new_xchecks (rd, gv, mdtopic, true);
   dds_rhc_set_qos(rhc, &rqos);
@@ -439,7 +467,7 @@ static void print_condmask (char *buf, size_t bufsz, const dds_readcond *cond)
       pos += (size_t) snprintf (buf + pos, bufsz - pos, "%sALIVE | DISPOSED", sep);
       break;
   }
-  snprintf (buf + pos, bufsz - pos, "]");
+  (void) snprintf (buf + pos, bufsz - pos, "]");
 }
 
 static void rdcond (struct dds_rhc *rhc, dds_readcond *cond, const struct check *chk, int max, bool print, uint32_t states_seen[STATIC_ARRAY_DIM 2*2*3][2])
@@ -532,9 +560,9 @@ static dds_entity_t readcond_wrapper (dds_entity_t reader, uint32_t mask, dds_qu
   return dds_create_readcondition (reader, mask);
 }
 
-static struct q_globals *get_gv (dds_entity_t e)
+static struct ddsi_domaingv *get_gv (dds_entity_t e)
 {
-  struct q_globals *gv;
+  struct ddsi_domaingv *gv;
   dds_entity *x;
   if (dds_entity_pin (e, &x) < 0)
     abort ();
@@ -548,6 +576,9 @@ static void test_conditions (dds_entity_t pp, dds_entity_t tp, const int count, 
   dds_qos_t *qos = dds_create_qos ();
   dds_qset_history (qos, DDS_HISTORY_KEEP_LAST, MAX_HIST_DEPTH);
   dds_qset_destination_order (qos, DDS_DESTINATIONORDER_BY_SOURCE_TIMESTAMP);
+#ifdef DDSI_INCLUDE_DEADLINE_MISSED
+  dds_qset_deadline (qos, rand_deadline());
+#endif
   /* two identical readers because we need 63 conditions while we can currently only attach 32 a single reader */
   dds_entity_t rd[] = { dds_create_reader (pp, tp, qos, NULL), dds_create_reader (pp, tp, qos, NULL) };
   const size_t nrd = sizeof (rd) / sizeof (rd[0]);
@@ -563,7 +594,7 @@ static void test_conditions (dds_entity_t pp, dds_entity_t tp, const int count, 
     dds_entity_unlock (x);
   }
 
-  const struct q_globals *gv = get_gv (pp);
+  const struct ddsi_domaingv *gv = get_gv (pp);
   struct ddsi_tkmap *tkmap = gv->m_tkmap;
   struct proxy_writer *wr[] = { mkwr (gv, 0), mkwr (gv, 1), mkwr (gv, 1) };
 
@@ -651,7 +682,9 @@ static void test_conditions (dds_entity_t pp, dds_entity_t tp, const int count, 
     [8] = "rdc",
     [9] = "tkc",
     [10] = "tkc1",
-    [11] = "delwr"
+    [11] = "delwr",
+    [12] = "drpxp",
+    [13] = "dlmis"
   };
   static const uint32_t opfreqs[] = {
     [0]  = 500, /* write */
@@ -665,7 +698,17 @@ static void test_conditions (dds_entity_t pp, dds_entity_t tp, const int count, 
     [8]  = 200, /* read cond */
     [9]  = 30,  /* take cond */
     [10] = 100, /* take cond, max 1 */
-    [11] = 1    /* unreg writer */
+    [11] = 1,   /* unreg writer */
+#ifdef DDSI_INCLUDE_LIFESPAN
+    [12] = 100, /* drop expired sample */
+#else
+    [12] = 0,   /* drop expired sample */
+#endif
+#ifdef DDSI_INCLUDE_DEADLINE_MISSED
+    [13] = 100  /* deadline missed */
+#else
+    [13] = 0    /* drop expired sample */
+#endif
   };
   uint32_t opthres[sizeof (opfreqs) / sizeof (opfreqs[0])];
   {
@@ -715,42 +758,42 @@ static void test_conditions (dds_entity_t pp, dds_entity_t tp, const int count, 
       case 0: { /* wr */
         struct ddsi_serdata *s = mksample (keyval, 0);
         for (size_t k = 0; k < nrd; k++)
-          store (tkmap, rhc[k], wr[which], ddsi_serdata_ref (s), print && k == 0);
+          store (tkmap, rhc[k], wr[which], ddsi_serdata_ref (s), print && k == 0, true);
         ddsi_serdata_unref (s);
         break;
       }
       case 1: { /* wr disp */
         struct ddsi_serdata *s = mksample (keyval, NN_STATUSINFO_DISPOSE);
         for (size_t k = 0; k < nrd; k++)
-          store (tkmap, rhc[k], wr[which], ddsi_serdata_ref (s), print && k == 0);
+          store (tkmap, rhc[k], wr[which], ddsi_serdata_ref (s), print && k == 0, true);
         ddsi_serdata_unref (s);
         break;
       }
       case 2: { /* disp */
         struct ddsi_serdata *s = mkkeysample (keyval, NN_STATUSINFO_DISPOSE);
         for (size_t k = 0; k < nrd; k++)
-          store (tkmap, rhc[k], wr[which], ddsi_serdata_ref (s), print && k == 0);
+          store (tkmap, rhc[k], wr[which], ddsi_serdata_ref (s), print && k == 0, true);
         ddsi_serdata_unref (s);
         break;
       }
       case 3: { /* unreg */
         struct ddsi_serdata *s = mkkeysample (keyval, NN_STATUSINFO_UNREGISTER);
         for (size_t k = 0; k < nrd; k++)
-          store (tkmap, rhc[k], wr[which], ddsi_serdata_ref (s), print && k == 0);
+          store (tkmap, rhc[k], wr[which], ddsi_serdata_ref (s), print && k == 0, true);
         ddsi_serdata_unref (s);
         break;
       }
       case 4: { /* disp unreg */
         struct ddsi_serdata *s = mkkeysample (keyval, NN_STATUSINFO_DISPOSE | NN_STATUSINFO_UNREGISTER);
         for (size_t k = 0; k < nrd; k++)
-          store (tkmap, rhc[k], wr[which], ddsi_serdata_ref (s), print && k == 0);
+          store (tkmap, rhc[k], wr[which], ddsi_serdata_ref (s), print && k == 0, true);
         ddsi_serdata_unref (s);
         break;
       }
       case 5: { /* wr disp unreg */
         struct ddsi_serdata *s = mksample (keyval, NN_STATUSINFO_DISPOSE | NN_STATUSINFO_UNREGISTER);
         for (size_t k = 0; k < nrd; k++)
-          store (tkmap, rhc[k], wr[which], ddsi_serdata_ref (s), print && k == 0);
+          store (tkmap, rhc[k], wr[which], ddsi_serdata_ref (s), print && k == 0, true);
         ddsi_serdata_unref (s);
         break;
       }
@@ -787,9 +830,32 @@ static void test_conditions (dds_entity_t pp, dds_entity_t tp, const int count, 
         wr_info.guid = wr[which]->e.guid;
         wr_info.iid = wr[which]->e.iid;
         wr_info.ownership_strength = wr[which]->c.xqos->ownership_strength.value;
+#ifdef DDSI_INCLUDE_LIFESPAN
+        wr_info.lifespan_exp = NN_MTIME_NEVER;
+#endif
         for (size_t k = 0; k < nrd; k++)
           dds_rhc_unregister_wr (rhc[k], &wr_info);
         thread_state_asleep (lookup_thread_state ());
+        break;
+      }
+      case 12: {
+#ifdef DDSI_INCLUDE_LIFESPAN
+        thread_state_awake_domain_ok (lookup_thread_state ());
+        /* We can assume that rhc[k] is a dds_rhc_default at this point */
+        for (size_t k = 0; k < nrd; k++)
+          (void) dds_rhc_default_sample_expired_cb (rhc[k], rand_texp());
+        thread_state_asleep (lookup_thread_state ());
+#endif
+        break;
+      }
+      case 13: {
+#ifdef DDSI_INCLUDE_DEADLINE_MISSED
+        thread_state_awake_domain_ok (lookup_thread_state ());
+        /* We can assume that rhc[k] is a dds_rhc_default at this point */
+        for (size_t k = 0; k < nrd; k++)
+          (void) dds_rhc_default_deadline_missed_cb (rhc[k], rand_texp());
+        thread_state_asleep (lookup_thread_state ());
+#endif
         break;
       }
     }
@@ -855,30 +921,30 @@ int main (int argc, char **argv)
   mainthread = lookup_thread_state ();
   assert (ddsrt_atomic_ldvoidp (&mainthread->gv) != NULL);
   {
-    struct dds_entity *x;
-    if (dds_entity_lock(tp, DDS_KIND_TOPIC, &x) < 0) abort();
-    mdtopic = dds_topic_lookup(x->m_domain, "RhcTypes_T");
-    dds_entity_unlock(x);
+    struct dds_topic *x;
+    if (dds_topic_pin (tp, &x) < 0) abort();
+    mdtopic = ddsi_sertopic_ref (x->m_stopic);
+    dds_topic_unpin (x);
   }
 
   if (0 >= first)
   {
-    struct q_globals *gv = get_gv (pp);
+    struct ddsi_domaingv *gv = get_gv (pp);
     struct ddsi_tkmap *tkmap = gv->m_tkmap;
     if (print)
       printf ("************* 0 *************\n");
     struct dds_rhc *rhc = mkrhc (gv, NULL, DDS_HISTORY_KEEP_LAST, 1, DDS_DESTINATIONORDER_BY_SOURCE_TIMESTAMP);
     struct proxy_writer *wr0 = mkwr (gv, 1);
     uint64_t iid0, iid1, iid_t;
-    iid0 = store (tkmap, rhc, wr0, mksample (0, 0), print);
-    iid1 = store (tkmap, rhc, wr0, mksample (1, NN_STATUSINFO_DISPOSE), print);
+    iid0 = store (tkmap, rhc, wr0, mksample (0, 0), print, false);
+    iid1 = store (tkmap, rhc, wr0, mksample (1, NN_STATUSINFO_DISPOSE), print, false);
     const struct check c0[] = {
       { "NNA", iid0, wr0->e.iid, 0,0, 1, 0,1 },
       { "NND", iid1, wr0->e.iid, 0,0, 1, 1,2 },
       { 0, 0, 0, 0, 0, 0, 0, 0 }
     };
     rdall (rhc, c0, print, states_seen);
-    iid_t = store (tkmap, rhc, wr0, mkkeysample (0, NN_STATUSINFO_UNREGISTER), print);
+    iid_t = store (tkmap, rhc, wr0, mkkeysample (0, NN_STATUSINFO_UNREGISTER), print, false);
     assert (iid_t == iid0);
     (void)iid0;
     (void)iid_t;
@@ -895,6 +961,9 @@ int main (int argc, char **argv)
     wr0_info.guid = wr0->e.guid;
     wr0_info.iid = wr0->e.iid;
     wr0_info.ownership_strength = wr0->c.xqos->ownership_strength.value;
+#ifdef DDSI_INCLUDE_LIFESPAN
+    wr0_info.lifespan_exp = NN_MTIME_NEVER;
+#endif
     dds_rhc_unregister_wr (rhc, &wr0_info);
     thread_state_asleep (lookup_thread_state ());
     const struct check c2[] = {
@@ -911,7 +980,7 @@ int main (int argc, char **argv)
 
   if (1 >= first)
   {
-    struct q_globals *gv = get_gv (pp);
+    struct ddsi_domaingv *gv = get_gv (pp);
     struct ddsi_tkmap *tkmap = gv->m_tkmap;
     if (print)
       printf ("************* 1 *************\n");
@@ -919,9 +988,9 @@ int main (int argc, char **argv)
     struct proxy_writer *wr[] = { mkwr (gv, 0), mkwr (gv, 0), mkwr (gv, 0) };
     uint64_t iid0, iid_t;
     int nregs = 3, isreg[] = { 1, 1, 1 };
-    iid0 = store (tkmap, rhc, wr[0], mksample (0, 0), print);
-    iid_t = store (tkmap, rhc, wr[1], mksample (0, 0), print); assert (iid0 == iid_t);
-    iid_t = store (tkmap, rhc, wr[2], mksample (0, 0), print); assert (iid0 == iid_t);
+    iid0 = store (tkmap, rhc, wr[0], mksample (0, 0), print, false);
+    iid_t = store (tkmap, rhc, wr[1], mksample (0, 0), print, false); assert (iid0 == iid_t);
+    iid_t = store (tkmap, rhc, wr[2], mksample (0, 0), print, false); assert (iid0 == iid_t);
     (void)iid0;
     tkall (rhc, NULL, print, states_seen);
     for (int i = 0; i < 3*3 * 3*3 * 3*3 * 3*3; i++)
@@ -933,17 +1002,17 @@ int main (int argc, char **argv)
         switch (oper)
         {
           case 0:
-            iid_t = store (tkmap, rhc, wr[which], mksample (0, 0), print);
+            iid_t = store (tkmap, rhc, wr[which], mksample (0, 0), print, false);
             if (!isreg[which]) { nregs++; isreg[which] = 1; }
             break;
           case 1:
-            iid_t = store (tkmap, rhc, wr[which], mkkeysample (0, NN_STATUSINFO_DISPOSE), print);
+            iid_t = store (tkmap, rhc, wr[which], mkkeysample (0, NN_STATUSINFO_DISPOSE), print, false);
             if (!isreg[which]) { nregs++; isreg[which] = 1; }
             break;
           case 2:
             if (nregs > 1 || !isreg[which])
             {
-              iid_t = store (tkmap, rhc, wr[which], mkkeysample (0, NN_STATUSINFO_UNREGISTER), print);
+              iid_t = store (tkmap, rhc, wr[which], mkkeysample (0, NN_STATUSINFO_UNREGISTER), print, false);
               if (isreg[which]) { isreg[which] = 0; nregs--; }
             }
             break;
@@ -958,7 +1027,7 @@ int main (int argc, char **argv)
     {
       if (isreg[i])
       {
-        iid_t = store (tkmap, rhc, wr[i], mkkeysample (0, NN_STATUSINFO_UNREGISTER), print);
+        iid_t = store (tkmap, rhc, wr[i], mkkeysample (0, NN_STATUSINFO_UNREGISTER), print, false);
         assert (iid_t == iid0);
         isreg[i] = 0;
         nregs--;
@@ -967,10 +1036,10 @@ int main (int argc, char **argv)
     assert (nregs == 0);
     tkall (rhc, 0, print, states_seen);
     wait_gc_cycle (gv->gcreq_queue);
-    iid_t = store (tkmap, rhc, wr[0], mksample (0, 0), print);
+    iid_t = store (tkmap, rhc, wr[0], mksample (0, 0), print, false);
     assert (iid_t != iid0);
     iid0 = iid_t;
-    iid_t = store (tkmap, rhc, wr[0], mkkeysample (0, NN_STATUSINFO_UNREGISTER), print);
+    iid_t = store (tkmap, rhc, wr[0], mkkeysample (0, NN_STATUSINFO_UNREGISTER), print, false);
     assert (iid_t == iid0);
     frhc (rhc);
 

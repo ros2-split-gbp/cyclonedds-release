@@ -266,162 +266,6 @@ Use \"\" for default partition.\n",
     exit (1);
 }
 
-static void expand_append(char **dst, size_t *sz,size_t *pos, char c) {
-    if (*pos == *sz) {
-        *sz += 1024;
-        *dst = dds_realloc(*dst, *sz);
-    }
-    (*dst)[*pos] = c;
-    (*pos)++;
-}
-
-static char *expand_envvars(const char *src0);
-
-// FIXME: This is the same as the expand function in util. Merge.
-static char *expand_env(const char *name, char op, const char *alt) {
-    char *env = NULL;
-    ddsrt_getenv(name, &env);
-    switch (op) {
-    case 0:
-        return dds_string_dup(env ? env : "");
-    case '-':
-        return env ? dds_string_dup(env) : expand_envvars(alt);
-    case '?':
-        if (env)
-            return dds_string_dup(env);
-        else {
-            char *altx = expand_envvars(alt);
-            error_exit("%s: %s\n", name, altx);
-            //dds_free(altx);
-            return NULL;
-        }
-    case '+':
-        return env ? expand_envvars(alt) : dds_string_dup("");
-    default:
-        exit(2);
-    }
-}
-
-static char *expand_envbrace(const char **src) {
-    const char *start = *src + 1;
-    char *name, *x;
-    assert(**src == '{');
-    (*src)++;
-    while (**src && **src != ':' && **src != '}')
-        (*src)++;
-    if (**src == 0)
-        goto err;
-
-    name = dds_alloc((size_t) (*src - start) + 1);
-    memcpy(name, start, (size_t) (*src - start));
-    name[*src - start] = 0;
-    if (**src == '}') {
-        (*src)++;
-        x = expand_env(name, 0, NULL);
-        dds_free(name);
-        return x;
-    } else {
-        const char *altstart;
-        char *alt;
-        char op;
-        assert(**src == ':');
-        (*src)++;
-
-        switch (**src) {
-        case '-': case '+': case '?':
-            op = **src;
-            (*src)++;
-            break;
-        default:
-            goto err;
-        }
-
-        altstart = *src;
-        while (**src && **src != '}') {
-            if (**src == '\\') {
-                (*src)++;
-                if (**src == 0)
-                goto err;
-            }
-            (*src)++;
-        }
-        if (**src == 0)
-            goto err;
-        assert(**src == '}');
-        alt = dds_alloc((size_t) (*src - altstart) + 1);
-        memcpy(alt, altstart, (size_t) (*src - altstart));
-        alt[*src - altstart] = 0;
-        (*src)++;
-        x = expand_env(name, op, alt);
-        dds_free(alt);
-        dds_free(name);
-        return x;
-    }
-
-    err:
-        error_exit("%*.*s: invalid expansion\n", (int) (*src - start), (int) (*src - start), start);
-    return NULL;
-}
-
-static char *expand_envsimple(const char **src) {
-    const char *start = *src;
-    char *name, *x;
-    while (**src && (isalnum((unsigned char)**src) || **src == '_'))
-        (*src)++;
-    assert(*src > start);
-    name = dds_alloc((size_t) (*src - start) + 1);
-    memcpy(name, start, (size_t) (*src - start));
-    name[*src - start] = 0;
-    x = expand_env(name, 0, NULL);
-    dds_free(name);
-    return x;
-}
-
-static char *expand_envchar(const char **src) {
-    char name[2];
-    assert(**src);
-    name[0] = **src;
-    name[1] = 0;
-    (*src)++;
-    return expand_env(name, 0, NULL);
-}
-
-static char *expand_envvars(const char *src0) {
-    /* Expands $X, ${X}, ${X:-Y}, ${X:+Y}, ${X:?Y} forms */
-    const char *src = src0;
-    size_t sz = strlen(src) + 1, pos = 0;
-    char *dst = dds_alloc(sz);
-    while (*src) {
-        if (*src == '\\') {
-            src++;
-            if (*src == 0)
-                error_exit("%s: incomplete escape at end of string\n", src0);
-            expand_append(&dst, &sz, &pos, *src++);
-        } else if (*src == '$') {
-            char *x, *xp;
-            src++;
-            if (*src == 0) {
-                error_exit("%s: incomplete variable expansion at end of string\n", src0);
-                return NULL;
-            } else if (*src == '{') {
-                x = expand_envbrace(&src);
-            } else if (isalnum((unsigned char)*src) || *src == '_') {
-                x = expand_envsimple(&src);
-            } else {
-                x = expand_envchar(&src);
-            }
-            xp = x;
-            while (*xp)
-                expand_append(&dst, &sz, &pos, *xp++);
-            dds_free(x);
-        } else {
-            expand_append(&dst, &sz, &pos, *src++);
-        }
-    }
-    expand_append(&dst, &sz, &pos, 0);
-    return dst;
-}
-
 static unsigned split_partitions(const char ***p_ps, char **p_bufcopy, const char *buf) {
     const char *b;
     const char **ps;
@@ -432,7 +276,7 @@ static unsigned split_partitions(const char ***p_ps, char **p_bufcopy, const cha
         nps += (*b == ',');
     }
     ps = dds_alloc(nps * sizeof(*ps));
-    bufcopy = expand_envvars(buf);
+    bufcopy = ddsrt_expand_envvars_sh(buf, 0);
     i = 0; bc = bufcopy;
     while (1) {
         ps[i++] = bc;
@@ -567,7 +411,7 @@ static int read_value(char *command, int *key, struct tstamp_t *tstamp, char **a
                 return 1;
             }
             break;
-        case 'p': case 'S': case ':': case 'Q': {
+        case 'p': case 'S': case 'C': case ':': case 'Q': {
             int i = 0;
             *command = (char) c;
             while ((c = getc(stdin)) != EOF && !isspace((unsigned char) c)) {
@@ -1320,6 +1164,53 @@ static void pub_do_auto(const struct writerspec *spec) {
     dds_free(handle);
 }
 
+static void do_deafmute(const char *args)
+{
+    const char *a = args;
+    bool deaf = false;
+    bool mute = false;
+    dds_duration_t duration = 0;
+    double durfloat;
+    int pos;
+    if (strncmp(a, "self", 4) == 0) {
+        a += 4;
+    } else {
+        printf ("deafmute: invalid args: %s\n", args);
+        return;
+    }
+    if (*a++ != ';') {
+        printf ("deafmute: invalid args: %s\n", args);
+        return;
+    }
+    while (*a && *a != ';') {
+        switch (*a++) {
+            case 'm': mute = true; break;
+            case 'd': deaf = true; break;
+            default: printf ("deafmute: invalid flags: %s\n", args); return;
+        }
+    }
+    if (*a++ != ';') {
+        printf ("deafmute: invalid args: %s\n", args);
+        return;
+    }
+    if (strcmp(a, "inf") == 0) {
+        duration = DDS_INFINITY;
+    } else if (sscanf(a, "%lf%n", &durfloat, &pos) == 1 && a[pos] == 0) {
+        if (durfloat <= 0.0) {
+            printf ("deafmute: invalid duration (<= 0): %s\n", args);
+            return;
+        }
+        if (durfloat > (double) (DDS_INFINITY / DDS_NSECS_IN_SEC))
+            duration = DDS_INFINITY;
+        else
+            duration = (dds_duration_t) (durfloat * 1e9);
+    } else {
+        printf ("deafmute: invalid args: %s\n", args);
+        return;
+    }
+    dds_domain_set_deafmute (dp, deaf, mute, duration);
+}
+
 static char *pub_do_nonarb(const struct writerspec *spec, uint32_t *seq) {
     struct tstamp_t tstamp_spec = { .isabs = 0, .t = 0 };
     int result;
@@ -1427,12 +1318,15 @@ static char *pub_do_nonarb(const struct writerspec *spec, uint32_t *seq) {
         case 'Q': {
             dds_qos_t *qos = dds_create_qos ();
             setqos_from_args (DDS_KIND_PARTICIPANT, qos, 1, (const char **) &arg);
-            dds_set_qos (dp, qos);
+            (void) dds_set_qos (dp, qos);
             dds_delete_qos (qos);
             break;
           }
         case 'Y': case 'B': case 'E': case 'W':
             non_data_operation(command, spec->wr);
+            break;
+        case 'C':
+            do_deafmute(arg);
             break;
         case ':':
             break;
@@ -1517,6 +1411,10 @@ static char *pub_do_nonarb(const struct writerspec *spec, uint32_t *seq) {
 //            break;
 //        case 'Y': case 'B': case 'E': case 'W':
 //            non_data_operation(*line, spec->wr);
+//            break;
+//        case 'C':
+//            do_deafmute(arg);
+//            line = NULL;
 //            break;
 //        case 'S':
 //            make_persistent_snapshot(line+1);
@@ -2058,8 +1956,8 @@ static uint32_t autotermthread(void *varg __attribute__((unused))) {
         tnow = dds_time();
     }
 
-    dds_waitset_detach(ws, termcond);
-    dds_delete(ws);
+    (void) dds_waitset_detach(ws, termcond);
+    (void) dds_delete(ws);
     return 0;
 }
 
@@ -2648,7 +2546,7 @@ int main(int argc, char *argv[]) {
     {
         char **ps = (char **) dds_alloc(sizeof(char *) * (uint32_t)(argc - optind));
         for (i = 0; i < (unsigned) (argc - optind); i++)
-            ps[i] = expand_envvars(argv[(unsigned) optind + i]);
+            ps[i] = ddsrt_expand_envvars_sh(argv[(unsigned) optind + i], 0);
         if (want_reader) {
             qos = dds_create_qos();
             setqos_from_args(DDS_KIND_SUBSCRIBER, qos, nqsubscriber, qsubscriber);
@@ -2709,7 +2607,7 @@ int main(int argc, char *argv[]) {
             fprintf (stderr,"C99 API doesn't support the creation of content filtered topic.\n");
             spec[i].cftp = spec[i].tp;
 //            TODO Content Filtered Topic support
-//            char name[40], *expr = expand_envvars(spec[i].cftp_expr);
+//            char name[40], *expr = expand_envvars_sh(spec[i].cftp_exp, 0);
 //            DDS_StringSeq *params = DDS_StringSeq__alloc();
 //            snprintf (name, sizeof (name), "cft%u", i);
 //            if ((spec[i].cftp = DDS_DomainParticipant_create_contentfilteredtopic(dp, name, spec[i].tp, expr, params)) == NULL)
