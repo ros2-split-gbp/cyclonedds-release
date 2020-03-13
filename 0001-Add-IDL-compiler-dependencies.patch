@@ -1,4 +1,4 @@
-From cb08dbe1f175d2e662d084e6604a9fed21c148d4 Mon Sep 17 00:00:00 2001
+From 89743a2e21a26cb261cf6f01786ad0da6ec8011e Mon Sep 17 00:00:00 2001
 From: Scott K Logan <logans@cottsay.net>
 Date: Thu, 14 Nov 2019 10:38:52 -0800
 Subject: [PATCH] Add IDL compiler dependencies
@@ -22,7 +22,7 @@ index 6d7b65c..a1d3b9d 100644
  Standards-Version: 3.9.2
  
 diff --git a/package.xml b/package.xml
-index 9d0980d..5b4b661 100644
+index efb8e8a..81b03ae 100644
 --- a/package.xml
 +++ b/package.xml
 @@ -12,6 +12,8 @@
