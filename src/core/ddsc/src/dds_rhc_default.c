@@ -30,15 +30,22 @@
 #include "dds/ddsi/ddsi_tkmap.h"
 #include "dds/ddsrt/hopscotch.h"
 #include "dds/ddsrt/avl.h"
+#include "dds/ddsrt/circlist.h"
 #include "dds/ddsi/ddsi_rhc.h"
-#include "dds/ddsi/q_xqos.h"
+#include "dds/ddsi/ddsi_xqos.h"
 #include "dds/ddsi/q_unused.h"
 #include "dds/ddsi/q_config.h"
-#include "dds/ddsi/q_globals.h"
+#include "dds/ddsi/ddsi_domaingv.h"
 #include "dds/ddsi/q_radmin.h" /* sampleinfo */
 #include "dds/ddsi/q_entity.h" /* proxy_writer_info */
 #include "dds/ddsi/ddsi_serdata.h"
 #include "dds/ddsi/ddsi_serdata_default.h"
+#ifdef DDSI_INCLUDE_LIFESPAN
+#include "dds/ddsi/ddsi_lifespan.h"
+#endif
+#ifdef DDSI_INCLUDE_DEADLINE_MISSED
+#include "dds/ddsi/ddsi_deadline.h"
+#endif
 #include "dds/ddsi/sysdeps.h"
 
 /* INSTANCE MANAGEMENT
@@ -122,9 +129,8 @@
    DDSI implementation, but still) will be done by also reseting "wr_iid"
    when an exclusive ownership writer lowers its strength.
 
-   Lifespan, time base filter and deadline, are based on the instance
-   timestamp ("tstamp").  This time stamp needs to be changed to either source
-   or reception timestamp, depending on the ordering chosen.
+   Lifespan is based on the reception timestamp, and the monotonic time is
+   used for sample expiry if this QoS is set to something else than infinite.
 
    READ CONDITIONS
    ===============
@@ -244,6 +250,10 @@ struct rhc_sample {
   bool isread;                 /* READ or NOT_READ sample state */
   uint32_t disposed_gen;       /* snapshot of instance counter at time of insertion */
   uint32_t no_writers_gen;     /* __/ */
+#ifdef DDSI_INCLUDE_LIFESPAN
+  struct lifespan_fhnode lifespan;  /* fibheap node for lifespan */
+  struct rhc_instance *inst;   /* reference to rhc instance */
+#endif
 };
 
 struct rhc_instance {
@@ -263,11 +273,13 @@ struct rhc_instance {
   uint32_t disposed_gen;       /* bloody generation counters - worst invention of mankind */
   uint32_t no_writers_gen;     /* __/ */
   int32_t strength;            /* "current" ownership strength */
-  ddsi_guid_t wr_guid;           /* guid of last writer (if wr_iid != 0 then wr_guid is the corresponding guid, else undef) */
+  ddsi_guid_t wr_guid;         /* guid of last writer (if wr_iid != 0 then wr_guid is the corresponding guid, else undef) */
   nn_wctime_t tstamp;          /* source time stamp of last update */
-  struct rhc_instance *next;   /* next non-empty instance in arbitrary ordering */
-  struct rhc_instance *prev;
-  struct ddsi_tkmap_instance *tk;   /* backref into TK for unref'ing */
+  struct ddsrt_circlist_elem nonempty_list; /* links non-empty instances in arbitrary ordering */
+#ifdef DDSI_INCLUDE_DEADLINE_MISSED
+  struct deadline_elem deadline; /* element in deadline missed administration */
+#endif
+  struct ddsi_tkmap_instance *tk;/* backref into TK for unref'ing */
   struct rhc_sample a_sample;  /* pre-allocated storage for 1 sample */
 };
 
@@ -280,7 +292,7 @@ typedef enum rhc_store_result {
 struct dds_rhc_default {
   struct dds_rhc common;
   struct ddsrt_hh *instances;
-  struct rhc_instance *nonempty_instances; /* circular, points to most recently added one, NULL if none */
+  struct ddsrt_circlist nonempty_instances; /* circular, points to most recently added one, NULL if none */
   struct lwregs registrations;       /* should be a global one (with lock-free lookups) */
 
   /* Instance/Sample maximums from resource limits QoS */
@@ -289,15 +301,15 @@ struct dds_rhc_default {
   int32_t max_samples;   /* FIXME: probably better as uint32_t with MAX_UINT32 for unlimited */
   int32_t max_samples_per_instance; /* FIXME: probably better as uint32_t with MAX_UINT32 for unlimited */
 
-  uint32_t n_instances;              /* # instances, including empty [NOT USED] */
+  uint32_t n_instances;              /* # instances, including empty */
   uint32_t n_nonempty_instances;     /* # non-empty instances */
-  uint32_t n_not_alive_disposed;     /* # disposed, non-empty instances [NOT USED] */
-  uint32_t n_not_alive_no_writers;   /* # not-alive-no-writers, non-empty instances [NOT USED] */
-  uint32_t n_new;                    /* # new, non-empty instances [NOT USED] */
+  uint32_t n_not_alive_disposed;     /* # disposed, non-empty instances */
+  uint32_t n_not_alive_no_writers;   /* # not-alive-no-writers, non-empty instances */
+  uint32_t n_new;                    /* # new, non-empty instances */
   uint32_t n_vsamples;               /* # "valid" samples over all instances */
-  uint32_t n_vread;                  /* # read "valid" samples over all instances [NOT USED] */
-  uint32_t n_invsamples;             /* # invalid samples over all instances [NOT USED] */
-  uint32_t n_invread;                /* # read invalid samples over all instances [NOT USED] */
+  uint32_t n_vread;                  /* # read "valid" samples over all instances */
+  uint32_t n_invsamples;             /* # invalid samples over all instances */
+  uint32_t n_invread;                /* # read invalid samples over all instances */
 
   bool by_source_ordering;           /* true if BY_SOURCE, false if BY_RECEPTION */
   bool exclusive_ownership;          /* true if EXCLUSIVE, false if SHARED */
@@ -306,7 +318,7 @@ struct dds_rhc_default {
 
   dds_reader *reader;                /* reader -- may be NULL (used by rhc_torture) */
   struct ddsi_tkmap *tkmap;          /* back pointer to tkmap */
-  struct q_globals *gv;              /* globals -- so far only for log config */
+  struct ddsi_domaingv *gv;          /* globals -- so far only for log config */
   const struct ddsi_sertopic *topic; /* topic description */
   uint32_t history_depth;            /* depth, 1 for KEEP_LAST_1, 2**32-1 for KEEP_ALL */
 
@@ -316,6 +328,12 @@ struct dds_rhc_default {
   uint32_t nqconds;                  /* Number of associated query conditions */
   dds_querycond_mask_t qconds_samplest;  /* Mask of associated query conditions that check the sample state */
   void *qcond_eval_samplebuf;        /* Temporary storage for evaluating query conditions, NULL if no qconds */
+#ifdef DDSI_INCLUDE_LIFESPAN
+  struct lifespan_adm lifespan;      /* Lifespan administration */
+#endif
+#ifdef DDSI_INCLUDE_DEADLINE_MISSED
+  struct deadline_adm deadline; /* Deadline missed administration */
+#endif
 };
 
 struct trigger_info_cmn {
@@ -460,6 +478,11 @@ static void topicless_to_clean_invsample (const struct ddsi_sertopic *topic, con
 }
 
 static unsigned qmask_of_inst (const struct rhc_instance *inst);
+static void free_sample (struct dds_rhc_default *rhc, struct rhc_instance *inst, struct rhc_sample *s);
+static void get_trigger_info_cmn (struct trigger_info_cmn *info, struct rhc_instance *inst);
+static void get_trigger_info_pre (struct trigger_info_pre *info, struct rhc_instance *inst);
+static void init_trigger_info_qcond (struct trigger_info_qcond *qc);
+static void drop_instance_noupdate_no_writers (struct dds_rhc_default *rhc, struct rhc_instance *inst);
 static bool update_conditions_locked (struct dds_rhc_default *rhc, bool called_from_insert, const struct trigger_info_pre *pre, const struct trigger_info_post *post, const struct trigger_info_qcond *trig_qc, const struct rhc_instance *inst, struct dds_entity *triggers[], size_t *ntriggers);
 #ifndef NDEBUG
 static int rhc_check_counts_locked (struct dds_rhc_default *rhc, bool check_conds, bool check_qcmask);
@@ -480,58 +503,141 @@ static int instance_iid_eq (const void *va, const void *vb)
 
 static void add_inst_to_nonempty_list (struct dds_rhc_default *rhc, struct rhc_instance *inst)
 {
-  if (rhc->nonempty_instances == NULL)
-  {
-    inst->next = inst->prev = inst;
-  }
-  else
-  {
-    struct rhc_instance * const hd = rhc->nonempty_instances;
-#ifndef NDEBUG
-    {
-      const struct rhc_instance *x = hd;
-      do { assert (x != inst); x = x->next; } while (x != hd);
-    }
-#endif
-    inst->next = hd->next;
-    inst->prev = hd;
-    hd->next = inst;
-    inst->next->prev = inst;
-  }
-  rhc->nonempty_instances = inst;
+  ddsrt_circlist_append (&rhc->nonempty_instances, &inst->nonempty_list);
   rhc->n_nonempty_instances++;
 }
 
 static void remove_inst_from_nonempty_list (struct dds_rhc_default *rhc, struct rhc_instance *inst)
 {
   assert (inst_is_empty (inst));
-#ifndef NDEBUG
-  {
-    const struct rhc_instance *x = rhc->nonempty_instances;
-    assert (x);
-    do { if (x == inst) break; x = x->next; } while (x != rhc->nonempty_instances);
-    assert (x == inst);
-  }
-#endif
-
-  if (inst->next == inst)
-  {
-    rhc->nonempty_instances = NULL;
-  }
-  else
-  {
-    struct rhc_instance * const inst_prev = inst->prev;
-    struct rhc_instance * const inst_next = inst->next;
-    inst_prev->next = inst_next;
-    inst_next->prev = inst_prev;
-    if (rhc->nonempty_instances == inst)
-      rhc->nonempty_instances = inst_prev;
-  }
+  ddsrt_circlist_remove (&rhc->nonempty_instances, &inst->nonempty_list);
   assert (rhc->n_nonempty_instances > 0);
   rhc->n_nonempty_instances--;
 }
 
-struct dds_rhc *dds_rhc_default_new_xchecks (dds_reader *reader, struct q_globals *gv, const struct ddsi_sertopic *topic, bool xchecks)
+static struct rhc_instance *oldest_nonempty_instance (const struct dds_rhc_default *rhc)
+{
+  return DDSRT_FROM_CIRCLIST (struct rhc_instance, nonempty_list, ddsrt_circlist_oldest (&rhc->nonempty_instances));
+}
+
+static struct rhc_instance *latest_nonempty_instance (const struct dds_rhc_default *rhc)
+{
+  return DDSRT_FROM_CIRCLIST (struct rhc_instance, nonempty_list, ddsrt_circlist_latest (&rhc->nonempty_instances));
+}
+
+static struct rhc_instance *next_nonempty_instance (const struct rhc_instance *inst)
+{
+  return DDSRT_FROM_CIRCLIST (struct rhc_instance, nonempty_list, inst->nonempty_list.next);
+}
+
+#ifdef DDSI_INCLUDE_LIFESPAN
+static void drop_expired_samples (struct dds_rhc_default *rhc, struct rhc_sample *sample)
+{
+  struct rhc_instance *inst = sample->inst;
+  struct trigger_info_pre pre;
+  struct trigger_info_post post;
+  struct trigger_info_qcond trig_qc;
+  size_t ntriggers = SIZE_MAX;
+
+  assert (!inst_is_empty (inst));
+
+  TRACE ("rhc_default %p drop_exp(iid %"PRIx64" wriid %"PRIx64" exp %"PRId64" %s",
+    rhc, inst->iid, sample->wr_iid, sample->lifespan.t_expire.v, sample->isread ? "read" : "notread");
+
+  get_trigger_info_pre (&pre, inst);
+  init_trigger_info_qcond (&trig_qc);
+
+  /* Find prev sample: in case of history depth of 1 this is the sample itself,
+    * (which is inst->latest). In case of larger history depth the most likely sample
+    * to be expired is the oldest, in which case inst->latest is the previous
+    * sample and inst->latest->next points to sample (circular list). We can
+    * assume that 'sample' is in the list, so a check to avoid infinite loop is not
+    * required here. */
+  struct rhc_sample *psample = inst->latest;
+  while (psample->next != sample)
+    psample = psample->next;
+
+  rhc->n_vsamples--;
+  if (sample->isread)
+  {
+    inst->nvread--;
+    rhc->n_vread--;
+    trig_qc.dec_sample_read = true;
+  }
+  if (--inst->nvsamples > 0)
+  {
+    if (inst->latest == sample)
+      inst->latest = psample;
+    psample->next = sample->next;
+  }
+  else
+  {
+    inst->latest = NULL;
+  }
+  trig_qc.dec_conds_sample = sample->conds;
+  free_sample (rhc, inst, sample);
+  get_trigger_info_cmn (&post.c, inst);
+  update_conditions_locked (rhc, false, &pre, &post, &trig_qc, inst, NULL, &ntriggers);
+  if (inst_is_empty (inst))
+  {
+    remove_inst_from_nonempty_list (rhc, inst);
+    if (inst->isdisposed)
+      rhc->n_not_alive_disposed--;
+    if (inst->wrcount == 0)
+    {
+      TRACE ("; iid %"PRIx64" #0,empty,drop", inst->iid);
+      if (!inst->isdisposed)
+        rhc->n_not_alive_no_writers--;
+      drop_instance_noupdate_no_writers (rhc, inst);
+    }
+  }
+  TRACE (")\n");
+}
+
+nn_mtime_t dds_rhc_default_sample_expired_cb(void *hc, nn_mtime_t tnow)
+{
+  struct dds_rhc_default *rhc = hc;
+  struct rhc_sample *sample;
+  nn_mtime_t tnext;
+  ddsrt_mutex_lock (&rhc->lock);
+  while ((tnext = lifespan_next_expired_locked (&rhc->lifespan, tnow, (void **)&sample)).v == 0)
+    drop_expired_samples (rhc, sample);
+  ddsrt_mutex_unlock (&rhc->lock);
+  return tnext;
+}
+#endif /* DDSI_INCLUDE_LIFESPAN */
+
+#ifdef DDSI_INCLUDE_DEADLINE_MISSED
+nn_mtime_t dds_rhc_default_deadline_missed_cb(void *hc, nn_mtime_t tnow)
+{
+  struct dds_rhc_default *rhc = hc;
+  void *vinst;
+  nn_mtime_t tnext;
+  ddsrt_mutex_lock (&rhc->lock);
+  while ((tnext = deadline_next_missed_locked (&rhc->deadline, tnow, &vinst)).v == 0)
+  {
+    struct rhc_instance *inst = vinst;
+    deadline_reregister_instance_locked (&rhc->deadline, &inst->deadline, tnow);
+
+    inst->wr_iid_islive = 0;
+
+    status_cb_data_t cb_data;
+    cb_data.raw_status_id = (int) DDS_REQUESTED_DEADLINE_MISSED_STATUS_ID;
+    cb_data.extra = 0;
+    cb_data.handle = inst->iid;
+    cb_data.add = true;
+    ddsrt_mutex_unlock (&rhc->lock);
+    dds_reader_status_cb (&rhc->reader->m_entity, &cb_data);
+    ddsrt_mutex_lock (&rhc->lock);
+
+    tnow = now_mt ();
+  }
+  ddsrt_mutex_unlock (&rhc->lock);
+  return tnext;
+}
+#endif /* DDSI_INCLUDE_DEADLINE_MISSED */
+
+struct dds_rhc *dds_rhc_default_new_xchecks (dds_reader *reader, struct ddsi_domaingv *gv, const struct ddsi_sertopic *topic, bool xchecks)
 {
   struct dds_rhc_default *rhc = ddsrt_malloc (sizeof (*rhc));
   memset (rhc, 0, sizeof (*rhc));
@@ -540,11 +646,21 @@ struct dds_rhc *dds_rhc_default_new_xchecks (dds_reader *reader, struct q_global
   lwregs_init (&rhc->registrations);
   ddsrt_mutex_init (&rhc->lock);
   rhc->instances = ddsrt_hh_new (1, instance_iid_hash, instance_iid_eq);
+  ddsrt_circlist_init (&rhc->nonempty_instances);
   rhc->topic = topic;
   rhc->reader = reader;
   rhc->tkmap = gv->m_tkmap;
   rhc->gv = gv;
   rhc->xchecks = xchecks;
+
+#ifdef DDSI_INCLUDE_LIFESPAN
+  lifespan_init (gv, &rhc->lifespan, offsetof(struct dds_rhc_default, lifespan), offsetof(struct rhc_sample, lifespan), dds_rhc_default_sample_expired_cb);
+#endif
+
+#ifdef DDSI_INCLUDE_DEADLINE_MISSED
+  rhc->deadline.dur = (reader != NULL) ? reader->m_entity.m_qos->deadline.deadline : DDS_INFINITY;
+  deadline_init (gv, &rhc->deadline, offsetof(struct dds_rhc_default, deadline), offsetof(struct rhc_instance, deadline), dds_rhc_default_deadline_missed_cb);
+#endif
 
   return &rhc->common;
 }
@@ -566,6 +682,8 @@ static void dds_rhc_default_set_qos (struct dds_rhc_default * rhc, const dds_qos
   rhc->reliable = (qos->reliability.kind == DDS_RELIABILITY_RELIABLE);
   assert(qos->history.kind != DDS_HISTORY_KEEP_LAST || qos->history.depth > 0);
   rhc->history_depth = (qos->history.kind == DDS_HISTORY_KEEP_LAST) ? (uint32_t)qos->history.depth : ~0u;
+  /* FIXME: updating deadline duration not yet supported
+  rhc->deadline.dur = qos->deadline.deadline; */
 }
 
 static bool eval_predicate_sample (const struct dds_rhc_default *rhc, const struct ddsi_serdata *sample, bool (*pred) (const void *sample))
@@ -601,9 +719,15 @@ static struct rhc_sample *alloc_sample (struct rhc_instance *inst)
   }
 }
 
-static void free_sample (struct rhc_instance *inst, struct rhc_sample *s)
+static void free_sample (struct dds_rhc_default *rhc, struct rhc_instance *inst, struct rhc_sample *s)
 {
+#ifndef DDSI_INCLUDE_LIFESPAN
+  DDSRT_UNUSED_ARG (rhc);
+#endif
   ddsi_serdata_unref (s->sample);
+#ifdef DDSI_INCLUDE_LIFESPAN
+  lifespan_unregister_sample_locked (&rhc->lifespan, &s->lifespan);
+#endif
   if (s == &inst->a_sample)
   {
     assert (!inst->a_sample_free);
@@ -657,6 +781,10 @@ static void free_empty_instance (struct rhc_instance *inst, struct dds_rhc_defau
 {
   assert (inst_is_empty (inst));
   ddsi_tkmap_instance_unref (rhc->tkmap, inst->tk);
+#ifdef DDSI_INCLUDE_DEADLINE_MISSED
+  if (!inst->isdisposed)
+    deadline_unregister_instance_locked (&rhc->deadline, &inst->deadline);
+#endif
   ddsrt_free (inst);
 }
 
@@ -665,11 +793,12 @@ static void free_instance_rhc_free (struct rhc_instance *inst, struct dds_rhc_de
   struct rhc_sample *s = inst->latest;
   const bool was_empty = inst_is_empty (inst);
   struct trigger_info_qcond dummy_trig_qc;
+
   if (s)
   {
     do {
       struct rhc_sample * const s1 = s->next;
-      free_sample (inst, s);
+      free_sample (rhc, inst, s);
       s = s1;
     } while (s != inst->latest);
     rhc->n_vsamples -= inst->nvsamples;
@@ -682,11 +811,10 @@ static void free_instance_rhc_free (struct rhc_instance *inst, struct dds_rhc_de
 #endif
   inst_clear_invsample_if_exists (rhc, inst, &dummy_trig_qc);
   if (!was_empty)
-  {
     remove_inst_from_nonempty_list (rhc, inst);
-  }
-  ddsi_tkmap_instance_unref (rhc->tkmap, inst->tk);
-  ddsrt_free (inst);
+  if (inst->isnew)
+    rhc->n_new--;
+  free_empty_instance(inst, rhc);
 }
 
 static uint32_t dds_rhc_default_lock_samples (struct dds_rhc_default *rhc)
@@ -708,9 +836,18 @@ static void free_instance_rhc_free_wrap (void *vnode, void *varg)
 
 static void dds_rhc_default_free (struct dds_rhc_default *rhc)
 {
-  assert (rhc_check_counts_locked (rhc, true, true));
+#ifdef DDSI_INCLUDE_LIFESPAN
+  dds_rhc_default_sample_expired_cb (rhc, NN_MTIME_NEVER);
+  lifespan_fini (&rhc->lifespan);
+#endif
+#ifdef DDSI_INCLUDE_DEADLINE_MISSED
+  deadline_stop (&rhc->deadline);
+#endif
   ddsrt_hh_enum (rhc->instances, free_instance_rhc_free_wrap, rhc);
-  assert (rhc->nonempty_instances == NULL);
+  assert (ddsrt_circlist_isempty (&rhc->nonempty_instances));
+#ifdef DDSI_INCLUDE_DEADLINE_MISSED
+  deadline_fini (&rhc->deadline);
+#endif
   ddsrt_hh_free (rhc->instances);
   lwregs_fini (&rhc->registrations);
   if (rhc->qcond_eval_samplebuf != NULL)
@@ -782,12 +919,15 @@ static bool add_sample (struct dds_rhc_default *rhc, struct rhc_instance *inst, 
   {
     /* replace oldest sample; latest points to the latest one, the
        list is circular from old -> new, so latest->next is the oldest */
-
     inst_clear_invsample_if_exists (rhc, inst, trig_qc);
     assert (inst->latest != NULL);
     s = inst->latest->next;
     assert (trig_qc->dec_conds_sample == 0);
     ddsi_serdata_unref (s->sample);
+
+#ifdef DDSI_INCLUDE_LIFESPAN
+    lifespan_unregister_sample_locked (&rhc->lifespan, &s->lifespan);
+#endif
 
     trig_qc->dec_sample_read = s->isread;
     trig_qc->dec_conds_sample = s->conds;
@@ -800,7 +940,6 @@ static bool add_sample (struct dds_rhc_default *rhc, struct rhc_instance *inst, 
   else
   {
     /* Check if resource max_samples QoS exceeded */
-
     if (rhc->reader && rhc->max_samples != DDS_LENGTH_UNLIMITED && rhc->n_vsamples >= (uint32_t) rhc->max_samples)
     {
       cb_data->raw_status_id = (int) DDS_SAMPLE_REJECTED_STATUS_ID;
@@ -811,7 +950,6 @@ static bool add_sample (struct dds_rhc_default *rhc, struct rhc_instance *inst, 
     }
 
     /* Check if resource max_samples_per_instance QoS exceeded */
-
     if (rhc->reader && rhc->max_samples_per_instance != DDS_LENGTH_UNLIMITED && inst->nvsamples >= (uint32_t) rhc->max_samples_per_instance)
     {
       cb_data->raw_status_id = (int) DDS_SAMPLE_REJECTED_STATUS_ID;
@@ -822,7 +960,6 @@ static bool add_sample (struct dds_rhc_default *rhc, struct rhc_instance *inst, 
     }
 
     /* add new latest sample */
-
     s = alloc_sample (inst);
     inst_clear_invsample_if_exists (rhc, inst, trig_qc);
     if (inst->latest == NULL)
@@ -843,6 +980,16 @@ static bool add_sample (struct dds_rhc_default *rhc, struct rhc_instance *inst, 
   s->isread = false;
   s->disposed_gen = inst->disposed_gen;
   s->no_writers_gen = inst->no_writers_gen;
+#ifdef DDSI_INCLUDE_LIFESPAN
+  s->inst = inst;
+  s->lifespan.t_expire = wrinfo->lifespan_exp;
+  lifespan_register_sample_locked (&rhc->lifespan, &s->lifespan);
+#endif
+#ifdef DDSI_INCLUDE_DEADLINE_MISSED
+  /* Only renew the deadline missed counter in case the sample is actually stored in the rhc */
+  if (!inst->isdisposed)
+    deadline_renew_instance_locked (&rhc->deadline, &inst->deadline);
+#endif
 
   s->conds = 0;
   if (rhc->nqconds != 0)
@@ -939,6 +1086,8 @@ static void drop_instance_noupdate_no_writers (struct dds_rhc_default *rhc, stru
   assert (inst_is_empty (inst));
 
   rhc->n_instances--;
+  if (inst->isnew)
+    rhc->n_new--;
 
   ret = ddsrt_hh_remove (rhc->instances, inst);
   assert (ret);
@@ -1065,7 +1214,6 @@ static void account_for_empty_to_nonempty_transition (struct dds_rhc_default *rh
 {
   assert (inst_nsamples (inst) == 1);
   add_inst_to_nonempty_list (rhc, inst);
-  rhc->n_new += inst->isnew;
   if (inst->isdisposed)
     rhc->n_not_alive_disposed++;
   else if (inst->wrcount == 0)
@@ -1110,7 +1258,7 @@ static int rhc_unregister_isreg_w_sideeffects (struct dds_rhc_default *rhc, cons
     if (inst->wrcount == 2 && inst->wr_iid_islive && inst->wr_iid != wr_iid)
     {
       TRACE (",delreg(remain)");
-      lwregs_delete (&rhc->registrations, inst->iid, inst->wr_iid);
+      (void) lwregs_delete (&rhc->registrations, inst->iid, inst->wr_iid);
     }
     return 1;
   }
@@ -1203,7 +1351,7 @@ static bool dds_rhc_unregister (struct dds_rhc_default *rhc, struct rhc_instance
   return notify_data_available;
 }
 
-static struct rhc_instance *alloc_new_instance (const struct dds_rhc_default *rhc, const struct ddsi_writer_info *wrinfo, struct ddsi_serdata *serdata, struct ddsi_tkmap_instance *tk)
+static struct rhc_instance *alloc_new_instance (struct dds_rhc_default *rhc, const struct ddsi_writer_info *wrinfo, struct ddsi_serdata *serdata, struct ddsi_tkmap_instance *tk)
 {
   struct rhc_instance *inst;
 
@@ -1233,6 +1381,11 @@ static struct rhc_instance *alloc_new_instance (const struct dds_rhc_default *rh
         inst->conds |= c->m_query.m_qcmask;
     }
   }
+
+#ifdef DDSI_INCLUDE_DEADLINE_MISSED
+  if (!inst->isdisposed)
+    deadline_register_instance_locked (&rhc->deadline, &inst->deadline, now_mt ());
+#endif
 
   return inst;
 }
@@ -1294,6 +1447,7 @@ static rhc_store_result_t rhc_store_new_instance (struct rhc_instance **out_inst
   assert (ret);
   (void) ret;
   rhc->n_instances++;
+  rhc->n_new++;
   get_trigger_info_cmn (&post->c, inst);
 
   *out_inst = inst;
@@ -1393,8 +1547,6 @@ static bool dds_rhc_default_store (struct dds_rhc_default * __restrict rhc, cons
     cb_data.handle = 0;
     cb_data.add = true;
     goto error_or_nochange;
-
-    /* FIXME: deadline (and other) QoS? */
   }
   else
   {
@@ -1444,11 +1596,19 @@ static bool dds_rhc_default_store (struct dds_rhc_default * __restrict rhc, cons
         TRACE (" disposed->notdisposed");
         inst->isdisposed = 0;
         inst->disposed_gen++;
+#ifdef DDSI_INCLUDE_DEADLINE_MISSED
+        if (!is_dispose)
+          deadline_register_instance_locked (&rhc->deadline, &inst->deadline, now_mt ());
+#endif
       }
       if (is_dispose)
       {
         inst->isdisposed = 1;
         inst_became_disposed = !old_isdisposed;
+#ifdef DDSI_INCLUDE_DEADLINE_MISSED
+        if (inst_became_disposed)
+          deadline_unregister_instance_locked (&rhc->deadline, &inst->deadline);
+#endif
         TRACE (" dispose(%d)", inst_became_disposed);
       }
 
@@ -1464,9 +1624,24 @@ static bool dds_rhc_default_store (struct dds_rhc_default * __restrict rhc, cons
 
           /* FIXME: fix the bad rejection handling, probably put back in a proper rollback, until then a band-aid like this will have to do: */
           inst->isnew = old_isnew;
-          inst->isdisposed = old_isdisposed;
           if (old_isdisposed)
+          {
             inst->disposed_gen--;
+            if (!inst->isdisposed)
+            {
+              inst->isdisposed = 1;
+#ifdef DDSI_INCLUDE_DEADLINE_MISSED
+              deadline_unregister_instance_locked (&rhc->deadline, &inst->deadline);
+#endif
+            }
+          }
+          else if (inst->isdisposed)
+          {
+            inst->isdisposed = 0;
+#ifdef DDSI_INCLUDE_DEADLINE_MISSED
+            deadline_register_instance_locked (&rhc->deadline, &inst->deadline, now_mt ());
+#endif
+          }
           goto error_or_nochange;
         }
         notify_data_available = true;
@@ -1486,16 +1661,10 @@ static bool dds_rhc_default_store (struct dds_rhc_default * __restrict rhc, cons
       if (inst->latest || inst_became_disposed)
       {
         if (was_empty)
-        {
-          /* general function is slightly slower than a specialised
-             one, but perhaps it is wiser to use the general one */
           account_for_empty_to_nonempty_transition (rhc, inst);
-        }
         else
-        {
           rhc->n_not_alive_disposed += (uint32_t)(inst->isdisposed - old_isdisposed);
-          rhc->n_new += (uint32_t)(inst->isnew - old_isnew);
-        }
+        rhc->n_new += (uint32_t)(inst->isnew - old_isnew);
       }
       else
       {
@@ -1609,6 +1778,9 @@ static void dds_rhc_default_unregister_wr (struct dds_rhc_default * __restrict r
       if (auto_dispose && !inst->isdisposed)
       {
         inst->isdisposed = 1;
+#ifdef DDSI_INCLUDE_DEADLINE_MISSED
+        deadline_unregister_instance_locked (&rhc->deadline, &inst->deadline);
+#endif
 
         /* Set invalid sample for disposing it (unregister may also set it for unregistering) */
         if (inst->latest)
@@ -1627,7 +1799,7 @@ static void dds_rhc_default_unregister_wr (struct dds_rhc_default * __restrict r
         }
       }
 
-      dds_rhc_unregister (rhc, inst, wrinfo, inst->tstamp, &post, &trig_qc);
+      (void) dds_rhc_unregister (rhc, inst, wrinfo, inst->tstamp, &post, &trig_qc);
 
       TRACE ("\n");
 
@@ -1857,10 +2029,10 @@ static int dds_rhc_read_w_qminv (struct dds_rhc_default *rhc, bool lock, void **
     rhc->n_not_alive_no_writers, rhc->n_new, rhc->n_vsamples, rhc->n_invsamples,
     rhc->n_vread, rhc->n_invread);
 
-  if (rhc->nonempty_instances)
+  if (!ddsrt_circlist_isempty (&rhc->nonempty_instances))
   {
     const dds_querycond_mask_t qcmask = (cond && cond->m_query.m_filter) ? cond->m_query.m_qcmask : 0;
-    struct rhc_instance * inst = rhc->nonempty_instances->next;
+    struct rhc_instance * inst = oldest_nonempty_instance (rhc);
     struct rhc_instance * const end = inst;
     do
     {
@@ -1946,7 +2118,7 @@ static int dds_rhc_read_w_qminv (struct dds_rhc_default *rhc, bool lock, void **
           break;
         }
       }
-      inst = inst->next;
+      inst = next_nonempty_instance (inst);
     }
     while (inst != end && n < max_samples);
   }
@@ -1974,14 +2146,14 @@ static int dds_rhc_take_w_qminv (struct dds_rhc_default *rhc, bool lock, void **
     rhc->n_not_alive_no_writers, rhc->n_new, rhc->n_vsamples,
     rhc->n_invsamples, rhc->n_vread, rhc->n_invread);
 
-  if (rhc->nonempty_instances)
+  if (!ddsrt_circlist_isempty (&rhc->nonempty_instances))
   {
     const dds_querycond_mask_t qcmask = (cond && cond->m_query.m_filter) ? cond->m_query.m_qcmask : 0;
-    struct rhc_instance *inst = rhc->nonempty_instances->next;
+    struct rhc_instance *inst = oldest_nonempty_instance (rhc);
     unsigned n_insts = rhc->n_nonempty_instances;
     while (n_insts-- > 0 && n < max_samples)
     {
-      struct rhc_instance * const inst1 = inst->next;
+      struct rhc_instance * const inst1 = next_nonempty_instance (inst);
       iid = inst->iid;
       if (handle == DDS_HANDLE_NIL || iid == handle)
       {
@@ -2032,7 +2204,7 @@ static int dds_rhc_take_w_qminv (struct dds_rhc_default *rhc, bool lock, void **
                   inst->latest = NULL;
                 }
 
-                free_sample (inst, sample);
+                free_sample (rhc, inst, sample);
 
                 if (++n == max_samples)
                 {
@@ -2129,14 +2301,14 @@ static int dds_rhc_takecdr_w_qminv (struct dds_rhc_default *rhc, bool lock, stru
           rhc->n_not_alive_no_writers, rhc->n_new, rhc->n_vsamples,
           rhc->n_invsamples, rhc->n_vread, rhc->n_invread);
 
-  if (rhc->nonempty_instances)
+  if (!ddsrt_circlist_isempty (&rhc->nonempty_instances))
   {
     const dds_querycond_mask_t qcmask = (cond && cond->m_query.m_filter) ? cond->m_query.m_qcmask : 0;
-    struct rhc_instance *inst = rhc->nonempty_instances->next;
+    struct rhc_instance *inst = oldest_nonempty_instance (rhc);
     unsigned n_insts = rhc->n_nonempty_instances;
     while (n_insts-- > 0 && n < max_samples)
     {
-      struct rhc_instance * const inst1 = inst->next;
+      struct rhc_instance * const inst1 = next_nonempty_instance (inst);
       iid = inst->iid;
       if (handle == DDS_HANDLE_NIL || iid == handle)
       {
@@ -2179,7 +2351,7 @@ static int dds_rhc_takecdr_w_qminv (struct dds_rhc_default *rhc, bool lock, stru
                 else
                   inst->latest = NULL;
 
-                free_sample (inst, sample);
+                free_sample (rhc, inst, sample);
 
                 if (++n == max_samples)
                 {
@@ -2345,13 +2517,14 @@ static bool dds_rhc_default_add_readcondition (struct dds_rhc_default *rhc, dds_
   {
     /* Read condition is not cached inside the instances and samples, so it only needs
        to be evaluated on the non-empty instances */
-    if (rhc->nonempty_instances)
+    if (!ddsrt_circlist_isempty (&rhc->nonempty_instances))
     {
-      struct rhc_instance *inst = rhc->nonempty_instances;
+      struct rhc_instance *inst = latest_nonempty_instance (rhc);
+      struct rhc_instance const * const end = inst;
       do {
         trigger += rhc_get_cond_trigger (inst, cond);
-        inst = inst->next;
-      } while (inst != rhc->nonempty_instances);
+        inst = next_nonempty_instance (inst);
+      } while (inst != end);
     }
   }
   else
@@ -2394,7 +2567,7 @@ static bool dds_rhc_default_add_readcondition (struct dds_rhc_default *rhc, dds_
     ddsrt_atomic_st32 (&cond->m_entity.m_status.m_trigger, trigger);
     dds_entity_status_signal (&cond->m_entity, DDS_DATA_AVAILABLE_STATUS);
   }
-  
+
   TRACE ("add_readcondition(%p, %"PRIx32", %"PRIx32", %"PRIx32") => %p qminv %"PRIx32" ; rhc %"PRIu32" conds\n",
     (void *) rhc, cond->m_sample_states, cond->m_view_states,
     cond->m_instance_states, (void *) cond, cond->m_qminv, rhc->nconds);
@@ -2442,7 +2615,11 @@ static bool update_conditions_locked (struct dds_rhc_default *rhc, bool called_f
          trig_qc->dec_conds_invsample, trig_qc->dec_conds_sample, trig_qc->inc_conds_invsample, trig_qc->inc_conds_sample);
 
   assert (rhc->n_nonempty_instances >= rhc->n_not_alive_disposed + rhc->n_not_alive_no_writers);
+#ifndef DDSI_INCLUDE_LIFESPAN
+  /* If lifespan is disabled, samples cannot expire and therefore
+     empty instances cannot be in the 'new' state. */
   assert (rhc->n_nonempty_instances >= rhc->n_new);
+#endif
   assert (rhc->n_vsamples >= rhc->n_vread);
 
   iter = rhc->conds;
@@ -2687,6 +2864,8 @@ static int rhc_check_counts_locked (struct dds_rhc_default *rhc, bool check_cond
     bool a_sample_free = true;
 
     n_instances++;
+    if (inst->isnew)
+      n_new++;
     if (inst_is_empty (inst))
       continue;
 
@@ -2695,8 +2874,6 @@ static int rhc_check_counts_locked (struct dds_rhc_default *rhc, bool check_cond
       n_not_alive_disposed++;
     else if (inst->wrcount == 0)
       n_not_alive_no_writers++;
-    if (inst->isnew)
-      n_new++;
 
     if (inst->latest)
     {
@@ -2790,29 +2967,26 @@ static int rhc_check_counts_locked (struct dds_rhc_default *rhc, bool check_cond
   if (check_conds)
   {
     for (i = 0, rciter = rhc->conds; i < ncheck; i++, rciter = rciter->m_next)
-    {
       assert (cond_match_count[i] == ddsrt_atomic_ld32 (&rciter->m_entity.m_status.m_trigger));
-    }
-   }
+  }
 
   if (rhc->n_nonempty_instances == 0)
   {
-    assert (rhc->nonempty_instances == NULL);
+    assert (ddsrt_circlist_isempty (&rhc->nonempty_instances));
   }
   else
   {
-    struct rhc_instance *prev, *end;
-    assert (rhc->nonempty_instances != NULL);
-    prev = rhc->nonempty_instances->prev;
-    end = rhc->nonempty_instances;
-    inst = rhc->nonempty_instances;
+    assert (!ddsrt_circlist_isempty (&rhc->nonempty_instances));
+    struct ddsrt_circlist_elem const *prev = rhc->nonempty_instances.latest->prev;
+    inst = latest_nonempty_instance (rhc);
+    struct rhc_instance const * const end = inst;
     n_nonempty_instances = 0;
     do {
       assert (!inst_is_empty (inst));
-      assert (prev->next == inst);
-      assert (inst->prev == prev);
-      prev = inst;
-      inst = inst->next;
+      assert (prev->next == &inst->nonempty_list);
+      assert (inst->nonempty_list.prev == prev);
+      prev = &inst->nonempty_list;
+      inst = next_nonempty_instance (inst);
       n_nonempty_instances++;
     } while (inst != end);
     assert (rhc->n_nonempty_instances == n_nonempty_instances);

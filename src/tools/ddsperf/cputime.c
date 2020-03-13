@@ -180,8 +180,13 @@ bool record_cputime (struct record_cputime_state *state, const char *prefix, dds
   }
   state->tprev = tnow;
   state->s.some_above = some_above;
-  dds_write (state->wr, &state->s);
+  (void) dds_write (state->wr, &state->s);
   return print_cputime (&state->s, prefix, false, true);
+}
+
+double record_cputime_read_rss (const struct record_cputime_state *state)
+{
+  return state->s.maxrss;
 }
 
 struct record_cputime_state *record_cputime_new (dds_entity_t wr)
@@ -249,6 +254,12 @@ bool record_cputime (struct record_cputime_state *state, const char *prefix, dds
   (void) state;
   (void) prefix;
   (void) tnow;
+}
+
+double record_cputime_read_rss (const struct record_cputime_state *state)
+{
+  (void) state;
+  return 0.0;
 }
 
 struct record_cputime_state *record_cputime_new (dds_entity_t wr)
