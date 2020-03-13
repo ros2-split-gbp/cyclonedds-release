@@ -17,7 +17,7 @@
 #include "dds/ddsi/q_config.h"
 #include "dds/ddsi/q_log.h"
 #include "dds/ddsi/q_pcap.h"
-#include "dds/ddsi/q_globals.h"
+#include "dds/ddsi/ddsi_domaingv.h"
 #include "dds/ddsrt/atomics.h"
 #include "dds/ddsrt/heap.h"
 #include "dds/ddsrt/log.h"
@@ -38,17 +38,16 @@ typedef struct ddsi_raweth_conn {
   int m_ifindex;
 } *ddsi_raweth_conn_t;
 
-static char *ddsi_raweth_to_string (ddsi_tran_factory_t tran, char *dst, size_t sizeof_dst, const nn_locator_t *loc, int with_port)
+static char *ddsi_raweth_to_string (char *dst, size_t sizeof_dst, const nn_locator_t *loc, int with_port)
 {
-  (void)tran;
   if (with_port)
-    snprintf(dst, sizeof_dst, "[%02x:%02x:%02x:%02x:%02x:%02x]:%u",
-             loc->address[10], loc->address[11], loc->address[12],
-             loc->address[13], loc->address[14], loc->address[15], loc->port);
+    (void) snprintf(dst, sizeof_dst, "[%02x:%02x:%02x:%02x:%02x:%02x]:%u",
+                    loc->address[10], loc->address[11], loc->address[12],
+                    loc->address[13], loc->address[14], loc->address[15], loc->port);
   else
-    snprintf(dst, sizeof_dst, "[%02x:%02x:%02x:%02x:%02x:%02x]",
-             loc->address[10], loc->address[11], loc->address[12],
-             loc->address[13], loc->address[14], loc->address[15]);
+    (void) snprintf(dst, sizeof_dst, "[%02x:%02x:%02x:%02x:%02x:%02x]",
+                    loc->address[10], loc->address[11], loc->address[12],
+                    loc->address[13], loc->address[14], loc->address[15]);
   return dst;
 }
 
@@ -80,6 +79,7 @@ static ssize_t ddsi_raweth_conn_read (ddsi_tran_conn_t conn, unsigned char * buf
   {
     if (srcloc)
     {
+      srcloc->tran = conn->m_factory;
       srcloc->kind = NN_LOCATOR_KIND_RAWETH;
       srcloc->port = ntohs (src.sll_protocol);
       memset(srcloc->address, 0, 10);
@@ -94,9 +94,9 @@ static ssize_t ddsi_raweth_conn_read (ddsi_tran_conn_t conn, unsigned char * buf
         )
     {
       char addrbuf[DDSI_LOCSTRLEN];
-      snprintf(addrbuf, sizeof(addrbuf), "[%02x:%02x:%02x:%02x:%02x:%02x]:%u",
-               src.sll_addr[0], src.sll_addr[1], src.sll_addr[2],
-               src.sll_addr[3], src.sll_addr[4], src.sll_addr[5], ntohs(src.sll_protocol));
+      (void) snprintf(addrbuf, sizeof(addrbuf), "[%02x:%02x:%02x:%02x:%02x:%02x]:%u",
+                      src.sll_addr[0], src.sll_addr[1], src.sll_addr[2],
+                      src.sll_addr[3], src.sll_addr[4], src.sll_addr[5], ntohs(src.sll_protocol));
       DDS_CWARNING(&conn->m_base.gv->logconfig, "%s => %d truncated to %d\n", addrbuf, (int)ret, (int)len);
     }
   }
@@ -175,13 +175,13 @@ static int ddsi_raweth_conn_locator (ddsi_tran_factory_t fact, ddsi_tran_base_t 
   return ret;
 }
 
-static ddsi_tran_conn_t ddsi_raweth_create_conn (ddsi_tran_factory_t fact, uint32_t port, ddsi_tran_qos_t qos)
+static ddsi_tran_conn_t ddsi_raweth_create_conn (ddsi_tran_factory_t fact, uint32_t port, const struct ddsi_tran_qos *qos)
 {
   ddsrt_socket_t sock;
   dds_return_t rc;
   ddsi_raweth_conn_t uc = NULL;
   struct sockaddr_ll addr;
-  bool mcast = (bool) (qos ? qos->m_multicast : 0);
+  bool mcast = (qos->m_purpose == DDSI_TRAN_QOS_RECV_MC);
 
   /* If port is zero, need to create dynamic port */
 
@@ -305,9 +305,8 @@ static int ddsi_raweth_is_ssm_mcaddr (const ddsi_tran_factory_t tran, const nn_l
   return 0;
 }
 
-static enum ddsi_nearby_address_result ddsi_raweth_is_nearby_address (ddsi_tran_factory_t tran, const nn_locator_t *loc, const nn_locator_t *ownloc, size_t ninterf, const struct nn_interface interf[])
+static enum ddsi_nearby_address_result ddsi_raweth_is_nearby_address (const nn_locator_t *loc, const nn_locator_t *ownloc, size_t ninterf, const struct nn_interface interf[])
 {
-  (void) tran;
   (void) loc;
   (void) ownloc;
   (void) ninterf;
@@ -319,6 +318,7 @@ static enum ddsi_locator_from_string_result ddsi_raweth_address_from_string (dds
 {
   int i = 0;
   (void)tran;
+  loc->tran = tran;
   loc->kind = NN_LOCATOR_KIND_RAWETH;
   loc->port = NN_LOCATOR_PORT_INVALID;
   memset (loc->address, 0, sizeof (loc->address));
@@ -362,7 +362,7 @@ static int ddsi_raweth_is_valid_port (ddsi_tran_factory_t fact, uint32_t port)
   return (port >= 1 && port <= 65535);
 }
 
-int ddsi_raweth_init (struct q_globals *gv)
+int ddsi_raweth_init (struct ddsi_domaingv *gv)
 {
   struct ddsi_tran_factory *fact = ddsrt_malloc (sizeof (*fact));
   memset (fact, 0, sizeof (*fact));
@@ -391,6 +391,6 @@ int ddsi_raweth_init (struct q_globals *gv)
 
 #else
 
-int ddsi_raweth_init (struct q_globals *gv) { (void) gv; return 0; }
+int ddsi_raweth_init (struct ddsi_domaingv *gv) { (void) gv; return 0; }
 
 #endif /* defined __linux */

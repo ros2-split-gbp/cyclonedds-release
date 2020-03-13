@@ -9,8 +9,8 @@
  *
  * SPDX-License-Identifier: EPL-2.0 OR BSD-3-Clause
  */
-#ifndef Q_GLOBALS_H
-#define Q_GLOBALS_H
+#ifndef DDSI_DOMAINGV_H
+#define DDSI_DOMAINGV_H
 
 #include <stdio.h>
 
@@ -20,7 +20,7 @@
 #include "dds/ddsrt/sync.h"
 #include "dds/ddsrt/fibheap.h"
 
-#include "dds/ddsi/q_plist.h"
+#include "dds/ddsi/ddsi_plist.h"
 #include "dds/ddsi/q_protocol.h"
 #include "dds/ddsi/q_nwif.h"
 #include "dds/ddsi/q_sockwaitset.h"
@@ -38,7 +38,7 @@ struct nn_defrag;
 struct addrset;
 struct xeventq;
 struct gcreq_queue;
-struct ephash;
+struct entity_index;
 struct lease;
 struct ddsi_tran_conn;
 struct ddsi_tran_listener;
@@ -68,7 +68,7 @@ enum recv_thread_mode {
 struct recv_thread_arg {
   enum recv_thread_mode mode;
   struct nn_rbufpool *rbpool;
-  struct q_globals *gv;
+  struct ddsi_domaingv *gv;
   union {
     struct {
       const nn_locator_t *loc;
@@ -82,7 +82,7 @@ struct recv_thread_arg {
 
 struct deleted_participants_admin;
 
-struct q_globals {
+struct ddsi_domaingv {
   volatile int terminate;
   volatile int deaf;
   volatile int mute;
@@ -93,9 +93,8 @@ struct q_globals {
   struct ddsi_tkmap * m_tkmap;
 
   /* Hash tables for participants, readers, writers, proxy
-     participants, proxy readers and proxy writers by GUID
-     (guid_hash) */
-  struct ephash *guid_hash;
+     participants, proxy readers and proxy writers by GUID. */
+  struct entity_index *entity_index;
 
   /* Timed events admin */
   struct xeventq *xevents;
@@ -116,18 +115,40 @@ struct q_globals {
      DCPS participant of DDSI2 itself will be mirrored in a DDSI
      participant, and in multi-socket mode that one gets its own
      socket. */
-
   struct ddsi_tran_conn * disc_conn_mc;
   struct ddsi_tran_conn * data_conn_mc;
   struct ddsi_tran_conn * disc_conn_uc;
   struct ddsi_tran_conn * data_conn_uc;
 
-  /* TCP listener */
+  /* Connection used for all output (for connectionless transports), this
+     used to simply be data_conn_uc, but:
 
+     - Windows has a quirk that makes multicast delivery within a machine
+       utterly unreliable if the transmitting socket is bound to 0.0.0.0
+       (despite all sockets having multicast interfaces set correctly),
+       but apparently only in the presence of sockets transmitting to the
+       same multicast group that have been bound to non-0.0.0.0 ...
+     - At least Fast-RTPS and Connext fail to honour the set of advertised
+       addresses and substitute 127.0.0.1 for the advertised IP address and
+       expect it to work.
+     - Fast-RTPS (at least) binds the socket it uses for transmitting
+       multicasts to non-0.0.0.0
+
+     So binding to 0.0.0.0 means the unicasts from Fast-RTPS & Connext will
+     arrive but the multicasts from Cyclone get dropped often on Windows
+     when trying to interoperate; and binding to the IP address means
+     unicast messages from the others fail to arrive (because they fail to
+     arrive).
+
+     The only work around is to use a separate socket for sending.  It is
+     rather sad that Cyclone needs to work around the bugs of the others,
+     but it seems the only way to get the users what they expect. */
+  struct ddsi_tran_conn * xmit_conn;
+
+  /* TCP listener */
   struct ddsi_tran_listener * listener;
 
   /* Thread pool */
-
   struct ddsrt_thread_pool_s * thread_pool;
 
   /* In many sockets mode, the receive threads maintain a local array
@@ -226,8 +247,8 @@ struct q_globals {
      supplying values for missing QoS settings in incoming discovery
      packets); plus the actual QoSs needed for the builtin
      endpoints. */
-  nn_plist_t default_plist_pp;
-  nn_plist_t default_local_plist_pp;
+  ddsi_plist_t default_plist_pp;
+  ddsi_plist_t default_local_plist_pp;
   dds_qos_t default_xqos_rd;
   dds_qos_t default_xqos_wr;
   dds_qos_t default_xqos_wr_nad;
@@ -250,10 +271,6 @@ struct q_globals {
      delivery queue; currently just SEDP and PMD */
   struct nn_dqueue *builtins_dqueue;
 
-  /* Connection used by general timed-event queue for transmitting data */
-
-  struct ddsi_tran_conn * tev_conn;
-
   struct debug_monitor *debmon;
 
 #ifndef DDSI_INCLUDE_NETWORK_CHANNELS
@@ -271,11 +288,6 @@ struct q_globals {
   struct ddsi_sertopic *plist_topic; /* used for all discovery data */
   struct ddsi_sertopic *rawcdr_topic; /* used for participant message data */
 
-  /* Network ID needed by v_groupWrite -- FIXME: might as well pass it
-     to the receive thread instead of making it global (and that would
-     remove the need to include kernelModule.h) */
-  uint32_t myNetworkId;
-
   ddsrt_mutex_t sendq_lock;
   ddsrt_cond_t sendq_cond;
   unsigned sendq_length;
@@ -291,10 +303,13 @@ struct q_globals {
   struct ddsi_builtin_topic_interface *builtin_topic_interface;
 
   struct nn_group_membership *mship;
+
+  ddsrt_mutex_t sertopics_lock;
+  struct ddsrt_hh *sertopics;
 };
 
 #if defined (__cplusplus)
 }
 #endif
 
-#endif /* Q_GLOBALS_H */
+#endif /* DDSI_DOMAINGV_H */
