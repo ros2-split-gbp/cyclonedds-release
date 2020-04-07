@@ -50,6 +50,8 @@ extern "C" {
 #endif
 
 struct dds_rhc;
+struct ddsi_plist;
+struct ddsi_sertopic;
 struct ddsi_serdata;
 
 #define DDS_MIN_PSEUDO_HANDLE ((dds_entity_t) 0x7fff0000)
@@ -555,7 +557,9 @@ dds_set_enabled_status(dds_entity_t entity, uint32_t mask);
  * @param[in]  entity  Entity on which to get qos.
  * @param[out] qos     Pointer to the qos structure that returns the set policies.
  *
- * @returns A dds_return_t indicating success or failure.
+ * @returns A dds_return_t indicating success or failure. The QoS object will have
+ * at least all QoS relevant for the entity present and the corresponding dds_qget_...
+ * will return true.
  *
  * @retval DDS_RETCODE_OK
  *             The existing set of QoS policy values applied to the entity
@@ -747,27 +751,50 @@ dds_create_participant(
  * @brief Creates a domain with a given configuration
  *
  * To explicitly create a domain based on a configuration passed as a string.
- * Normally, the domain is created implicitly on the first call to
- * dds_create_particiant based on the configuration specified throught
- * the environment. This function allows to by-pass this behaviour.
+ *
+ * It will not be created if a domain with the given domain id already exists.
+ * This could have been created implicitly by a dds_create_participant().
+ *
+ * Please be aware that the given domain_id always takes precedence over the
+ * configuration.
+ *
+ *   | domain_id | domain id in config | result
+ *   +-----------+---------------------+----------
+ *   | n         | any (or absent)     | n, config is used
+ *   | n         | m == n              | n, config is used
+ *   | n         | m != n              | n, config is ignored: default
+ *
+ *     Config models:
+ *     1: <CycloneDDS>
+ *          <Domain id="X">...</Domain>
+ *          <Domain .../>
+ *        </CycloneDDS>
+ *        where ... is all that can today be set in children of CycloneDDS
+ *        with the exception of the id
+ *     2: <CycloneDDS>
+ *          <Domain><Id>X</Id></Domain>
+ *          ...
+ *        </CycloneDDS>
+ *        legacy form, domain id must be the first element in the file with
+ *        a value (if nothing has been set previously, it a warning is good
+ *        enough)
+ *
+ * Using NULL or "" as config will create a domain with default settings.
  *
  *
  * @param[in]  domain The domain to be created. DEFAULT_DOMAIN is not allowed.
  * @param[in]  config A configuration string containing file names and/or XML fragments representing the configuration.
  *
- * @returns A return code
+ * @returns A valid entity handle or an error code.
  *
- * @retval DDS_RETCODE_OK
- *             The domain with the domain identifier has been created from
- *             given configuration string.
  * @retval DDS_RETCODE_BAD_PARAMETER
  *             Illegal value for domain id or the configfile parameter is NULL.
- * @retval DDS_PRECONDITION_NOT_MET
+ * @retval DDS_RETCODE_PRECONDITION_NOT_MET
  *             The domain already existed and cannot be created again.
  * @retval DDS_RETCODE_ERROR
  *             An internal error has occurred.
  */
-DDS_EXPORT dds_return_t
+DDS_EXPORT dds_entity_t
 dds_create_domain(const dds_domainid_t domain, const char *config);
 
 /**
@@ -777,15 +804,10 @@ dds_create_domain(const dds_domainid_t domain, const char *config);
  * For instance, it will return the Participant that was used when
  * creating a Publisher (when that Publisher was provided here).
  *
- * When a reader or a writer are created with a partition, then a
- * subscriber or publisher respectively are created implicitly. These
- * implicit subscribers or publishers will be deleted automatically
- * when the reader or writer is deleted. However, when this function
- * returns such an implicit entity, it is from there on out considered
- * 'explicit'. This means that it isn't deleted automatically anymore.
- * The application should explicitly call dds_delete on those entities
- * now (or delete the parent participant which will delete all entities
- * within its hierarchy).
+ * When a reader or a writer are created with a participant, then a
+ * subscriber or publisher are created implicitly.
+ * This function will return the implicit parent and not the used
+ * participant.
  *
  * @param[in]  entity  Entity from which to get its parent.
  *
@@ -852,15 +874,10 @@ dds_get_participant(dds_entity_t entity);
  * When supplying NULL as list and 0 as size, you can use this to acquire
  * the number of children without having to pre-allocate a list.
  *
- * When a reader or a writer are created with a partition, then a
- * subscriber or publisher respectively are created implicitly. These
- * implicit subscribers or publishers will be deleted automatically
- * when the reader or writer is deleted. However, when this function
- * returns such an implicit entity, it is from there on out considered
- * 'explicit'. This means that it isn't deleted automatically anymore.
- * The application should explicitly call dds_delete on those entities
- * now (or delete the parent participant which will delete all entities
- * within its hierarchy).
+ * When a reader or a writer are created with a participant, then a
+ * subscriber or publisher are created implicitly.
+ * When used on the participant, this function will return the implicit
+ * subscriber and/or publisher and not the related reader/writer.
  *
  * @param[in]  entity   Entity from which to get its children.
  * @param[out] children Pre-allocated array to contain the found children.
@@ -869,7 +886,7 @@ dds_get_participant(dds_entity_t entity);
  * @returns Number of children or an error code.
  *
  * @retval >=0
- *             Number of childer found children (can be larger than 'size').
+ *             Number of found children (can be larger than 'size').
  * @retval DDS_RETCODE_ERROR
  *             An internal error has occurred.
  * @retval DDS_RETCODE_BAD_PARAMETER
@@ -949,7 +966,9 @@ dds_lookup_participant(
  * @brief Creates a new topic with default type handling.
  *
  * The type name for the topic is taken from the generated descriptor. Topic
- * matching is done on a combination of topic name and type name.
+ * matching is done on a combination of topic name and type name. Each successful
+ * call to dds_create_topic creates a new topic entity sharing the same QoS
+ * settings with all other topics of the same name.
  *
  * @param[in]  participant  Participant on which to create the topic.
  * @param[in]  descriptor   An IDL generated topic descriptor.
@@ -957,14 +976,20 @@ dds_lookup_participant(
  * @param[in]  qos          QoS to set on the new topic (can be NULL).
  * @param[in]  listener     Any listener functions associated with the new topic (can be NULL).
  *
- * @returns A valid topic handle or an error code.
+ * @returns A valid, unique topic handle or an error code.
  *
  * @retval >=0
- *             A valid topic handle.
+ *             A valid unique topic handle.
  * @retval DDS_RETCODE_BAD_PARAMETER
  *             Either participant, descriptor, name or qos is invalid.
+ * @retval DDS_RETCODE_BAD_PARAMETER
+ *             Either participant, descriptor, name or qos is invalid.
+ * @retval DDS_RETCODE_INCONSISTENT_POLICY
+ *             QoS mismatch between qos and an existing topic's QoS.
+ * @retval DDS_RETCODE_PRECONDITION_NOT_MET
+ *             Mismatch between type name in descriptor and pre-existing
+ *             topic's type name.
  */
-/* TODO: Check list of retcodes is complete. */
 DDS_EXPORT dds_entity_t
 dds_create_topic(
   dds_entity_t participant,
@@ -973,35 +998,57 @@ dds_create_topic(
   const dds_qos_t *qos,
   const dds_listener_t *listener);
 
-struct ddsi_sertopic;
-struct nn_plist;
+
+#define DDS_HAS_CREATE_TOPIC_GENERIC 1
 /**
- * @brief Creates a new topic with arbitrary type handling.
+ * @brief Creates a new topic with provided type handling.
  *
  * The type name for the topic is taken from the provided "sertopic" object. Topic
- * matching is done on a combination of topic name and type name.
+ * matching is done on a combination of topic name and type name. Each successful
+ * call to dds_create_topic creates a new topic entity sharing the same QoS
+ * settings with all other topics of the same name.
  *
- * @param[in]  participant  Participant on which to create the topic.
- * @param[in]  sertopic     Internal description of the topic type (includes name).
- * @param[in]  qos          QoS to set on the new topic (can be NULL).
- * @param[in]  listener     Any listener functions associated with the new topic (can be NULL).
- * @param[in]  sedp_plist   Topic description to be published as part of discovery (if NULL, not published).
+ * In case this function returns a valid handle, the ownership of the provided
+ * sertopic is handed over to Cyclone. On return, the caller gets in the sertopic parameter a
+ * pointer to the sertopic that is actually used by the topic. This can be the provided sertopic
+ * (if this sertopic was not yet known in the domain), or a sertopic thas was
+ * already known in the domain.
  *
- * @returns A valid topic handle or an error code.
+ * @param[in]     participant  Participant on which to create the topic.
+ * @param[in,out] sertopic     Internal description of the topic type (includes name). On return, the sertopic parameter is set to the actual sertopic that is used by the topic.
+ * @param[in]     qos          QoS to set on the new topic (can be NULL).
+ * @param[in]     listener     Any listener functions associated with the new topic (can be NULL).
+ * @param[in]     sedp_plist   Topic description to be published as part of discovery (if NULL, not published).
+ *
+ * @returns A valid, unique topic handle or an error code. Iff a valid handle, the domain takes ownership of provided serdata.
  *
  * @retval >=0
- *             A valid topic handle.
+ *             A valid unique topic handle.
  * @retval DDS_RETCODE_BAD_PARAMETER
  *             Either participant, descriptor, name or qos is invalid.
+ * @retval DDS_RETCODE_BAD_PARAMETER
+ *             Either participant, descriptor, name or qos is invalid.
+ * @retval DDS_RETCODE_INCONSISTENT_POLICY
+ *             QoS mismatch between qos and an existing topic's QoS.
+ * @retval DDS_RETCODE_PRECONDITION_NOT_MET
+ *             Mismatch between type name in sertopic and pre-existing
+ *             topic's type name.
  */
-/* TODO: Check list of retcodes is complete. */
 DDS_EXPORT dds_entity_t
+dds_create_topic_generic (
+  dds_entity_t participant,
+  struct ddsi_sertopic **sertopic,
+  const dds_qos_t *qos,
+  const dds_listener_t *listener,
+  const struct ddsi_plist *sedp_plist);
+
+DDS_DEPRECATED_EXPORT dds_entity_t
 dds_create_topic_arbitrary (
   dds_entity_t participant,
   struct ddsi_sertopic *sertopic,
   const dds_qos_t *qos,
   const dds_listener_t *listener,
-  const struct nn_plist *sedp_plist);
+  const struct ddsi_plist *sedp_plist);
 
 /**
  * @brief Finds a named topic.
@@ -1017,8 +1064,9 @@ dds_create_topic_arbitrary (
  *             A valid topic handle.
  * @retval DDS_RETCODE_BAD_PARAMETER
  *             Participant was invalid.
+ * @retval DDS_RETCODE_PRECONDITION_NOT_MET
+ *             No topic of this name existed yet in the participant
  */
-/* TODO: Check list of retcodes is complete. */
 DDS_EXPORT dds_entity_t
 dds_find_topic(dds_entity_t participant, const char *name);
 
@@ -1034,8 +1082,6 @@ dds_find_topic(dds_entity_t participant, const char *name);
  * @retval DDS_RETCODE_OK
  *             Success.
  */
-/* TODO: do we need a convenience version as well that allocates and add a _s suffix to this one? */
-/* TODO: Check annotation. Could be _Out_writes_to_(size, return + 1) as well. */
 DDS_EXPORT dds_return_t
 dds_get_name(dds_entity_t topic, char *name, size_t size);
 
@@ -1200,6 +1246,7 @@ dds_wait_for_acks(dds_entity_t publisher_or_writer, dds_duration_t timeout);
 /**
  * @brief Creates a new instance of a DDS reader.
  *
+ * When a participant is used to create a reader, an implicit subscriber is created.
  * This implicit subscriber will be deleted automatically when the created reader
  * is deleted.
  *
@@ -1226,6 +1273,7 @@ dds_create_reader(
 /**
  * @brief Creates a new instance of a DDS reader with a custom history cache.
  *
+ * When a participant is used to create a reader, an implicit subscriber is created.
  * This implicit subscriber will be deleted automatically when the created reader
  * is deleted.
  *
@@ -1273,6 +1321,7 @@ dds_reader_wait_for_historical_data(
 /**
  * @brief Creates a new instance of a DDS writer.
  *
+ * When a participant is used to create a writer, an implicit publisher is created.
  * This implicit publisher will be deleted automatically when the created writer
  * is deleted.
  *
@@ -1308,7 +1357,7 @@ dds_create_writer(
  *
  * This operation registers an instance with a key value to the data writer and
  * returns an instance handle that could be used for successive write & dispose
- * operations. When the handle is not allocated, the function will return and
+ * operations. When the handle is not allocated, the function will return an
  * error and the handle will be un-touched.
  *
  * @param[in]  writer  The writer to which instance has be associated.
@@ -1696,12 +1745,28 @@ DDS_EXPORT void
 dds_write_flush(dds_entity_t writer);
 
 /**
- * @brief Write a CDR serialized value of a data instance
+ * @brief Write a serialized value of a data instance
+ *
+ * This call causes the writer to write the serialized value that is provided
+ * in the serdata argument.
  *
  * @param[in]  writer The writer entity.
- * @param[in]  serdata CDR serialized value to be written.
+ * @param[in]  serdata Serialized value to be written.
  *
  * @returns A dds_return_t indicating success or failure.
+ *
+ * @retval DDS_RETCODE_OK
+ *             The writer successfully wrote the serialized value.
+ * @retval DDS_RETCODE_ERROR
+ *             An internal error has occurred.
+ * @retval DDS_RETCODE_BAD_PARAMETER
+ *             One of the given arguments is not valid.
+ * @retval DDS_RETCODE_ILLEGAL_OPERATION
+ *             The operation is invoked on an inappropriate object.
+ * @retval DDS_RETCODE_ALREADY_DELETED
+ *             The entity has already been deleted.
+ * @retval DDS_RETCODE_TIMEOUT
+ *             The writer failed to write the serialized value reliably within the specified max_blocking_time.
  */
 DDS_EXPORT dds_return_t
 dds_writecdr(dds_entity_t writer, struct ddsi_serdata *serdata);
@@ -2003,7 +2068,7 @@ dds_waitset_attach(
  * @returns A dds_return_t indicating success or failure.
  *
  * @retval DDS_RETCODE_OK
- *             Entity attached.
+ *             Entity detached.
  * @retval DDS_RETCODE_ERROR
  *             An internal error has occurred.
  * @retval DDS_RETCODE_BAD_PARAMETER
@@ -2040,7 +2105,7 @@ dds_waitset_detach(
  * @returns A dds_return_t indicating success or failure.
  *
  * @retval DDS_RETCODE_OK
- *             Entity attached.
+ *             Trigger value set.
  * @retval DDS_RETCODE_ERROR
  *             An internal error has occurred.
  * @retval DDS_RETCODE_BAD_PARAMETER
@@ -2652,6 +2717,44 @@ dds_take_mask_wl(
   uint32_t maxs,
   uint32_t mask);
 
+/**
+ * @brief Access the collection of serialized data values (of same type) and
+ *        sample info from the data reader, readcondition or querycondition.
+ *
+ * This call accesses the serialized data from the data reader, readcondition or
+ * querycondition and makes it available to the application. The serialized data
+ * is made available through \ref ddsi_serdata structures. Once read the data is
+ * removed from the reader and cannot be 'read' or 'taken' again.
+ *
+ * Return value provides information about the number of samples read, which will
+ * be <= maxs. Based on the count, the buffer will contain serialized data to be
+ * read only when valid_data bit in sample info structure is set.
+ * The buffer required for data values, could be allocated explicitly or can
+ * use the memory from data reader to prevent copy. In the latter case, buffer and
+ * sample_info should be returned back, once it is no longer using the data.
+ *
+ * @param[in]  reader_or_condition Reader, readcondition or querycondition entity.
+ * @param[out] buf An array of pointers to \ref ddsi_serdata structures that contain
+ *                 the serialized data. The pointers can be NULL.
+ * @param[in]  maxs Maximum number of samples to read.
+ * @param[out] si Pointer to an array of \ref dds_sample_info_t returned for each data value.
+ * @param[in]  mask Filter the data based on dds_sample_state_t|dds_view_state_t|dds_instance_state_t.
+ *
+ * @returns A dds_return_t with the number of samples read or an error code.
+ *
+ * @retval >=0
+ *             Number of samples read.
+ * @retval DDS_RETCODE_ERROR
+ *             An internal error has occurred.
+ * @retval DDS_RETCODE_BAD_PARAMETER
+ *             One of the given arguments is not valid.
+ * @retval DDS_RETCODE_ILLEGAL_OPERATION
+ *             The operation is invoked on an inappropriate object.
+ * @retval DDS_RETCODE_ALREADY_DELETED
+ *             The entity has already been deleted.
+ * @retval DDS_RETCODE_PRECONDITION_NOT_MET
+ *             The precondition for this operation is not met.
+ */
 DDS_EXPORT dds_return_t
 dds_takecdr(
   dds_entity_t reader_or_condition,
@@ -3243,6 +3346,63 @@ DDS_EXPORT dds_builtintopic_endpoint_t *
 dds_get_matched_publication_data (
   dds_entity_t reader,
   dds_instance_handle_t ih);
+
+/**
+ * @brief This operation manually asserts the liveliness of a writer
+ * or domain participant.
+ *
+ * This operation manually asserts the liveliness of a writer
+ * or domain participant. This is used in combination with the Liveliness
+ * QoS policy to indicate that the entity remains active. This operation need
+ * only be used if the liveliness kind in the QoS is either
+ * DDS_LIVELINESS_MANUAL_BY_PARTICIPANT or DDS_LIVELINESS_MANUAL_BY_TOPIC.
+ *
+ * @param[in] entity  A domain participant or writer
+ *
+ * @returns A dds_return_t indicating success or failure.
+ *
+ * @retval DDS_RETCODE_OK
+ *             The operation was successful.
+ * @retval DDS_RETCODE_ILLEGAL_OPERATION
+ *             The operation is invoked on an inappropriate object.
+ */
+DDS_EXPORT dds_return_t
+dds_assert_liveliness (
+  dds_entity_t entity);
+
+/**
+ * @brief This operation allows making the domain's network stack
+ * temporarily deaf and/or mute. It is a support function for testing and,
+ * other special uses and is subject to change.
+ *
+ * @param[in] entity  A domain entity or an entity bound to a domain, such
+ *                    as a participant, reader or writer.
+ * @param[in] deaf    Whether to network stack should pretend to be deaf and
+ *                    ignore any incoming packets.
+ * @param[in] mute    Whether to network stack should pretend to be mute and
+ *                    discard any outgoing packets where it normally would.
+ *                    pass them to the operating system kernel for transmission.
+ * @param[in] reset_after  Any value less than INFINITY will cause it to
+ *                    set deaf = mute = false after reset_after ns have passed.
+ *                    This is done by an event scheduled for the appropriate
+ *                    time and otherwise forgotten. These events are not
+ *                    affected by subsequent calls to this function.
+ *
+ * @returns A dds_return_t indicating success or failure.
+ *
+ * @retval DDS_RETCODE_OK
+ *             The operation was successful.
+ * @retval DDS_BAD_PARAMETER
+ *             The entity parameter is not a valid parameter.
+ * @retval DDS_RETCODE_ILLEGAL_OPERATION
+ *             The operation is invoked on an inappropriate object.
+*/
+DDS_EXPORT dds_return_t
+dds_domain_set_deafmute (
+  dds_entity_t entity,
+  bool deaf,
+  bool mute,
+  dds_duration_t reset_after);
 
 #if defined (__cplusplus)
 }

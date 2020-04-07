@@ -27,24 +27,25 @@
 #include "dds/ddsi/q_misc.h"
 #include "dds/ddsi/q_config.h"
 #include "dds/ddsi/q_log.h"
-#include "dds/ddsi/q_plist.h"
+#include "dds/ddsi/ddsi_plist.h"
 #include "dds/ddsi/q_unused.h"
 #include "dds/ddsi/q_xevent.h"
 #include "dds/ddsi/q_addrset.h"
 #include "dds/ddsi/q_ddsi_discovery.h"
 
 #include "dds/ddsi/q_radmin.h"
-#include "dds/ddsi/q_ephash.h"
+#include "dds/ddsi/ddsi_entity_index.h"
 #include "dds/ddsi/q_entity.h"
-#include "dds/ddsi/q_globals.h"
+#include "dds/ddsi/ddsi_domaingv.h"
 #include "dds/ddsi/q_xmsg.h"
 #include "dds/ddsi/q_bswap.h"
 #include "dds/ddsi/q_transmit.h"
 #include "dds/ddsi/q_lease.h"
 #include "dds/ddsi/ddsi_serdata_default.h"
 #include "dds/ddsi/q_feature_check.h"
+#include "dds/ddsi/ddsi_pmd.h"
 
-static int get_locator (const struct q_globals *gv, nn_locator_t *loc, const nn_locators_t *locs, int uc_same_subnet)
+static int get_locator (const struct ddsi_domaingv *gv, nn_locator_t *loc, const nn_locators_t *locs, int uc_same_subnet)
 {
   struct nn_locators_one *l;
   nn_locator_t first, samenet;
@@ -116,7 +117,7 @@ static int get_locator (const struct q_globals *gv, nn_locator_t *loc, const nn_
       first_set = 1;
     }
 
-    switch (ddsi_is_nearby_address(gv, &l->loc, &gv->ownloc, (size_t) gv->n_interfaces, gv->interfaces))
+    switch (ddsi_is_nearby_address(&l->loc, &gv->ownloc, (size_t) gv->n_interfaces, gv->interfaces))
     {
       case DNAR_DISTANT:
         break;
@@ -158,7 +159,7 @@ static int get_locator (const struct q_globals *gv, nn_locator_t *loc, const nn_
  ***
  *****************************************************************************/
 
-static void maybe_add_pp_as_meta_to_as_disc (struct q_globals *gv, const struct addrset *as_meta)
+static void maybe_add_pp_as_meta_to_as_disc (struct ddsi_domaingv *gv, const struct addrset *as_meta)
 {
   if (addrset_empty_mc (as_meta) || !(gv->config.allowMulticast & AMC_SPDP))
   {
@@ -186,7 +187,7 @@ int spdp_write (struct participant *pp)
 {
   struct nn_xmsg *mpayload;
   struct nn_locators_one def_uni_loc_one, def_multi_loc_one, meta_uni_loc_one, meta_multi_loc_one;
-  nn_plist_t ps;
+  ddsi_plist_t ps;
   struct writer *wr;
   size_t size;
   char node[64];
@@ -214,18 +215,26 @@ int spdp_write (struct participant *pp)
      construct the payload. */
   mpayload = nn_xmsg_new (pp->e.gv->xmsgpool, &pp->e.guid.prefix, 0, NN_XMSG_KIND_DATA);
 
-  nn_plist_init_empty (&ps);
+  ddsi_plist_init_empty (&ps);
   ps.present |= PP_PARTICIPANT_GUID | PP_BUILTIN_ENDPOINT_SET |
-    PP_PROTOCOL_VERSION | PP_VENDORID | PP_PARTICIPANT_LEASE_DURATION;
+    PP_PROTOCOL_VERSION | PP_VENDORID | PP_PARTICIPANT_LEASE_DURATION |
+    PP_DOMAIN_ID;
   ps.participant_guid = pp->e.guid;
   ps.builtin_endpoint_set = pp->bes;
   ps.protocol_version.major = RTPS_MAJOR;
   ps.protocol_version.minor = RTPS_MINOR;
   ps.vendorid = NN_VENDORID_ECLIPSE;
-  if (pp->prismtech_bes)
+  ps.domain_id = pp->e.gv->config.extDomainId.value;
+  /* Be sure not to send a DOMAIN_TAG when it is the default (an empty)
+     string: it is an "incompatible-if-unrecognized" parameter, and so
+     implementations that don't understand the parameter will refuse to
+     discover us, and so sending the default would break backwards
+     compatibility. */
+  if (strcmp (pp->e.gv->config.domainTag, "") != 0)
   {
-    ps.present |= PP_PRISMTECH_BUILTIN_ENDPOINT_SET;
-    ps.prismtech_builtin_endpoint_set = pp->prismtech_bes;
+    ps.present |= PP_DOMAIN_TAG;
+    ps.aliased |= PP_DOMAIN_TAG;
+    ps.domain_tag = pp->e.gv->config.domainTag;
   }
   ps.default_unicast_locators.n = 1;
   ps.default_unicast_locators.first =
@@ -304,7 +313,7 @@ int spdp_write (struct participant *pp)
     ddsrt_mutex_unlock (&pp->e.gv->privileged_pp_lock);
 
     if (ddsrt_gethostname(node, sizeof(node)-1) < 0)
-      ddsrt_strlcpy (node, "unknown", sizeof (node));
+      (void) ddsrt_strlcpy (node, "unknown", sizeof (node));
     size = strlen(node) + strlen(DDS_VERSION) + strlen(DDS_HOST_NAME) + strlen(DDS_TARGET_NAME) + 4; /* + ///'\0' */
     ps.prismtech_participant_version_info.internals = ddsrt_malloc(size);
     (void) snprintf(ps.prismtech_participant_version_info.internals, size, "%s/%s/%s/%s", node, DDS_VERSION, DDS_HOST_NAME, DDS_TARGET_NAME);
@@ -312,15 +321,15 @@ int spdp_write (struct participant *pp)
   }
 
   /* Participant QoS's insofar as they are set, different from the default, and mapped to the SPDP data, rather than to the PrismTech-specific CMParticipant endpoint.  Currently, that means just USER_DATA. */
-  qosdiff = nn_xqos_delta (&pp->plist->qos, &pp->e.gv->default_plist_pp.qos, QP_USER_DATA);
+  qosdiff = ddsi_xqos_delta (&pp->plist->qos, &pp->e.gv->default_plist_pp.qos, QP_USER_DATA);
   if (pp->e.gv->config.explicitly_publish_qos_set_to_default)
     qosdiff |= ~QP_UNRECOGNIZED_INCOMPATIBLE_MASK;
 
   assert (ps.qos.present == 0);
-  nn_plist_addtomsg (mpayload, &ps, ~(uint64_t)0, 0);
-  nn_plist_addtomsg (mpayload, pp->plist, 0, qosdiff);
+  ddsi_plist_addtomsg (mpayload, &ps, ~(uint64_t)0, 0);
+  ddsi_plist_addtomsg (mpayload, pp->plist, 0, qosdiff);
   nn_xmsg_addpar_sentinel (mpayload);
-  nn_plist_fini (&ps);
+  ddsi_plist_fini (&ps);
 
   ret = write_mpayload (wr, 1, PID_PARTICIPANT_GUID, mpayload);
   nn_xmsg_free (mpayload);
@@ -330,7 +339,7 @@ int spdp_write (struct participant *pp)
 int spdp_dispose_unregister (struct participant *pp)
 {
   struct nn_xmsg *mpayload;
-  nn_plist_t ps;
+  ddsi_plist_t ps;
   struct writer *wr;
   int ret;
 
@@ -341,12 +350,12 @@ int spdp_dispose_unregister (struct participant *pp)
   }
 
   mpayload = nn_xmsg_new (pp->e.gv->xmsgpool, &pp->e.guid.prefix, 0, NN_XMSG_KIND_DATA);
-  nn_plist_init_empty (&ps);
+  ddsi_plist_init_empty (&ps);
   ps.present |= PP_PARTICIPANT_GUID;
   ps.participant_guid = pp->e.guid;
-  nn_plist_addtomsg (mpayload, &ps, ~(uint64_t)0, ~(uint64_t)0);
+  ddsi_plist_addtomsg (mpayload, &ps, ~(uint64_t)0, ~(uint64_t)0);
   nn_xmsg_addpar_sentinel (mpayload);
-  nn_plist_fini (&ps);
+  ddsi_plist_fini (&ps);
 
   ret = write_mpayload (wr, 0, PID_PARTICIPANT_GUID, mpayload);
   nn_xmsg_free (mpayload);
@@ -382,13 +391,13 @@ static unsigned pseudo_random_delay (const ddsi_guid_t *x, const ddsi_guid_t *y,
   return (unsigned) (m >> 32);
 }
 
-static void respond_to_spdp (const struct q_globals *gv, const ddsi_guid_t *dest_proxypp_guid)
+static void respond_to_spdp (const struct ddsi_domaingv *gv, const ddsi_guid_t *dest_proxypp_guid)
 {
-  struct ephash_enum_participant est;
+  struct entidx_enum_participant est;
   struct participant *pp;
   nn_mtime_t tnow = now_mt ();
-  ephash_enum_participant_init (&est, gv->guid_hash);
-  while ((pp = ephash_enum_participant_next (&est)) != NULL)
+  entidx_enum_participant_init (&est, gv->entity_index);
+  while ((pp = entidx_enum_participant_next (&est)) != NULL)
   {
     /* delay_base has 32 bits, so delay_norm is approximately 1s max;
        delay_max <= 1s by gv.config checks */
@@ -400,16 +409,16 @@ static void respond_to_spdp (const struct q_globals *gv, const ddsi_guid_t *dest
     GVTRACE (" %"PRId64, delay);
     if (!pp->e.gv->config.unicast_response_to_spdp_messages)
       /* pp can't reach gc_delete_participant => can safely reschedule */
-      resched_xevent_if_earlier (pp->spdp_xevent, tsched);
+      (void) resched_xevent_if_earlier (pp->spdp_xevent, tsched);
     else
       qxev_spdp (gv->xevents, tsched, &pp->e.guid, dest_proxypp_guid);
   }
-  ephash_enum_participant_fini (&est);
+  entidx_enum_participant_fini (&est);
 }
 
-static int handle_SPDP_dead (const struct receiver_state *rst, nn_wctime_t timestamp, const nn_plist_t *datap, unsigned statusinfo)
+static int handle_SPDP_dead (const struct receiver_state *rst, nn_wctime_t timestamp, const ddsi_plist_t *datap, unsigned statusinfo)
 {
-  struct q_globals * const gv = rst->gv;
+  struct ddsi_domaingv * const gv = rst->gv;
   ddsi_guid_t guid;
 
   GVLOGDISC ("SPDP ST%x", statusinfo);
@@ -435,7 +444,7 @@ static int handle_SPDP_dead (const struct receiver_state *rst, nn_wctime_t times
   return 1;
 }
 
-static void allowmulticast_aware_add_to_addrset (const struct q_globals *gv, uint32_t allow_multicast, struct addrset *as, const nn_locator_t *loc)
+static void allowmulticast_aware_add_to_addrset (const struct ddsi_domaingv *gv, uint32_t allow_multicast, struct addrset *as, const nn_locator_t *loc)
 {
 #if DDSI_INCLUDE_SSM
   if (ddsi_is_ssm_mcaddr (gv, loc))
@@ -455,30 +464,28 @@ static void allowmulticast_aware_add_to_addrset (const struct q_globals *gv, uin
   add_to_addrset (gv, as, loc);
 }
 
-static struct proxy_participant *find_ddsi2_proxy_participant (const struct ephash *guid_hash, const ddsi_guid_t *ppguid)
+static struct proxy_participant *find_ddsi2_proxy_participant (const struct entity_index *entidx, const ddsi_guid_t *ppguid)
 {
-  struct ephash_enum_proxy_participant it;
+  struct entidx_enum_proxy_participant it;
   struct proxy_participant *pp;
-  ephash_enum_proxy_participant_init (&it, guid_hash);
-  while ((pp = ephash_enum_proxy_participant_next (&it)) != NULL)
+  entidx_enum_proxy_participant_init (&it, entidx);
+  while ((pp = entidx_enum_proxy_participant_next (&it)) != NULL)
   {
     if (vendor_is_eclipse_or_opensplice (pp->vendor) && pp->e.guid.prefix.u[0] == ppguid->prefix.u[0] && pp->is_ddsi2_pp)
       break;
   }
-  ephash_enum_proxy_participant_fini (&it);
+  entidx_enum_proxy_participant_fini (&it);
   return pp;
 }
 
-static void make_participants_dependent_on_ddsi2 (struct q_globals *gv, const ddsi_guid_t *ddsi2guid, nn_wctime_t timestamp)
+static void make_participants_dependent_on_ddsi2 (struct ddsi_domaingv *gv, const ddsi_guid_t *ddsi2guid, nn_wctime_t timestamp)
 {
-  struct ephash_enum_proxy_participant it;
+  struct entidx_enum_proxy_participant it;
   struct proxy_participant *pp, *d2pp;
-  struct lease *d2pp_lease;
-  if ((d2pp = ephash_lookup_proxy_participant_guid (gv->guid_hash, ddsi2guid)) == NULL)
+  if ((d2pp = entidx_lookup_proxy_participant_guid (gv->entity_index, ddsi2guid)) == NULL)
     return;
-  d2pp_lease = ddsrt_atomic_ldvoidp (&d2pp->lease);
-  ephash_enum_proxy_participant_init (&it, gv->guid_hash);
-  while ((pp = ephash_enum_proxy_participant_next (&it)) != NULL)
+  entidx_enum_proxy_participant_init (&it, gv->entity_index);
+  while ((pp = entidx_enum_proxy_participant_next (&it)) != NULL)
   {
     if (vendor_is_eclipse_or_opensplice (pp->vendor) && pp->e.guid.prefix.u[0] == ddsi2guid->prefix.u[0] && !pp->is_ddsi2_pp)
     {
@@ -486,10 +493,10 @@ static void make_participants_dependent_on_ddsi2 (struct q_globals *gv, const dd
       ddsrt_mutex_lock (&pp->e.lock);
       pp->privileged_pp_guid = *ddsi2guid;
       ddsrt_mutex_unlock (&pp->e.lock);
-      proxy_participant_reassign_lease (pp, d2pp_lease);
+      proxy_participant_reassign_lease (pp, d2pp->lease);
       GVTRACE ("\n");
 
-      if (ephash_lookup_proxy_participant_guid (gv->guid_hash, ddsi2guid) == NULL)
+      if (entidx_lookup_proxy_participant_guid (gv->entity_index, ddsi2guid) == NULL)
       {
         /* If DDSI2 has been deleted here (i.e., very soon after
            having been created), we don't know whether pp will be
@@ -498,7 +505,7 @@ static void make_participants_dependent_on_ddsi2 (struct q_globals *gv, const dd
       }
     }
   }
-  ephash_enum_proxy_participant_fini (&it);
+  entidx_enum_proxy_participant_fini (&it);
 
   if (pp != NULL)
   {
@@ -507,18 +514,29 @@ static void make_participants_dependent_on_ddsi2 (struct q_globals *gv, const dd
   }
 }
 
-static int handle_SPDP_alive (const struct receiver_state *rst, seqno_t seq, nn_wctime_t timestamp, const nn_plist_t *datap)
+static int handle_SPDP_alive (const struct receiver_state *rst, seqno_t seq, nn_wctime_t timestamp, const ddsi_plist_t *datap)
 {
-  struct q_globals * const gv = rst->gv;
+  struct ddsi_domaingv * const gv = rst->gv;
   const unsigned bes_sedp_announcer_mask =
     NN_DISC_BUILTIN_ENDPOINT_SUBSCRIPTION_ANNOUNCER |
     NN_DISC_BUILTIN_ENDPOINT_PUBLICATION_ANNOUNCER;
   struct addrset *as_meta, *as_default;
-  unsigned builtin_endpoint_set;
-  unsigned prismtech_builtin_endpoint_set;
+  uint32_t builtin_endpoint_set;
   ddsi_guid_t privileged_pp_guid;
   dds_duration_t lease_duration;
   unsigned custom_flags = 0;
+
+  /* If advertised domain id or domain tag doesn't match, ignore the message.  Do this first to
+     minimize the impact such messages have. */
+  {
+    const uint32_t domain_id = (datap->present & PP_DOMAIN_ID) ? datap->domain_id : gv->config.extDomainId.value;
+    const char *domain_tag = (datap->present & PP_DOMAIN_TAG) ? datap->domain_tag : "";
+    if (domain_id != gv->config.extDomainId.value || strcmp (domain_tag, gv->config.domainTag) != 0)
+    {
+      GVTRACE ("ignore remote participant in mismatching domain %"PRIu32" tag \"%s\"\n", domain_id, domain_tag);
+      return 0;
+    }
+  }
 
   if (!(datap->present & PP_PARTICIPANT_GUID) || !(datap->present & PP_BUILTIN_ENDPOINT_SET))
   {
@@ -531,7 +549,6 @@ static int handle_SPDP_alive (const struct receiver_state *rst, seqno_t seq, nn_
      so it seemed; and yet they are necessary for correct operation,
      so add them. */
   builtin_endpoint_set = datap->builtin_endpoint_set;
-  prismtech_builtin_endpoint_set = (datap->present & PP_PRISMTECH_BUILTIN_ENDPOINT_SET) ? datap->prismtech_builtin_endpoint_set : 0;
   if (vendor_is_rti (rst->vendor) &&
       ((builtin_endpoint_set &
         (NN_BUILTIN_ENDPOINT_PARTICIPANT_MESSAGE_DATA_READER |
@@ -546,26 +563,11 @@ static int handle_SPDP_alive (const struct receiver_state *rst, seqno_t seq, nn_
       NN_BUILTIN_ENDPOINT_PARTICIPANT_MESSAGE_DATA_READER |
       NN_BUILTIN_ENDPOINT_PARTICIPANT_MESSAGE_DATA_WRITER;
   }
-  if ((datap->present & PP_PRISMTECH_PARTICIPANT_VERSION_INFO) &&
-      (datap->present & PP_PRISMTECH_BUILTIN_ENDPOINT_SET) &&
-      !(datap->prismtech_participant_version_info.flags & NN_PRISMTECH_FL_PTBES_FIXED_0))
-  {
-    /* FIXED_0 (bug 0) indicates that this is an updated version that advertises
-       CM readers/writers correctly (without it, we could make a reasonable guess,
-       but it would cause problems with cases where we would be happy with only
-       (say) CM participant. Have to do a backwards-compatible fix because it has
-       already been released with the flags all aliased to bits 0 and 1 ... */
-      GVLOGDISC (" (ptbes_fixed_0 %x)", prismtech_builtin_endpoint_set);
-      if (prismtech_builtin_endpoint_set & NN_DISC_BUILTIN_ENDPOINT_CM_PARTICIPANT_READER)
-        prismtech_builtin_endpoint_set |= NN_DISC_BUILTIN_ENDPOINT_CM_PUBLISHER_READER | NN_DISC_BUILTIN_ENDPOINT_CM_SUBSCRIBER_READER;
-      if (prismtech_builtin_endpoint_set & NN_DISC_BUILTIN_ENDPOINT_CM_PARTICIPANT_WRITER)
-        prismtech_builtin_endpoint_set |= NN_DISC_BUILTIN_ENDPOINT_CM_PUBLISHER_WRITER | NN_DISC_BUILTIN_ENDPOINT_CM_SUBSCRIBER_WRITER;
-  }
 
   /* Do we know this GUID already? */
   {
     struct entity_common *existing_entity;
-    if ((existing_entity = ephash_lookup_guid_untyped (gv->guid_hash, &datap->participant_guid)) == NULL)
+    if ((existing_entity = entidx_lookup_guid_untyped (gv->entity_index, &datap->participant_guid)) == NULL)
     {
       /* Local SPDP packets may be looped back, and that can include ones
          for participants currently being deleted.  The first thing that
@@ -586,12 +588,15 @@ static int handle_SPDP_alive (const struct receiver_state *rst, seqno_t seq, nn_
     else if (existing_entity->kind == EK_PROXY_PARTICIPANT)
     {
       struct proxy_participant *proxypp = (struct proxy_participant *) existing_entity;
+      struct lease *lease;
       int interesting = 0;
       RSTTRACE ("SPDP ST0 "PGUIDFMT" (known)", PGUID (datap->participant_guid));
       /* SPDP processing is so different from normal processing that we are
-         even skipping the automatic lease renewal.  Therefore do it regardless
-         of gv.config.arrival_of_data_asserts_pp_and_ep_liveliness. */
-      lease_renew (ddsrt_atomic_ldvoidp (&proxypp->lease), now_et ());
+         even skipping the automatic lease renewal. Note that proxy writers
+         that are not alive are not set alive here. This is done only when
+         data is received from a particular pwr (in handle_regular) */
+      if ((lease = ddsrt_atomic_ldvoidp (&proxypp->minl_auto)) != NULL)
+        lease_renew (lease, now_et ());
       ddsrt_mutex_lock (&proxypp->e.lock);
       if (proxypp->implicitly_created || seq > proxypp->seq)
       {
@@ -600,7 +605,7 @@ static int handle_SPDP_alive (const struct receiver_state *rst, seqno_t seq, nn_
           GVLOGDISC ("SPDP ST0 "PGUIDFMT, PGUID (datap->participant_guid));
         GVLOGDISC (proxypp->implicitly_created ? " (NEW was-implicitly-created)" : " (update)");
         proxypp->implicitly_created = 0;
-        update_proxy_participant_plist_locked (proxypp, seq, datap, UPD_PROXYPP_SPDP, timestamp);
+        update_proxy_participant_plist_locked (proxypp, seq, datap, timestamp);
       }
       ddsrt_mutex_unlock (&proxypp->e.lock);
       return interesting;
@@ -614,7 +619,7 @@ static int handle_SPDP_alive (const struct receiver_state *rst, seqno_t seq, nn_
     }
   }
 
-  GVLOGDISC ("SPDP ST0 "PGUIDFMT" bes %x ptbes %x NEW", PGUID (datap->participant_guid), builtin_endpoint_set, prismtech_builtin_endpoint_set);
+  GVLOGDISC ("SPDP ST0 "PGUIDFMT" bes %x NEW", PGUID (datap->participant_guid), builtin_endpoint_set);
 
   if (datap->present & PP_PARTICIPANT_LEASE_DURATION)
   {
@@ -647,7 +652,7 @@ static int handle_SPDP_alive (const struct receiver_state *rst, seqno_t seq, nn_
      the SPDP writer differs from the guid prefix of the new participant,
      we make it dependent on the writer's participant.  See also the
      lease expiration handling.  Note that the entityid MUST be
-     NN_ENTITYID_PARTICIPANT or ephash_lookup will assert.  So we only
+     NN_ENTITYID_PARTICIPANT or entidx_lookup will assert.  So we only
      zero the prefix. */
   privileged_pp_guid.prefix = rst->src_guid_prefix;
   privileged_pp_guid.entityid.u = NN_ENTITYID_PARTICIPANT;
@@ -664,7 +669,7 @@ static int handle_SPDP_alive (const struct receiver_state *rst, seqno_t seq, nn_
     /* Non-DDSI2 participants are made dependent on DDSI2 (but DDSI2
        itself need not be discovered yet) */
     struct proxy_participant *ddsi2;
-    if ((ddsi2 = find_ddsi2_proxy_participant (gv->guid_hash, &datap->participant_guid)) == NULL)
+    if ((ddsi2 = find_ddsi2_proxy_participant (gv->entity_index, &datap->participant_guid)) == NULL)
       memset (&privileged_pp_guid.prefix, 0, sizeof (privileged_pp_guid.prefix));
     else
     {
@@ -733,7 +738,7 @@ static int handle_SPDP_alive (const struct receiver_state *rst, seqno_t seq, nn_
   }
 
   GVLOGDISC (" QOS={");
-  nn_log_xqos (DDS_LC_DISCOVERY, &gv->logconfig, &datap->qos);
+  ddsi_xqos_log (DDS_LC_DISCOVERY, &gv->logconfig, &datap->qos);
   GVLOGDISC ("}\n");
 
   maybe_add_pp_as_meta_to_as_disc (gv, as_meta);
@@ -743,7 +748,6 @@ static int handle_SPDP_alive (const struct receiver_state *rst, seqno_t seq, nn_
     gv,
     &datap->participant_guid,
     builtin_endpoint_set,
-    prismtech_builtin_endpoint_set,
     &privileged_pp_guid,
     as_default,
     as_meta,
@@ -783,7 +787,7 @@ static int handle_SPDP_alive (const struct receiver_state *rst, seqno_t seq, nn_
     /* If we just created a participant dependent on DDSI2, make sure
        DDSI2 still exists.  There is a risk of racing the lease expiry
        of DDSI2. */
-    if (ephash_lookup_proxy_participant_guid (gv->guid_hash, &privileged_pp_guid) == NULL)
+    if (entidx_lookup_proxy_participant_guid (gv->entity_index, &privileged_pp_guid) == NULL)
     {
       GVLOGDISC ("make_participants_dependent_on_ddsi2: ddsi2 "PGUIDFMT" is no more, delete "PGUIDFMT"\n",
                  PGUID (privileged_pp_guid), PGUID (datap->participant_guid));
@@ -795,7 +799,7 @@ static int handle_SPDP_alive (const struct receiver_state *rst, seqno_t seq, nn_
 
 static void handle_SPDP (const struct receiver_state *rst, seqno_t seq, nn_wctime_t timestamp, unsigned statusinfo, const void *vdata, uint32_t len)
 {
-  struct q_globals * const gv = rst->gv;
+  struct ddsi_domaingv * const gv = rst->gv;
   const struct CDRHeader *data = vdata; /* built-ins not deserialized (yet) */
   if (data == NULL)
   {
@@ -804,8 +808,8 @@ static void handle_SPDP (const struct receiver_state *rst, seqno_t seq, nn_wctim
   }
   else
   {
-    nn_plist_t decoded_data;
-    nn_plist_src_t src;
+    ddsi_plist_t decoded_data;
+    ddsi_plist_src_t src;
     int interesting = 0;
     dds_return_t plist_ret;
     src.protocol_version = rst->protocol_version;
@@ -816,7 +820,7 @@ static void handle_SPDP (const struct receiver_state *rst, seqno_t seq, nn_wctim
     src.strict = NN_STRICT_P (gv->config);
     src.factory = gv->m_factory;
     src.logconfig = &gv->logconfig;
-    if ((plist_ret = nn_plist_init_frommsg (&decoded_data, NULL, ~(uint64_t)0, ~(uint64_t)0, &src)) < 0)
+    if ((plist_ret = ddsi_plist_init_frommsg (&decoded_data, NULL, ~(uint64_t)0, ~(uint64_t)0, &src)) < 0)
     {
       if (plist_ret != DDS_RETCODE_UNSUPPORTED)
         GVWARNING ("SPDP (vendor %u.%u): invalid qos/parameters\n", src.vendorid.id[0], src.vendorid.id[1]);
@@ -836,14 +840,14 @@ static void handle_SPDP (const struct receiver_state *rst, seqno_t seq, nn_wctim
         break;
     }
 
-    nn_plist_fini (&decoded_data);
+    ddsi_plist_fini (&decoded_data);
     GVLOG (interesting ? DDS_LC_DISCOVERY : DDS_LC_TRACE, "\n");
   }
 }
 
 struct add_locator_to_ps_arg {
-  struct q_globals *gv;
-  nn_plist_t *ps;
+  struct ddsi_domaingv *gv;
+  ddsi_plist_t *ps;
 };
 
 static void add_locator_to_ps (const nn_locator_t *loc, void *varg)
@@ -890,14 +894,14 @@ static int sedp_write_endpoint
    const struct entity_common *common, const struct endpoint_common *epcommon,
    const dds_qos_t *xqos, struct addrset *as)
 {
-  struct q_globals * const gv = wr->e.gv;
+  struct ddsi_domaingv * const gv = wr->e.gv;
   const dds_qos_t *defqos = is_writer_entityid (epguid->entityid) ? &gv->default_xqos_wr : &gv->default_xqos_rd;
   struct nn_xmsg *mpayload;
   uint64_t qosdiff;
-  nn_plist_t ps;
+  ddsi_plist_t ps;
   int ret;
 
-  nn_plist_init_empty (&ps);
+  ddsi_plist_init_empty (&ps);
   ps.present |= PP_ENDPOINT_GUID;
   ps.endpoint_guid = *epguid;
 
@@ -936,7 +940,7 @@ static int sedp_write_endpoint
      the default. */
     if (!is_writer_entityid (epguid->entityid))
     {
-      const struct reader *rd = ephash_lookup_reader_guid (gv->guid_hash, epguid);
+      const struct reader *rd = entidx_lookup_reader_guid (gv->entity_index, epguid);
       assert (rd);
       if (rd->favours_ssm)
       {
@@ -946,7 +950,7 @@ static int sedp_write_endpoint
     }
 #endif
 
-    qosdiff = nn_xqos_delta (xqos, defqos, ~(uint64_t)0);
+    qosdiff = ddsi_xqos_delta (xqos, defqos, ~(uint64_t)0);
     if (gv->config.explicitly_publish_qos_set_to_default)
       qosdiff |= ~QP_UNRECOGNIZED_INCOMPATIBLE_MASK;
 
@@ -964,10 +968,10 @@ static int sedp_write_endpoint
      important, except that they need to be set to reasonable things
      or it'll crash */
   mpayload = nn_xmsg_new (gv->xmsgpool, &wr->e.guid.prefix, 0, NN_XMSG_KIND_DATA);
-  nn_plist_addtomsg (mpayload, &ps, ~(uint64_t)0, ~(uint64_t)0);
-  if (xqos) nn_xqos_addtomsg (mpayload, xqos, qosdiff);
+  ddsi_plist_addtomsg (mpayload, &ps, ~(uint64_t)0, ~(uint64_t)0);
+  if (xqos) ddsi_xqos_addtomsg (mpayload, xqos, qosdiff);
   nn_xmsg_addpar_sentinel (mpayload);
-  nn_plist_fini (&ps);
+  ddsi_plist_fini (&ps);
 
   GVLOGDISC ("sedp: write for "PGUIDFMT" via "PGUIDFMT"\n", PGUID (*epguid), PGUID (wr->e.guid));
   ret = write_mpayload (wr, alive, PID_ENDPOINT_GUID, mpayload);
@@ -1045,10 +1049,10 @@ static const char *durability_to_string (dds_durability_kind_t k)
   return "undefined-durability";
 }
 
-static struct proxy_participant *implicitly_create_proxypp (struct q_globals *gv, const ddsi_guid_t *ppguid, nn_plist_t *datap /* note: potentially modifies datap */, const ddsi_guid_prefix_t *src_guid_prefix, nn_vendorid_t vendorid, nn_wctime_t timestamp, seqno_t seq)
+static struct proxy_participant *implicitly_create_proxypp (struct ddsi_domaingv *gv, const ddsi_guid_t *ppguid, ddsi_plist_t *datap /* note: potentially modifies datap */, const ddsi_guid_prefix_t *src_guid_prefix, nn_vendorid_t vendorid, nn_wctime_t timestamp, seqno_t seq)
 {
   ddsi_guid_t privguid;
-  nn_plist_t pp_plist;
+  ddsi_plist_t pp_plist;
 
   if (memcmp (&ppguid->prefix, src_guid_prefix, sizeof (ppguid->prefix)) == 0)
     /* if the writer is owned by the participant itself, we're not interested */
@@ -1056,7 +1060,7 @@ static struct proxy_participant *implicitly_create_proxypp (struct q_globals *gv
 
   privguid.prefix = *src_guid_prefix;
   privguid.entityid = to_entityid (NN_ENTITYID_PARTICIPANT);
-  nn_plist_init_empty(&pp_plist);
+  ddsi_plist_init_empty(&pp_plist);
 
   if (vendor_is_cloud (vendorid))
   {
@@ -1082,7 +1086,7 @@ static struct proxy_participant *implicitly_create_proxypp (struct q_globals *gv
        doing anything about (1).  That means we fall back to the legacy mode of locally generating
        GIDs but leaving the system id unchanged if the remote is OSPL.  */
     actual_vendorid = (datap->present & PP_VENDORID) ?  datap->vendorid : vendorid;
-    new_proxy_participant(gv, ppguid, 0, 0, &privguid, new_addrset(), new_addrset(), &pp_plist, T_NEVER, actual_vendorid, CF_IMPLICITLY_CREATED_PROXYPP, timestamp, seq);
+    new_proxy_participant(gv, ppguid, 0, &privguid, new_addrset(), new_addrset(), &pp_plist, T_NEVER, actual_vendorid, CF_IMPLICITLY_CREATED_PROXYPP, timestamp, seq);
   }
   else if (ppguid->prefix.u[0] == src_guid_prefix->u[0] && vendor_is_eclipse_or_opensplice (vendorid))
   {
@@ -1090,7 +1094,7 @@ static struct proxy_participant *implicitly_create_proxypp (struct q_globals *gv
        readers or writers, only if remote ddsi2 is provably running
        with a minimal built-in endpoint set */
     struct proxy_participant *privpp;
-    if ((privpp = ephash_lookup_proxy_participant_guid (gv->guid_hash, &privguid)) == NULL) {
+    if ((privpp = entidx_lookup_proxy_participant_guid (gv->entity_index, &privguid)) == NULL) {
       GVTRACE (" unknown-src-proxypp?\n");
       goto err;
     } else if (!privpp->is_ddsi2_pp) {
@@ -1101,9 +1105,9 @@ static struct proxy_participant *implicitly_create_proxypp (struct q_globals *gv
       goto err;
     } else {
       struct addrset *as_default, *as_meta;
-      nn_plist_t tmp_plist;
+      ddsi_plist_t tmp_plist;
       GVTRACE (" from-ddsi2 "PGUIDFMT, PGUID (privguid));
-      nn_plist_init_empty (&pp_plist);
+      ddsi_plist_init_empty (&pp_plist);
 
       ddsrt_mutex_lock (&privpp->e.lock);
       as_default = ref_addrset(privpp->as_default);
@@ -1112,23 +1116,23 @@ static struct proxy_participant *implicitly_create_proxypp (struct q_globals *gv
       tmp_plist = *privpp->plist;
       tmp_plist.present = PP_PARTICIPANT_GUID | PP_PRISMTECH_PARTICIPANT_VERSION_INFO;
       tmp_plist.participant_guid = *ppguid;
-      nn_plist_mergein_missing (&pp_plist, &tmp_plist, ~(uint64_t)0, ~(uint64_t)0);
+      ddsi_plist_mergein_missing (&pp_plist, &tmp_plist, ~(uint64_t)0, ~(uint64_t)0);
       ddsrt_mutex_unlock (&privpp->e.lock);
 
       pp_plist.prismtech_participant_version_info.flags &= ~NN_PRISMTECH_FL_PARTICIPANT_IS_DDSI2;
-      new_proxy_participant (gv, ppguid, 0, 0, &privguid, as_default, as_meta, &pp_plist, T_NEVER, vendorid, CF_IMPLICITLY_CREATED_PROXYPP | CF_PROXYPP_NO_SPDP, timestamp, seq);
+      new_proxy_participant (gv, ppguid, 0, &privguid, as_default, as_meta, &pp_plist, T_NEVER, vendorid, CF_IMPLICITLY_CREATED_PROXYPP | CF_PROXYPP_NO_SPDP, timestamp, seq);
     }
   }
 
  err:
-  nn_plist_fini (&pp_plist);
-  return ephash_lookup_proxy_participant_guid (gv->guid_hash, ppguid);
+  ddsi_plist_fini (&pp_plist);
+  return entidx_lookup_proxy_participant_guid (gv->entity_index, ppguid);
 }
 
-static void handle_SEDP_alive (const struct receiver_state *rst, seqno_t seq, nn_plist_t *datap /* note: potentially modifies datap */, const ddsi_guid_prefix_t *src_guid_prefix, nn_vendorid_t vendorid, nn_wctime_t timestamp)
+static void handle_SEDP_alive (const struct receiver_state *rst, seqno_t seq, ddsi_plist_t *datap /* note: potentially modifies datap */, const ddsi_guid_prefix_t *src_guid_prefix, nn_vendorid_t vendorid, nn_wctime_t timestamp)
 {
 #define E(msg, lbl) do { GVLOGDISC (msg); goto lbl; } while (0)
-  struct q_globals * const gv = rst->gv;
+  struct ddsi_domaingv * const gv = rst->gv;
   struct proxy_participant *pp;
   struct proxy_writer * pwr = NULL;
   struct proxy_reader * prd = NULL;
@@ -1152,7 +1156,7 @@ static void handle_SEDP_alive (const struct receiver_state *rst, seqno_t seq, nn
   if (is_deleted_participant_guid (gv->deleted_participants, &ppguid, DPG_REMOTE))
     E (" local dead pp?\n", err);
 
-  if (ephash_lookup_participant_guid (gv->guid_hash, &ppguid) != NULL)
+  if (entidx_lookup_participant_guid (gv->entity_index, &ppguid) != NULL)
     E (" local pp?\n", err);
 
   if (is_builtin_entityid (datap->endpoint_guid.entityid, vendorid))
@@ -1162,7 +1166,7 @@ static void handle_SEDP_alive (const struct receiver_state *rst, seqno_t seq, nn
   if (!(datap->qos.present & QP_TYPE_NAME))
     E (" no typename?\n", err);
 
-  if ((pp = ephash_lookup_proxy_participant_guid (gv->guid_hash, &ppguid)) == NULL)
+  if ((pp = entidx_lookup_proxy_participant_guid (gv->entity_index, &ppguid)) == NULL)
   {
     GVLOGDISC (" unknown-proxypp");
     if ((pp = implicitly_create_proxypp (gv, &ppguid, datap, src_guid_prefix, vendorid, timestamp, 0)) == NULL)
@@ -1174,11 +1178,11 @@ static void handle_SEDP_alive (const struct receiver_state *rst, seqno_t seq, nn
   xqos = &datap->qos;
   is_writer = is_writer_entityid (datap->endpoint_guid.entityid);
   if (!is_writer)
-    nn_xqos_mergein_missing (xqos, &gv->default_xqos_rd, ~(uint64_t)0);
+    ddsi_xqos_mergein_missing (xqos, &gv->default_xqos_rd, ~(uint64_t)0);
   else if (vendor_is_eclipse_or_prismtech(vendorid))
-    nn_xqos_mergein_missing (xqos, &gv->default_xqos_wr, ~(uint64_t)0);
+    ddsi_xqos_mergein_missing (xqos, &gv->default_xqos_wr, ~(uint64_t)0);
   else
-    nn_xqos_mergein_missing (xqos, &gv->default_xqos_wr_nad, ~(uint64_t)0);
+    ddsi_xqos_mergein_missing (xqos, &gv->default_xqos_wr_nad, ~(uint64_t)0);
 
   /* After copy + merge, should have at least the ones present in the
      input.  Also verify reliability and durability are present,
@@ -1204,11 +1208,11 @@ static void handle_SEDP_alive (const struct receiver_state *rst, seqno_t seq, nn
 
   if (is_writer)
   {
-    pwr = ephash_lookup_proxy_writer_guid (gv->guid_hash, &datap->endpoint_guid);
+    pwr = entidx_lookup_proxy_writer_guid (gv->entity_index, &datap->endpoint_guid);
   }
   else
   {
-    prd = ephash_lookup_proxy_reader_guid (gv->guid_hash, &datap->endpoint_guid);
+    prd = entidx_lookup_proxy_reader_guid (gv->entity_index, &datap->endpoint_guid);
   }
   if (pwr || prd)
   {
@@ -1218,11 +1222,10 @@ static void handle_SEDP_alive (const struct receiver_state *rst, seqno_t seq, nn
     GVLOGDISC (" known%s", vendor_is_cloud (vendorid) ? "-DS" : "");
     if (vendor_is_cloud (vendorid) && pp->implicitly_created && memcmp(&pp->privileged_pp_guid.prefix, src_guid_prefix, sizeof(pp->privileged_pp_guid.prefix)) != 0)
     {
-      nn_etime_t never = { T_NEVER };
       GVLOGDISC (" "PGUIDFMT" attach-to-DS "PGUIDFMT, PGUID(pp->e.guid), PGUIDPREFIX(*src_guid_prefix), pp->privileged_pp_guid.entityid.u);
       ddsrt_mutex_lock (&pp->e.lock);
       pp->privileged_pp_guid.prefix = *src_guid_prefix;
-      lease_set_expiry(ddsrt_atomic_ldvoidp(&pp->lease), never);
+      lease_set_expiry(pp->lease, NN_ETIME_NEVER);
       ddsrt_mutex_unlock (&pp->e.lock);
     }
     GVLOGDISC ("\n");
@@ -1267,7 +1270,7 @@ static void handle_SEDP_alive (const struct receiver_state *rst, seqno_t seq, nn
   GVLOGDISC (" ssm=%u", ssm);
 #endif
   GVLOGDISC (") QOS={");
-  nn_log_xqos (DDS_LC_DISCOVERY, &gv->logconfig, xqos);
+  ddsi_xqos_log (DDS_LC_DISCOVERY, &gv->logconfig, xqos);
   GVLOGDISC ("}\n");
 
   if ((datap->endpoint_guid.entityid.u & NN_ENTITYID_SOURCE_MASK) == NN_ENTITYID_SOURCE_VENDOR && !vendor_is_eclipse_or_prismtech (vendorid))
@@ -1321,9 +1324,9 @@ err:
 #undef E
 }
 
-static void handle_SEDP_dead (const struct receiver_state *rst, nn_plist_t *datap, nn_wctime_t timestamp)
+static void handle_SEDP_dead (const struct receiver_state *rst, ddsi_plist_t *datap, nn_wctime_t timestamp)
 {
-  struct q_globals * const gv = rst->gv;
+  struct ddsi_domaingv * const gv = rst->gv;
   int res;
   if (!(datap->present & PP_ENDPOINT_GUID))
   {
@@ -1332,19 +1335,15 @@ static void handle_SEDP_dead (const struct receiver_state *rst, nn_plist_t *data
   }
   GVLOGDISC (" "PGUIDFMT, PGUID (datap->endpoint_guid));
   if (is_writer_entityid (datap->endpoint_guid.entityid))
-  {
     res = delete_proxy_writer (gv, &datap->endpoint_guid, timestamp, 0);
-  }
   else
-  {
     res = delete_proxy_reader (gv, &datap->endpoint_guid, timestamp, 0);
-  }
   GVLOGDISC (" %s\n", (res < 0) ? " unknown" : " delete");
 }
 
 static void handle_SEDP (const struct receiver_state *rst, seqno_t seq, nn_wctime_t timestamp, unsigned statusinfo, const void *vdata, uint32_t len)
 {
-  struct q_globals * const gv = rst->gv;
+  struct ddsi_domaingv * const gv = rst->gv;
   const struct CDRHeader *data = vdata; /* built-ins not deserialized (yet) */
   GVLOGDISC ("SEDP ST%x", statusinfo);
   if (data == NULL)
@@ -1354,8 +1353,8 @@ static void handle_SEDP (const struct receiver_state *rst, seqno_t seq, nn_wctim
   }
   else
   {
-    nn_plist_t decoded_data;
-    nn_plist_src_t src;
+    ddsi_plist_t decoded_data;
+    ddsi_plist_src_t src;
     dds_return_t plist_ret;
     src.protocol_version = rst->protocol_version;
     src.vendorid = rst->vendor;
@@ -1365,7 +1364,7 @@ static void handle_SEDP (const struct receiver_state *rst, seqno_t seq, nn_wctim
     src.strict = NN_STRICT_P (gv->config);
     src.factory = gv->m_factory;
     src.logconfig = &gv->logconfig;
-    if ((plist_ret = nn_plist_init_frommsg (&decoded_data, NULL, ~(uint64_t)0, ~(uint64_t)0, &src)) < 0)
+    if ((plist_ret = ddsi_plist_init_frommsg (&decoded_data, NULL, ~(uint64_t)0, ~(uint64_t)0, &src)) < 0)
     {
       if (plist_ret != DDS_RETCODE_UNSUPPORTED)
         GVWARNING ("SEDP (vendor %u.%u): invalid qos/parameters\n", src.vendorid.id[0], src.vendorid.id[1]);
@@ -1385,7 +1384,7 @@ static void handle_SEDP (const struct receiver_state *rst, seqno_t seq, nn_wctim
         break;
     }
 
-    nn_plist_fini (&decoded_data);
+    ddsi_plist_fini (&decoded_data);
   }
 }
 
@@ -1395,7 +1394,7 @@ static void handle_SEDP (const struct receiver_state *rst, seqno_t seq, nn_wctim
  ***
  *****************************************************************************/
 
-int sedp_write_topic (struct participant *pp, const struct nn_plist *datap)
+int sedp_write_topic (struct participant *pp, const struct ddsi_plist *datap)
 {
   struct writer *sedp_wr;
   struct nn_xmsg *mpayload;
@@ -1412,10 +1411,10 @@ int sedp_write_topic (struct participant *pp, const struct nn_plist *datap)
   sedp_wr = get_sedp_writer (pp, NN_ENTITYID_SEDP_BUILTIN_TOPIC_WRITER);
 
   mpayload = nn_xmsg_new (sedp_wr->e.gv->xmsgpool, &sedp_wr->e.guid.prefix, 0, NN_XMSG_KIND_DATA);
-  delta = nn_xqos_delta (&datap->qos, &sedp_wr->e.gv->default_xqos_tp, ~(uint64_t)0);
+  delta = ddsi_xqos_delta (&datap->qos, &sedp_wr->e.gv->default_xqos_tp, ~(uint64_t)0);
   if (sedp_wr->e.gv->config.explicitly_publish_qos_set_to_default)
     delta |= ~QP_UNRECOGNIZED_INCOMPATIBLE_MASK;
-  nn_plist_addtomsg (mpayload, datap, ~(uint64_t)0, delta);
+  ddsi_plist_addtomsg (mpayload, datap, ~(uint64_t)0, delta);
   nn_xmsg_addpar_sentinel (mpayload);
 
   ETRACE (pp, "sedp: write topic %s via "PGUIDFMT"\n", datap->qos.topic_name, PGUID (sedp_wr->e.guid));
@@ -1424,104 +1423,6 @@ int sedp_write_topic (struct participant *pp, const struct nn_plist *datap)
   return ret;
 }
 
-
-/******************************************************************************
- ***
- *** PrismTech CM data
- ***
- *****************************************************************************/
-
-int sedp_write_cm_participant (struct participant *pp, int alive)
-{
-  struct writer * sedp_wr;
-  struct nn_xmsg *mpayload;
-  nn_plist_t ps;
-  int ret;
-
-  if (pp->e.onlylocal) {
-      /* This topic is only locally available. */
-      return 0;
-  }
-
-  sedp_wr = get_sedp_writer (pp, NN_ENTITYID_SEDP_BUILTIN_CM_PARTICIPANT_WRITER);
-
-  /* The message is only a temporary thing, used only for encoding
-   the QoS and other settings. So the header fields aren't really
-   important, except that they need to be set to reasonable things
-   or it'll crash */
-  mpayload = nn_xmsg_new (sedp_wr->e.gv->xmsgpool, &sedp_wr->e.guid.prefix, 0, NN_XMSG_KIND_DATA);
-  nn_plist_init_empty (&ps);
-  ps.present = PP_PARTICIPANT_GUID;
-  ps.participant_guid = pp->e.guid;
-  nn_plist_addtomsg (mpayload, &ps, ~(uint64_t)0, ~(uint64_t)0);
-  nn_plist_fini (&ps);
-  if (alive)
-  {
-    nn_plist_addtomsg (mpayload, pp->plist,
-                       PP_PRISMTECH_NODE_NAME | PP_PRISMTECH_EXEC_NAME | PP_PRISMTECH_PROCESS_ID |
-                       PP_ENTITY_NAME,
-                       QP_PRISMTECH_ENTITY_FACTORY);
-  }
-  nn_xmsg_addpar_sentinel (mpayload);
-
-  ETRACE (pp, "sedp: write CMParticipant ST%x for "PGUIDFMT" via "PGUIDFMT"\n",
-          alive ? 0 : NN_STATUSINFO_DISPOSE | NN_STATUSINFO_UNREGISTER, PGUID (pp->e.guid), PGUID (sedp_wr->e.guid));
-  ret = write_mpayload (sedp_wr, alive, PID_PARTICIPANT_GUID, mpayload);
-  nn_xmsg_free (mpayload);
-  return ret;
-}
-
-static void handle_SEDP_CM (const struct receiver_state *rst, ddsi_entityid_t wr_entity_id, nn_wctime_t timestamp, uint32_t statusinfo, const void *vdata, uint32_t len)
-{
-  struct q_globals * const gv = rst->gv;
-  const struct CDRHeader *data = vdata; /* built-ins not deserialized (yet) */
-  GVLOGDISC ("SEDP_CM ST%x", statusinfo);
-  assert (wr_entity_id.u == NN_ENTITYID_SEDP_BUILTIN_CM_PARTICIPANT_WRITER);
-  (void) wr_entity_id;
-  if (data == NULL)
-  {
-    GVLOGDISC (" no payload?\n");
-    return;
-  }
-  else
-  {
-    nn_plist_t decoded_data;
-    nn_plist_src_t src;
-    dds_return_t plist_ret;
-    src.protocol_version = rst->protocol_version;
-    src.vendorid = rst->vendor;
-    src.encoding = data->identifier;
-    src.buf = (unsigned char *) data + 4;
-    src.bufsz = len - 4;
-    src.strict = NN_STRICT_P (gv->config);
-    src.factory = gv->m_factory;
-    src.logconfig = &gv->logconfig;
-    if ((plist_ret = nn_plist_init_frommsg (&decoded_data, NULL, ~(uint64_t)0, ~(uint64_t)0, &src)) < 0)
-    {
-      if (plist_ret != DDS_RETCODE_UNSUPPORTED)
-        GVWARNING ("SEDP_CM (vendor %u.%u): invalid qos/parameters\n", src.vendorid.id[0], src.vendorid.id[1]);
-      return;
-    }
-
-    /* ignore: dispose/unregister is tied to deleting the participant, which will take care of the dispose/unregister for us */;
-    if ((statusinfo & (NN_STATUSINFO_DISPOSE | NN_STATUSINFO_UNREGISTER)) == 0)
-    {
-      struct proxy_participant *proxypp;
-      if (!(decoded_data.present & PP_PARTICIPANT_GUID))
-        GVWARNING ("SEDP_CM (vendor %u.%u): missing participant GUID\n", src.vendorid.id[0], src.vendorid.id[1]);
-      else
-      {
-        if ((proxypp = ephash_lookup_proxy_participant_guid (gv->guid_hash, &decoded_data.participant_guid)) == NULL)
-          proxypp = implicitly_create_proxypp (gv, &decoded_data.participant_guid, &decoded_data, &rst->src_guid_prefix, rst->vendor, timestamp, 0);
-        if (proxypp != NULL)
-          update_proxy_participant_plist (proxypp, 0, &decoded_data, UPD_PROXYPP_CM, timestamp);
-      }
-    }
-
-    nn_plist_fini (&decoded_data);
-  }
-  GVLOGDISC ("\n");
-}
 
 /******************************************************************************
  *****************************************************************************/
@@ -1559,7 +1460,7 @@ static int defragment (unsigned char **datap, const struct nn_rdata *fragchain, 
 
 int builtins_dqueue_handler (const struct nn_rsample_info *sampleinfo, const struct nn_rdata *fragchain, UNUSED_ARG (const ddsi_guid_t *rdguid), UNUSED_ARG (void *qarg))
 {
-  struct q_globals * const gv = sampleinfo->rst->gv;
+  struct ddsi_domaingv * const gv = sampleinfo->rst->gv;
   struct proxy_writer *pwr;
   struct {
     struct CDRHeader cdr;
@@ -1572,7 +1473,7 @@ int builtins_dqueue_handler (const struct nn_rsample_info *sampleinfo, const str
   ddsi_guid_t srcguid;
   Data_DataFrag_common_t *msg;
   unsigned char data_smhdr_flags;
-  nn_plist_t qos;
+  ddsi_plist_t qos;
   unsigned char *datap;
   int needs_free;
   uint32_t datasz = sampleinfo->size;
@@ -1610,12 +1511,12 @@ int builtins_dqueue_handler (const struct nn_rsample_info *sampleinfo, const str
   need_keyhash = (datasz == 0 || (data_smhdr_flags & (DATA_FLAG_KEYFLAG | DATA_FLAG_DATAFLAG)) == 0);
   if (!(sampleinfo->complex_qos || need_keyhash))
   {
-    nn_plist_init_empty (&qos);
+    ddsi_plist_init_empty (&qos);
     statusinfo = sampleinfo->statusinfo;
   }
   else
   {
-    nn_plist_src_t src;
+    ddsi_plist_src_t src;
     size_t qos_offset = NN_RDATA_SUBMSG_OFF (fragchain) + offsetof (Data_DataFrag_common_t, octetsToInlineQos) + sizeof (msg->octetsToInlineQos) + msg->octetsToInlineQos;
     dds_return_t plist_ret;
     src.protocol_version = sampleinfo->rst->protocol_version;
@@ -1626,7 +1527,7 @@ int builtins_dqueue_handler (const struct nn_rsample_info *sampleinfo, const str
     src.strict = NN_STRICT_P (gv->config);
     src.factory = gv->m_factory;
     src.logconfig = &gv->logconfig;
-    if ((plist_ret = nn_plist_init_frommsg (&qos, NULL, PP_STATUSINFO | PP_KEYHASH, 0, &src)) < 0)
+    if ((plist_ret = ddsi_plist_init_frommsg (&qos, NULL, PP_STATUSINFO | PP_KEYHASH, 0, &src)) < 0)
     {
       if (plist_ret != DDS_RETCODE_UNSUPPORTED)
         GVWARNING ("data(builtin, vendor %u.%u): "PGUIDFMT" #%"PRId64": invalid inline qos\n",
@@ -1689,12 +1590,7 @@ int builtins_dqueue_handler (const struct nn_rsample_info *sampleinfo, const str
       switch (srcguid.entityid.u)
       {
         case NN_ENTITYID_SPDP_BUILTIN_PARTICIPANT_WRITER:
-        case NN_ENTITYID_SEDP_BUILTIN_CM_PARTICIPANT_WRITER:
           pid = PID_PARTICIPANT_GUID;
-          break;
-        case NN_ENTITYID_SEDP_BUILTIN_CM_PUBLISHER_WRITER:
-        case NN_ENTITYID_SEDP_BUILTIN_CM_SUBSCRIBER_WRITER:
-          pid = PID_GROUP_GUID;
           break;
         case NN_ENTITYID_SEDP_BUILTIN_PUBLICATIONS_WRITER:
         case NN_ENTITYID_SEDP_BUILTIN_SUBSCRIPTIONS_WRITER:
@@ -1743,10 +1639,7 @@ int builtins_dqueue_handler (const struct nn_rsample_info *sampleinfo, const str
       handle_SEDP (sampleinfo->rst, sampleinfo->seq, timestamp, statusinfo, datap, datasz);
       break;
     case NN_ENTITYID_P2P_BUILTIN_PARTICIPANT_MESSAGE_WRITER:
-      handle_PMD (sampleinfo->rst, timestamp, statusinfo, datap, datasz);
-      break;
-    case NN_ENTITYID_SEDP_BUILTIN_CM_PARTICIPANT_WRITER:
-      handle_SEDP_CM (sampleinfo->rst, srcguid.entityid, timestamp, statusinfo, datap, datasz);
+      handle_pmd_message (sampleinfo->rst, timestamp, statusinfo, datap, datasz);
       break;
     default:
       GVLOGDISC ("data(builtin, vendor %u.%u): "PGUIDFMT" #%"PRId64": not handled\n",

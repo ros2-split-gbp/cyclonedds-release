@@ -10,7 +10,7 @@
 # SPDX-License-Identifier: EPL-2.0 OR BSD-3-Clause
 #
 cmake_minimum_required(VERSION 3.7)
-project(CycloneDDS VERSION 0.1.0)
+project(CycloneDDS VERSION 0.5.0)
 
 # Set a default build type if none was specified
 set(default_build_type "RelWithDebInfo")
@@ -22,11 +22,6 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
     "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
 endif()
-
-# By default the Java-based components get built, but make it possible to disable that: if only the
-# core library is required, there's no need to build them, and that in turn eliminates the Maven and
-# JDK dependency.
-option(BUILD_IDLC "Build IDL preprocessor" ON)
 
 # By default don't treat warnings as errors, else anyone building it with a different compiler that
 # just happens to generate a warning, as well as anyone adding or modifying something and making a
@@ -49,6 +44,15 @@ set(PROJECT_NAME_FULL "Eclipse Cyclone DDS")
 string(REPLACE " " "-" PROJECT_NAME_DASHED "${PROJECT_NAME_FULL}")
 string(TOUPPER ${PROJECT_NAME} PROJECT_NAME_CAPS)
 string(TOLOWER ${PROJECT_NAME} PROJECT_NAME_SMALL)
+
+# By default the Java-based components get built, but make it possible to disable that: if only the
+# core library is required, there's no need to build them, and that in turn eliminates the Maven and
+# JDK dependency.
+option(BUILD_IDLC "Build IDL preprocessor" ON)
+if(BUILD_IDLC STREQUAL "AUTO")
+  find_package(Maven 3.0 QUIET)
+  set(BUILD_IDLC ${Maven_FOUND})
+endif()
 
 set(CMAKE_C_STANDARD 99)
 if(CMAKE_SYSTEM_NAME STREQUAL "VxWorks")
@@ -166,25 +170,25 @@ if(${CMAKE_GENERATOR} STREQUAL "Xcode")
   set (CMAKE_XCODE_ATTRIBUTE_GCC_WARN_ABOUT_MISSING_PROTOTYPES YES)
 endif()
 
-# Make it easy to enable one of Clang's/gcc's analyzers, and default to using
-# the address sanitizer for ordinary debug builds; gcc is giving some grief on
-# Travis, so don't enable it for gcc by default
-if(NOT USE_SANITIZER)
-  if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug" AND
-      NOT ("${CMAKE_GENERATOR}" STREQUAL "Xcode") AND
-      ("${CMAKE_C_COMPILER_ID}" STREQUAL "Clang"
-        OR "${CMAKE_C_COMPILER_ID}" STREQUAL "AppleClang"))
-    message(STATUS "Enabling address sanitizer; set USE_SANITIZER=none to prevent this")
-    set(USE_SANITIZER address)
-  else()
-    set(USE_SANITIZER none)
-  endif()
+
+# Make it easy to enable Clang's/gcc's analyzers
+set(USE_SANITIZER "" CACHE STRING "Sanitizers to enable on the build.")
+if(NOT("${USE_SANITIZER}" STREQUAL ""))
+  foreach(san "${USE_SANITIZER}")
+    message(STATUS "Enabling sanitizer: '${san}'")
+
+    if("${san}" STREQUAL address)
+      add_compile_options(-fno-omit-frame-pointer)
+      link_libraries(-fno-omit-frame-pointer)
+    endif()
+
+    if(NOT("${san}" STREQUAL "none"))
+      add_compile_options("-fsanitize=${san}")
+      link_libraries("-fsanitize=${san}")
+    endif()
+  endforeach()
 endif()
-if(NOT ("${USE_SANITIZER}" STREQUAL "none"))
-  message(STATUS "Sanitizer set to ${USE_SANITIZER}")
-  add_compile_options(-fno-omit-frame-pointer -fsanitize=${USE_SANITIZER})
-  link_libraries(-fno-omit-frame-pointer -fsanitize=${USE_SANITIZER})
-endif()
+
 
 include(GNUInstallDirs)
 include(AnalyzeBuild)
