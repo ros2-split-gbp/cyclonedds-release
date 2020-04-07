@@ -101,40 +101,41 @@ set(include_path "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(source_path "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
 list(APPEND headers
+  "${include_path}/dds/ddsrt/avl.h"
+  "${include_path}/dds/ddsrt/fibheap.h"
+  "${include_path}/dds/ddsrt/hopscotch.h"
+  "${include_path}/dds/ddsrt/thread_pool.h"
   "${include_path}/dds/ddsrt/log.h"
   "${include_path}/dds/ddsrt/retcode.h"
   "${include_path}/dds/ddsrt/attributes.h"
   "${include_path}/dds/ddsrt/endian.h"
   "${include_path}/dds/ddsrt/arch.h"
   "${include_path}/dds/ddsrt/misc.h"
+  "${include_path}/dds/ddsrt/mh3.h"
   "${include_path}/dds/ddsrt/io.h"
   "${include_path}/dds/ddsrt/process.h"
   "${include_path}/dds/ddsrt/strtod.h"
   "${include_path}/dds/ddsrt/strtol.h"
   "${include_path}/dds/ddsrt/types.h"
   "${include_path}/dds/ddsrt/countargs.h"
-  "${include_path}/dds/ddsrt/static_assert.h")
+  "${include_path}/dds/ddsrt/static_assert.h"
+  "${include_path}/dds/ddsrt/circlist.h")
 
 list(APPEND sources
+  "${source_path}/bswap.c"
   "${source_path}/io.c"
   "${source_path}/log.c"
   "${source_path}/retcode.c"
   "${source_path}/strtod.c"
-  "${source_path}/strtol.c")
-
-list(APPEND headers
-  "${include_path}/dds/ddsrt/avl.h"
-  "${include_path}/dds/ddsrt/fibheap.h"
-  "${include_path}/dds/ddsrt/hopscotch.h"
-  "${include_path}/dds/ddsrt/thread_pool.h")
-
-list(APPEND sources
+  "${source_path}/strtol.c"
+  "${source_path}/mh3.c"
   "${source_path}/avl.c"
   "${source_path}/expand_envvars.c"
   "${source_path}/fibheap.c"
   "${source_path}/hopscotch.c"
   "${source_path}/thread_pool.c"
-  "${source_path}/xmlparser.c")
+  "${source_path}/xmlparser.c"
+  "${source_path}/circlist.c")
 
 # Not every target offers the same set of features. For embedded targets the
 # set of features may even be different between builds. e.g. a FreeRTOS build
@@ -182,6 +183,19 @@ foreach(feature atomics cdtors environ heap ifaddrs random rusage
       endif()
       set(system_exists FALSE)
 
+      # Headers that must remain private but are required by other runtime
+      # source files must be located in src/<feature>/dds/ddsrt.
+      if(IS_DIRECTORY "${source_path}/${feature}/include")
+        file(GLOB_RECURSE
+               files
+             CONFIGURE_DEPENDS
+               "${source_path}/${feature}/include/*.h")
+        list(APPEND headers ${files})
+        target_include_directories(
+          ddsrt INTERFACE
+            "$<BUILD_INTERFACE:${source_path}/${feature}/include/>")
+      endif()
+
       # Allow custom implementations for a feature. e.g. lwip as opposed to
       # windows or posix.
       set(_system_name "${system_name}")
@@ -190,18 +204,6 @@ foreach(feature atomics cdtors environ heap ifaddrs random rusage
       endif()
 
       foreach(system ${_system_name} posix)
-        # Headers that must remain private but are required by other runtime
-        # source files must be located in src/<feature>/dds/ddsrt.
-        if(IS_DIRECTORY "${source_path}/${feature}/include")
-          file(GLOB_RECURSE
-                 files
-               CONFIGURE_DEPENDS
-                 "${source_path}/${feature}/include/*.h")
-          list(APPEND headers ${files})
-          target_include_directories(
-            ddsrt INTERFACE
-              "$<BUILD_INTERFACE:${source_path}/${feature}/include/>")
-        endif()
         if(IS_DIRECTORY "${source_path}/${feature}/${system}")
           file(GLOB_RECURSE
                  files
@@ -234,7 +236,7 @@ if(NOT WITH_FREERTOS)
 endif()
 
 if(WIN32)
-  target_link_libraries(ddsrt INTERFACE wsock32 ws2_32 iphlpapi bcrypt)
+  target_link_libraries(ddsrt INTERFACE ws2_32 iphlpapi bcrypt)
 elseif(UNIX)
   check_library_exists(c clock_gettime "" HAVE_CLOCK_GETTIME)
   if(NOT HAVE_CLOCK_GETTIME)

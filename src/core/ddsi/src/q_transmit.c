@@ -18,6 +18,7 @@
 
 #include "dds/ddsrt/avl.h"
 #include "dds/ddsi/q_entity.h"
+#include "dds/ddsi/ddsi_entity_index.h"
 #include "dds/ddsi/q_addrset.h"
 #include "dds/ddsi/q_xmsg.h"
 #include "dds/ddsi/q_bswap.h"
@@ -26,11 +27,12 @@
 #include "dds/ddsi/q_xevent.h"
 #include "dds/ddsi/q_time.h"
 #include "dds/ddsi/q_config.h"
-#include "dds/ddsi/q_globals.h"
+#include "dds/ddsi/ddsi_domaingv.h"
 #include "dds/ddsi/q_transmit.h"
 #include "dds/ddsi/q_entity.h"
 #include "dds/ddsi/q_unused.h"
 #include "dds/ddsi/q_hbcontrol.h"
+#include "dds/ddsi/q_lease.h"
 #include "dds/ddsi/ddsi_tkmap.h"
 #include "dds/ddsi/ddsi_serdata.h"
 #include "dds/ddsi/ddsi_sertopic.h"
@@ -77,7 +79,7 @@ static void writer_hbcontrol_note_hb (struct writer *wr, nn_mtime_t tnow, int an
 
 int64_t writer_hbcontrol_intv (const struct writer *wr, const struct whc_state *whcst, UNUSED_ARG (nn_mtime_t tnow))
 {
-  struct q_globals const * const gv = wr->e.gv;
+  struct ddsi_domaingv const * const gv = wr->e.gv;
   struct hbcontrol const * const hbc = &wr->hbcontrol;
   int64_t ret = gv->config.const_hb_intv_sched;
   size_t n_unacked;
@@ -103,7 +105,7 @@ int64_t writer_hbcontrol_intv (const struct writer *wr, const struct whc_state *
 
 void writer_hbcontrol_note_asyncwrite (struct writer *wr, nn_mtime_t tnow)
 {
-  struct q_globals const * const gv = wr->e.gv;
+  struct ddsi_domaingv const * const gv = wr->e.gv;
   struct hbcontrol * const hbc = &wr->hbcontrol;
   nn_mtime_t tnext;
 
@@ -120,7 +122,7 @@ void writer_hbcontrol_note_asyncwrite (struct writer *wr, nn_mtime_t tnow)
        least one unacked msg if there are reliable readers, so must
        have a heartbeat scheduled.  Do so now */
     hbc->tsched = tnext;
-    resched_xevent_if_earlier (wr->heartbeat_xevent, tnext);
+    (void) resched_xevent_if_earlier (wr->heartbeat_xevent, tnext);
   }
 }
 
@@ -132,7 +134,7 @@ int writer_hbcontrol_must_send (const struct writer *wr, const struct whc_state 
 
 struct nn_xmsg *writer_hbcontrol_create_heartbeat (struct writer *wr, const struct whc_state *whcst, nn_mtime_t tnow, int hbansreq, int issync)
 {
-  struct q_globals const * const gv = wr->e.gv;
+  struct ddsi_domaingv const * const gv = wr->e.gv;
   struct nn_xmsg *msg;
   const ddsi_guid_t *prd_guid;
 
@@ -194,12 +196,12 @@ struct nn_xmsg *writer_hbcontrol_create_heartbeat (struct writer *wr, const stru
 #ifdef DDSI_INCLUDE_NETWORK_PARTITIONS
     nn_xmsg_setencoderid (msg, wr->partition_id);
 #endif
-    add_Heartbeat (msg, wr, whcst, hbansreq, to_entityid (NN_ENTITYID_UNKNOWN), issync);
+    add_Heartbeat (msg, wr, whcst, hbansreq, 0, to_entityid (NN_ENTITYID_UNKNOWN), issync);
   }
   else
   {
     struct proxy_reader *prd;
-    if ((prd = ephash_lookup_proxy_reader_guid (gv->guid_hash, prd_guid)) == NULL)
+    if ((prd = entidx_lookup_proxy_reader_guid (gv->entity_index, prd_guid)) == NULL)
     {
       ETRACE (wr, "writer_hbcontrol: wr "PGUIDFMT" unknown prd "PGUIDFMT"\n", PGUID (wr->e.guid), PGUID (*prd_guid));
       nn_xmsg_free (msg);
@@ -215,7 +217,7 @@ struct nn_xmsg *writer_hbcontrol_create_heartbeat (struct writer *wr, const stru
 #ifdef DDSI_INCLUDE_NETWORK_PARTITIONS
     nn_xmsg_setencoderid (msg, wr->partition_id);
 #endif
-    add_Heartbeat (msg, wr, whcst, hbansreq, prd_guid->entityid, issync);
+    add_Heartbeat (msg, wr, whcst, hbansreq, 0, prd_guid->entityid, issync);
   }
 
   writer_hbcontrol_note_hb (wr, tnow, hbansreq);
@@ -224,7 +226,7 @@ struct nn_xmsg *writer_hbcontrol_create_heartbeat (struct writer *wr, const stru
 
 static int writer_hbcontrol_ack_required_generic (const struct writer *wr, const struct whc_state *whcst, nn_mtime_t tlast, nn_mtime_t tnow, int piggyback)
 {
-  struct q_globals const * const gv = wr->e.gv;
+  struct ddsi_domaingv const * const gv = wr->e.gv;
   struct hbcontrol const * const hbc = &wr->hbcontrol;
   const int64_t hb_intv_ack = gv->config.const_hb_intv_sched;
   assert(wr->heartbeat_xevent != NULL && whcst != NULL);
@@ -313,9 +315,9 @@ struct nn_xmsg *writer_hbcontrol_piggyback (struct writer *wr, const struct whc_
   return msg;
 }
 
-void add_Heartbeat (struct nn_xmsg *msg, struct writer *wr, const struct whc_state *whcst, int hbansreq, ddsi_entityid_t dst, int issync)
+void add_Heartbeat (struct nn_xmsg *msg, struct writer *wr, const struct whc_state *whcst, int hbansreq, int hbliveliness, ddsi_entityid_t dst, int issync)
 {
-  struct q_globals const * const gv = wr->e.gv;
+  struct ddsi_domaingv const * const gv = wr->e.gv;
   struct nn_xmsg_marker sm_marker;
   Heartbeat_t * hb;
   seqno_t max = 0, min = 1;
@@ -324,6 +326,7 @@ void add_Heartbeat (struct nn_xmsg *msg, struct writer *wr, const struct whc_sta
 
   assert (wr->reliable);
   assert (hbansreq >= 0);
+  assert (hbliveliness >= 0);
 
   if (gv->config.meas_hb_to_ack_latency)
   {
@@ -337,6 +340,8 @@ void add_Heartbeat (struct nn_xmsg *msg, struct writer *wr, const struct whc_sta
 
   if (!hbansreq)
     hb->smhdr.flags |= HEARTBEAT_FLAG_FINAL;
+  if (hbliveliness)
+    hb->smhdr.flags |= HEARTBEAT_FLAG_LIVELINESS;
 
   hb->readerId = nn_hton_entityid (dst);
   hb->writerId = nn_hton_entityid (wr->e.guid.entityid);
@@ -387,7 +392,7 @@ static dds_return_t create_fragment_message_simple (struct writer *wr, seqno_t s
   /* actual expected_inline_qos_size is typically 0, but always claiming 32 bytes won't make
      a difference, so no point in being precise */
   const size_t expected_inline_qos_size = /* statusinfo */ 8 + /* keyhash */ 20 + /* sentinel */ 4;
-  struct q_globals const * const gv = wr->e.gv;
+  struct ddsi_domaingv const * const gv = wr->e.gv;
   struct nn_xmsg_marker sm_marker;
   unsigned char contentflag = 0;
   Data_t *data;
@@ -456,7 +461,7 @@ static dds_return_t create_fragment_message_simple (struct writer *wr, seqno_t s
   return 0;
 }
 
-dds_return_t create_fragment_message (struct writer *wr, seqno_t seq, const struct nn_plist *plist, struct ddsi_serdata *serdata, unsigned fragnum, struct proxy_reader *prd, struct nn_xmsg **pmsg, int isnew)
+dds_return_t create_fragment_message (struct writer *wr, seqno_t seq, const struct ddsi_plist *plist, struct ddsi_serdata *serdata, unsigned fragnum, struct proxy_reader *prd, struct nn_xmsg **pmsg, int isnew)
 {
   /* We always fragment into FRAGMENT_SIZEd fragments, which are near
      the smallest allowed fragment size & can't be bothered (yet) to
@@ -472,7 +477,7 @@ dds_return_t create_fragment_message (struct writer *wr, seqno_t seq, const stru
      actual expected_inline_qos_size is typically 0, but always claiming 32 bytes won't make
      a difference, so no point in being precise */
   const size_t expected_inline_qos_size = /* statusinfo */ 8 + /* keyhash */ 20 + /* sentinel */ 4;
-  struct q_globals const * const gv = wr->e.gv;
+  struct ddsi_domaingv const * const gv = wr->e.gv;
   struct nn_xmsg_marker sm_marker;
   void *sm;
   Data_DataFrag_common_t *ddcmn;
@@ -631,7 +636,7 @@ dds_return_t create_fragment_message (struct writer *wr, seqno_t seq, const stru
 
 static void create_HeartbeatFrag (struct writer *wr, seqno_t seq, unsigned fragnum, struct proxy_reader *prd, struct nn_xmsg **pmsg)
 {
-  struct q_globals const * const gv = wr->e.gv;
+  struct ddsi_domaingv const * const gv = wr->e.gv;
   struct nn_xmsg_marker sm_marker;
   HeartbeatFrag_t *hbf;
   ASSERT_MUTEX_HELD (&wr->e.lock);
@@ -666,6 +671,42 @@ static void create_HeartbeatFrag (struct writer *wr, seqno_t seq, unsigned fragn
   nn_xmsg_submsg_setnext (*pmsg, sm_marker);
 }
 
+dds_return_t write_hb_liveliness (struct ddsi_domaingv * const gv, struct ddsi_guid *wr_guid, struct nn_xpack *xp)
+{
+  struct nn_xmsg *msg = NULL;
+  struct whc_state whcst;
+  struct thread_state1 * const ts1 = lookup_thread_state ();
+  struct lease *lease;
+
+  thread_state_awake (ts1, gv);
+  struct writer *wr = entidx_lookup_writer_guid (gv->entity_index, wr_guid);
+  if (wr == NULL)
+  {
+    GVTRACE ("write_hb_liveliness("PGUIDFMT") - writer not found\n", PGUID (*wr_guid));
+    return DDS_RETCODE_PRECONDITION_NOT_MET;
+  }
+
+  if (wr->xqos->liveliness.kind == DDS_LIVELINESS_MANUAL_BY_PARTICIPANT && ((lease = ddsrt_atomic_ldvoidp (&wr->c.pp->minl_man)) != NULL))
+    lease_renew (lease, now_et());
+  else if (wr->xqos->liveliness.kind == DDS_LIVELINESS_MANUAL_BY_TOPIC && wr->lease != NULL)
+    lease_renew (wr->lease, now_et());
+
+  if ((msg = nn_xmsg_new (gv->xmsgpool, &wr->e.guid.prefix, sizeof (InfoTS_t) + sizeof (Heartbeat_t), NN_XMSG_KIND_CONTROL)) == NULL)
+    return DDS_RETCODE_OUT_OF_RESOURCES;
+  ddsrt_mutex_lock (&wr->e.lock);
+  nn_xmsg_setdstN (msg, wr->as, wr->as_group);
+#ifdef DDSI_INCLUDE_NETWORK_PARTITIONS
+  nn_xmsg_setencoderid (msg, wr->partition_id);
+#endif
+  whc_get_state (wr->whc, &whcst);
+  add_Heartbeat (msg, wr, &whcst, 0, 1, to_entityid (NN_ENTITYID_UNKNOWN), 1);
+  ddsrt_mutex_unlock (&wr->e.lock);
+  nn_xpack_addmsg (xp, msg, 0);
+  nn_xpack_send (xp, true);
+  thread_state_asleep (ts1);
+  return DDS_RETCODE_OK;
+}
+
 #if 0
 static int must_skip_frag (const char *frags_to_skip, unsigned frag)
 {
@@ -689,7 +730,7 @@ static int must_skip_frag (const char *frags_to_skip, unsigned frag)
 }
 #endif
 
-static void transmit_sample_lgmsg_unlocked (struct nn_xpack *xp, struct writer *wr, const struct whc_state *whcst, seqno_t seq, const struct nn_plist *plist, struct ddsi_serdata *serdata, struct proxy_reader *prd, int isnew, uint32_t nfrags)
+static void transmit_sample_lgmsg_unlocked (struct nn_xpack *xp, struct writer *wr, const struct whc_state *whcst, seqno_t seq, const struct ddsi_plist *plist, struct ddsi_serdata *serdata, struct proxy_reader *prd, int isnew, uint32_t nfrags)
 {
 #if 0
   const char *frags_to_skip = getenv ("SKIPFRAGS");
@@ -746,10 +787,10 @@ static void transmit_sample_lgmsg_unlocked (struct nn_xpack *xp, struct writer *
   }
 }
 
-static void transmit_sample_unlocks_wr (struct nn_xpack *xp, struct writer *wr, const struct whc_state *whcst, seqno_t seq, const struct nn_plist *plist, struct ddsi_serdata *serdata, struct proxy_reader *prd, int isnew)
+static void transmit_sample_unlocks_wr (struct nn_xpack *xp, struct writer *wr, const struct whc_state *whcst, seqno_t seq, const struct ddsi_plist *plist, struct ddsi_serdata *serdata, struct proxy_reader *prd, int isnew)
 {
   /* on entry: &wr->e.lock held; on exit: lock no longer held */
-  struct q_globals const * const gv = wr->e.gv;
+  struct ddsi_domaingv const * const gv = wr->e.gv;
   struct nn_xmsg *fmsg;
   uint32_t sz;
   assert(xp);
@@ -789,9 +830,9 @@ static void transmit_sample_unlocks_wr (struct nn_xpack *xp, struct writer *wr, 
   }
 }
 
-int enqueue_sample_wrlock_held (struct writer *wr, seqno_t seq, const struct nn_plist *plist, struct ddsi_serdata *serdata, struct proxy_reader *prd, int isnew)
+int enqueue_sample_wrlock_held (struct writer *wr, seqno_t seq, const struct ddsi_plist *plist, struct ddsi_serdata *serdata, struct proxy_reader *prd, int isnew)
 {
-  struct q_globals const * const gv = wr->e.gv;
+  struct ddsi_domaingv const * const gv = wr->e.gv;
   uint32_t i, sz, nfrags;
   int enqueued = 1;
 
@@ -844,10 +885,11 @@ int enqueue_sample_wrlock_held (struct writer *wr, seqno_t seq, const struct nn_
   return enqueued ? 0 : -1;
 }
 
-static int insert_sample_in_whc (struct writer *wr, seqno_t seq, struct nn_plist *plist, struct ddsi_serdata *serdata, struct ddsi_tkmap_instance *tk)
+static int insert_sample_in_whc (struct writer *wr, seqno_t seq, struct ddsi_plist *plist, struct ddsi_serdata *serdata, struct ddsi_tkmap_instance *tk)
 {
   /* returns: < 0 on error, 0 if no need to insert in whc, > 0 if inserted */
-  int do_insert, insres, res;
+  int insres, res = 0;
+  bool wr_deadline = false;
 
   ASSERT_MUTEX_HELD (&wr->e.lock);
 
@@ -868,20 +910,40 @@ static int insert_sample_in_whc (struct writer *wr, seqno_t seq, struct nn_plist
   }
 
   assert (wr->reliable || have_reliable_subs (wr) == 0);
+#ifdef DDSI_INCLUDE_DEADLINE_MISSED
+  /* If deadline missed duration is not infinite, the sample is inserted in
+     the whc so that the instance is created (or renewed) in the whc and the deadline
+     missed event is registered. The sample is removed immediately after inserting it
+     as we don't want to store it. */
+  wr_deadline = wr->xqos->deadline.deadline != DDS_INFINITY;
+#endif
 
-  if (wr->reliable && have_reliable_subs (wr))
-    do_insert = 1;
-  else if (wr->handle_as_transient_local)
-    do_insert = 1;
-  else
-    do_insert = 0;
+  if ((wr->reliable && have_reliable_subs (wr)) || wr_deadline || wr->handle_as_transient_local)
+  {
+    nn_mtime_t exp = NN_MTIME_NEVER;
+#ifdef DDSI_INCLUDE_LIFESPAN
+    /* Don't set expiry for samples with flags unregister or dispose, because these are required
+     * for sample lifecycle and should always be delivered to the reader so that is can clean up
+     * its history cache. */
+    if (wr->xqos->lifespan.duration != DDS_INFINITY && (serdata->statusinfo & (NN_STATUSINFO_UNREGISTER | NN_STATUSINFO_DISPOSE)) == 0)
+      exp = add_duration_to_mtime(serdata->twrite, wr->xqos->lifespan.duration);
+#endif
+    res = ((insres = whc_insert (wr->whc, writer_max_drop_seq (wr), seq, exp, plist, serdata, tk)) < 0) ? insres : 1;
 
-  if (!do_insert)
-    res = 0;
-  else if ((insres = whc_insert (wr->whc, writer_max_drop_seq (wr), seq, plist, serdata, tk)) < 0)
-    res = insres;
-  else
-    res = 1;
+#ifdef DDSI_INCLUDE_DEADLINE_MISSED
+    if (!(wr->reliable && have_reliable_subs (wr)) && !wr->handle_as_transient_local)
+    {
+      /* Sample was inserted only because writer has deadline, so we'll remove the sample from whc */
+      struct whc_node *deferred_free_list = NULL;
+      struct whc_state whcst;
+      uint32_t n = whc_remove_acked_messages (wr->whc, seq, &whcst, &deferred_free_list);
+      (void)n;
+      assert (n <= 1);
+      assert (whcst.min_seq == -1 && whcst.max_seq == -1);
+      whc_free_deferred_free_list (wr->whc, deferred_free_list);
+    }
+#endif
+  }
 
 #ifndef NDEBUG
   if (wr->e.guid.entityid.u == NN_ENTITYID_SPDP_BUILTIN_PARTICIPANT_WRITER && !is_local_orphan_endpoint (&wr->e))
@@ -935,7 +997,7 @@ static dds_return_t throttle_writer (struct thread_state1 * const ts1, struct nn
      resent to them, until a ACKNACK is received from that
      reader. This implicitly clears the whc and unblocks the
      writer. */
-  struct q_globals const * const gv = wr->e.gv;
+  struct ddsi_domaingv const * const gv = wr->e.gv;
   dds_return_t result = DDS_RETCODE_OK;
   nn_mtime_t tnow = now_mt ();
   const nn_mtime_t abstimeout = add_duration_to_mtime (tnow, wr->xqos->reliability.max_blocking_time);
@@ -1006,7 +1068,7 @@ static dds_return_t throttle_writer (struct thread_state1 * const ts1, struct nn
 
 static int maybe_grow_whc (struct writer *wr)
 {
-  struct q_globals const * const gv = wr->e.gv;
+  struct ddsi_domaingv const * const gv = wr->e.gv;
   if (!wr->retransmitting && gv->config.whc_adaptive && wr->whc_high < gv->config.whc_highwater_mark)
   {
     nn_etime_t tnow = now_et();
@@ -1022,12 +1084,13 @@ static int maybe_grow_whc (struct writer *wr)
   return 0;
 }
 
-static int write_sample_eot (struct thread_state1 * const ts1, struct nn_xpack *xp, struct writer *wr, struct nn_plist *plist, struct ddsi_serdata *serdata, struct ddsi_tkmap_instance *tk, int end_of_txn, int gc_allowed)
+static int write_sample_eot (struct thread_state1 * const ts1, struct nn_xpack *xp, struct writer *wr, struct ddsi_plist *plist, struct ddsi_serdata *serdata, struct ddsi_tkmap_instance *tk, int end_of_txn, int gc_allowed)
 {
-  struct q_globals const * const gv = wr->e.gv;
+  struct ddsi_domaingv const * const gv = wr->e.gv;
   int r;
   seqno_t seq;
   nn_mtime_t tnow;
+  struct lease *lease;
 
   /* If GC not allowed, we must be sure to never block when writing.  That is only the case for (true, aggressive) KEEP_LAST writers, and also only if there is no limit to how much unacknowledged data the WHC may contain. */
   assert (gc_allowed || (wr->xqos->history.kind == DDS_HISTORY_KEEP_LAST && wr->whc_low == INT32_MAX));
@@ -1049,7 +1112,15 @@ static int write_sample_eot (struct thread_state1 * const ts1, struct nn_xpack *
     goto drop;
   }
 
+  if (wr->xqos->liveliness.kind == DDS_LIVELINESS_MANUAL_BY_PARTICIPANT && ((lease = ddsrt_atomic_ldvoidp (&wr->c.pp->minl_man)) != NULL))
+    lease_renew (lease, now_et());
+  else if (wr->xqos->liveliness.kind == DDS_LIVELINESS_MANUAL_BY_TOPIC && wr->lease != NULL)
+    lease_renew (wr->lease, now_et());
+
   ddsrt_mutex_lock (&wr->e.lock);
+
+  if (!wr->alive)
+    writer_set_alive_may_unlock (wr, true);
 
   if (end_of_txn)
   {
@@ -1100,7 +1171,7 @@ static int write_sample_eot (struct thread_state1 * const ts1, struct nn_xpack *
     if (plist == NULL)
     {
       plist = ddsrt_malloc (sizeof (*plist));
-      nn_plist_init_empty (plist);
+      ddsi_plist_init_empty (plist);
     }
     assert (!(plist->present & PP_COHERENT_SET));
     plist->present |= PP_COHERENT_SET;
@@ -1113,7 +1184,7 @@ static int write_sample_eot (struct thread_state1 * const ts1, struct nn_xpack *
     ddsrt_mutex_unlock (&wr->e.lock);
     if (plist != NULL)
     {
-      nn_plist_fini (plist);
+      ddsi_plist_fini (plist);
       ddsrt_free (plist);
     }
   }
@@ -1129,7 +1200,7 @@ static int write_sample_eot (struct thread_state1 * const ts1, struct nn_xpack *
     ddsrt_mutex_unlock (&wr->e.lock);
     if (plist != NULL)
     {
-      nn_plist_fini (plist);
+      ddsi_plist_fini (plist);
       ddsrt_free (plist);
     }
   }
@@ -1144,14 +1215,14 @@ static int write_sample_eot (struct thread_state1 * const ts1, struct nn_xpack *
        * creating the message, the WHC will free the plist (if any). Currently,
        * plist's are only used for coherent sets, which is assumed to be rare,
        * which in turn means that an extra copy doesn't hurt too badly ... */
-      nn_plist_t plist_stk, *plist_copy;
+      ddsi_plist_t plist_stk, *plist_copy;
       struct whc_state whcst, *whcstptr;
       if (plist == NULL)
         plist_copy = NULL;
       else
       {
         plist_copy = &plist_stk;
-        nn_plist_copy (plist_copy, plist);
+        ddsi_plist_copy (plist_copy, plist);
       }
       if (wr->heartbeat_xevent == NULL)
         whcstptr = NULL;
@@ -1162,7 +1233,7 @@ static int write_sample_eot (struct thread_state1 * const ts1, struct nn_xpack *
       }
       transmit_sample_unlocks_wr (xp, wr, whcstptr, seq, plist_copy, serdata, NULL, 1);
       if (plist_copy)
-        nn_plist_fini (plist_copy);
+        ddsi_plist_fini (plist_copy);
     }
     else
     {
@@ -1175,7 +1246,7 @@ static int write_sample_eot (struct thread_state1 * const ts1, struct nn_xpack *
     /* If not actually inserted, WHC didn't take ownership of plist */
     if (r == 0 && plist != NULL)
     {
-      nn_plist_fini (plist);
+      ddsi_plist_fini (plist);
       ddsrt_free (plist);
     }
   }

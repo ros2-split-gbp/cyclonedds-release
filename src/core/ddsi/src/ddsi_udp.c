@@ -25,7 +25,7 @@
 #include "dds/ddsi/q_config.h"
 #include "dds/ddsi/q_log.h"
 #include "dds/ddsi/q_pcap.h"
-#include "dds/ddsi/q_globals.h"
+#include "dds/ddsi/ddsi_domaingv.h"
 
 typedef struct ddsi_udp_conn {
   struct ddsi_tran_conn m_base;
@@ -68,7 +68,7 @@ static ssize_t ddsi_udp_conn_read (ddsi_tran_conn_t conn, unsigned char * buf, s
   if (ret > 0)
   {
     if (srcloc)
-      ddsi_ipaddr_to_loc(srcloc, (struct sockaddr *)&src, src.ss_family == AF_INET ? NN_LOCATOR_KIND_UDPv4 : NN_LOCATOR_KIND_UDPv6);
+      ddsi_ipaddr_to_loc(conn->m_factory, srcloc, (struct sockaddr *)&src, src.ss_family == AF_INET ? NN_LOCATOR_KIND_UDPv4 : NN_LOCATOR_KIND_UDPv6);
 
     if(conn->m_base.gv->pcap_fp)
     {
@@ -88,8 +88,8 @@ static ssize_t ddsi_udp_conn_read (ddsi_tran_conn_t conn, unsigned char * buf, s
     {
       char addrbuf[DDSI_LOCSTRLEN];
       nn_locator_t tmp;
-      ddsi_ipaddr_to_loc(&tmp, (struct sockaddr *)&src, src.ss_family == AF_INET ? NN_LOCATOR_KIND_UDPv4 : NN_LOCATOR_KIND_UDPv6);
-      ddsi_locator_to_string(conn->m_base.gv, addrbuf, sizeof(addrbuf), &tmp);
+      ddsi_ipaddr_to_loc(conn->m_factory, &tmp, (struct sockaddr *)&src, src.ss_family == AF_INET ? NN_LOCATOR_KIND_UDPv4 : NN_LOCATOR_KIND_UDPv6);
+      ddsi_locator_to_string(addrbuf, sizeof(addrbuf), &tmp);
       DDS_CWARNING(&conn->m_base.gv->logconfig, "%s => %d truncated to %d\n", addrbuf, (int)ret, (int)len);
     }
   }
@@ -218,16 +218,37 @@ static unsigned short get_socket_port (const struct ddsrt_log_cfg *logcfg, ddsrt
   return ddsrt_sockaddr_get_port((struct sockaddr *)&addr);
 }
 
-static ddsi_tran_conn_t ddsi_udp_create_conn (ddsi_tran_factory_t fact, uint32_t port, ddsi_tran_qos_t qos)
+static ddsi_tran_conn_t ddsi_udp_create_conn (ddsi_tran_factory_t fact, uint32_t port, const ddsi_tran_qos_t *qos)
 {
   int ret;
   ddsrt_socket_t sock;
   ddsi_udp_conn_t uc = NULL;
-  bool mcast = (bool) (qos ? qos->m_multicast : false);
+  bool reuse_addr = false, bind_to_any = false;
+  const char *purpose_str = NULL;
+
+  switch (qos->m_purpose)
+  {
+    case DDSI_TRAN_QOS_XMIT:
+      reuse_addr = false;
+      bind_to_any = false;
+      purpose_str = "transmit";
+      break;
+    case DDSI_TRAN_QOS_RECV_UC:
+      reuse_addr = false;
+      bind_to_any = true;
+      purpose_str = "unicast";
+      break;
+    case DDSI_TRAN_QOS_RECV_MC:
+      reuse_addr = true;
+      bind_to_any = true;
+      purpose_str = "multicast";
+      break;
+  }
+  assert (purpose_str != NULL);
 
   /* If port is zero, need to create dynamic port */
 
-  ret = make_socket (&sock, (unsigned short) port, false, mcast, fact->gv);
+  ret = make_socket (&sock, (unsigned short) port, false, reuse_addr, bind_to_any, fact->gv);
 
   if (ret == 0)
   {
@@ -235,7 +256,7 @@ static ddsi_tran_conn_t ddsi_udp_create_conn (ddsi_tran_factory_t fact, uint32_t
     memset (uc, 0, sizeof (*uc));
 
     uc->m_sock = sock;
-    uc->m_diffserv = qos ? qos->m_diffserv : 0;
+    uc->m_diffserv = qos->m_diffserv;
 #if defined _WIN32 && !defined WINCE
     uc->m_sockEvent = WSACreateEvent();
     WSAEventSelect(uc->m_sock, uc->m_sockEvent, FD_WRITE);
@@ -244,7 +265,7 @@ static ddsi_tran_conn_t ddsi_udp_create_conn (ddsi_tran_factory_t fact, uint32_t
     ddsi_factory_conn_init (fact, &uc->m_base);
     uc->m_base.m_base.m_port = get_socket_port (&fact->gv->logconfig, sock);
     uc->m_base.m_base.m_trantype = DDSI_TRAN_CONN;
-    uc->m_base.m_base.m_multicast = mcast;
+    uc->m_base.m_base.m_multicast = (qos->m_purpose == DDSI_TRAN_QOS_RECV_MC);
     uc->m_base.m_base.m_handle_fn = ddsi_udp_conn_handle;
 
     uc->m_base.m_read_fn = ddsi_udp_conn_read;
@@ -254,7 +275,7 @@ static ddsi_tran_conn_t ddsi_udp_create_conn (ddsi_tran_factory_t fact, uint32_t
 
     DDS_CTRACE (&fact->gv->logconfig,
                 "ddsi_udp_create_conn %s socket %"PRIdSOCK" port %"PRIu32"\n",
-                mcast ? "multicast" : "unicast",
+                purpose_str,
                 uc->m_sock,
                 uc->m_base.m_base.m_port);
 #ifdef DDSI_INCLUDE_NETWORK_CHANNELS
@@ -271,7 +292,7 @@ static ddsi_tran_conn_t ddsi_udp_create_conn (ddsi_tran_factory_t fact, uint32_t
   {
     if (fact->gv->config.participantIndex != PARTICIPANT_INDEX_AUTO)
     {
-      DDS_CERROR (&fact->gv->logconfig, "UDP make_socket failed for %s port %"PRIu32"\n", mcast ? "multicast" : "unicast", port);
+      DDS_CERROR (&fact->gv->logconfig, "UDP make_socket failed for %s port %"PRIu32"\n", purpose_str, port);
     }
   }
 
@@ -432,10 +453,10 @@ static enum ddsi_locator_from_string_result ddsi_udp_address_from_string (ddsi_t
   return ddsi_ipaddr_from_string (tran, loc, str, tran->m_kind);
 }
 
-static char *ddsi_udp_locator_to_string (ddsi_tran_factory_t tran, char *dst, size_t sizeof_dst, const nn_locator_t *loc, int with_port)
+static char *ddsi_udp_locator_to_string (char *dst, size_t sizeof_dst, const nn_locator_t *loc, int with_port)
 {
   if (loc->kind != NN_LOCATOR_KIND_UDPv4MCGEN) {
-    return ddsi_ipaddr_to_string(tran, dst, sizeof_dst, loc, with_port);
+    return ddsi_ipaddr_to_string(dst, sizeof_dst, loc, with_port);
   } else {
     struct sockaddr_in src;
     nn_udpv4mcgen_address_t mcgen;
@@ -454,7 +475,7 @@ static char *ddsi_udp_locator_to_string (ddsi_tran_factory_t tran, char *dst, si
       pos += (size_t)cnt;
     }
     if (with_port && pos < sizeof_dst) {
-      snprintf (dst + pos, sizeof_dst - pos, ":%"PRIu32, loc->port);
+      (void) snprintf (dst + pos, sizeof_dst - pos, ":%"PRIu32, loc->port);
     }
     return dst;
   }
@@ -466,7 +487,13 @@ static void ddsi_udp_fini (ddsi_tran_factory_t fact)
   ddsrt_free (fact);
 }
 
-int ddsi_udp_init (struct q_globals *gv)
+static int ddsi_udp_is_valid_port (ddsi_tran_factory_t fact, uint32_t port)
+{
+  (void) fact;
+  return (port <= 65535);
+}
+
+int ddsi_udp_init (struct ddsi_domaingv *gv)
 {
   struct ddsi_tran_factory *fact = ddsrt_malloc (sizeof (*fact));
   memset (fact, 0, sizeof (*fact));
@@ -489,6 +516,7 @@ int ddsi_udp_init (struct q_globals *gv)
   fact->m_locator_from_string_fn = ddsi_udp_address_from_string;
   fact->m_locator_to_string_fn = ddsi_udp_locator_to_string;
   fact->m_enumerate_interfaces_fn = ddsi_eth_enumerate_interfaces;
+  fact->m_is_valid_port_fn = ddsi_udp_is_valid_port;
 #if DDSRT_HAVE_IPV6
   if (gv->config.transport_selector == TRANS_UDP6)
   {

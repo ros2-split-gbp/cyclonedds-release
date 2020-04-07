@@ -43,7 +43,7 @@ extern "C" {
 /** Absolute Time definition */
 typedef int64_t dds_time_t;
 
-/** Relative Time definition */
+/** Relative Time definition in nanoseconds */
 typedef int64_t dds_duration_t;
 
 /** @name Macro definition for time units in nanoseconds.
@@ -58,6 +58,9 @@ typedef int64_t dds_duration_t;
 
 /** @name Infinite timeout for relative time */
 #define DDS_INFINITY ((dds_duration_t) INT64_MAX)
+
+/** @name Invalid duration value */
+#define DDS_DURATION_INVALID ((dds_duration_t) INT64_MIN)
 
 /** @name Macro definition for time conversion to nanoseconds
   @{**/

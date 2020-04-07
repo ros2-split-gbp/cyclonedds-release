@@ -36,7 +36,7 @@ current [ROS2 RMW layer](https://github.com/ros2/rmw_cyclonedds), that is suffic
 
 To obtain Eclipse Cyclone DDS, do
 
-    $ git clone https://github.com/eclipse-cyclonedds/cyclonedds.git 
+    $ git clone https://github.com/eclipse-cyclonedds/cyclonedds.git
     $ cd cyclonedds
     $ mkdir build
 
@@ -66,7 +66,7 @@ generating build files.  For example, "Visual Studio 15 2017 Win64" would target
 using Visual Studio 2017.
 
 To install it after a successful build, do:
-    
+
     $ cmake --build . --target install
 
 which will copy everything to:
@@ -102,12 +102,22 @@ Such a build requires the presence of [CUnit](http://cunit.sourceforge.net/).  Y
 yourself, or you can choose to instead rely on the [Conan](https://conan.io) packaging system that
 the CI build infrastructure also uses.  In that case, install Conan and do:
 
-    $ conan install ..
+    $ conan install .. --build missing
 
-in the build directory prior to running cmake.  For Windows, depending on the generator, you might
-also need to add switches to select the architecture and build type, e.g., ``conan install -s
-arch=x86_64 -s build_type=Debug ..`` This will automatically download and/or build CUnit (and, at
-the moment, OpenSSL).
+in the build directory prior to running cmake.
+
+The CUnit Conan package is hosted in the
+[Bincrafters Bintray repository](https://bintray.com/bincrafters/public-conan). In case this repository
+was not added to your Conan remotes list yet (and the above mentioned install command failed because it
+could not find the CUnit package), you can add the Bintray repository by:
+
+    $ conan remote add <REMOTE> https://api.bintray.com/conan/bincrafters/public-conan
+
+Replace ``<REMOTE>`` with a name that identifies the repository (e.g. ``bincrafters``).
+
+For Windows, depending on the generator, you might also need to add switches to select the architecture
+and build type, e.g., ``conan install -s arch=x86_64 -s build_type=Debug ..`` This will automatically
+download and/or build CUnit (and, at the moment, OpenSSL).
 
 ## Documentation
 
@@ -124,19 +134,18 @@ We will show you how to build and run an example program that measures latency. 
 built automatically when you build Cyclone DDS, so you don't need to follow these steps to be able
 to run the program, it is merely to illustrate the process.
 
-    $ cd cyclonedds/examples/roundtrip
-    $ mkdir build
-    $ cd build
-    $ cmake ..
-    $ make
-    
+    $ mkdir roundtrip
+    $ cd roundtrip
+    $ cmake <install-location>/share/CycloneDDS/examples/roundtrip
+    $ cmake --build .
+
 On one terminal start the application that will be responding to pings:
 
     $ ./RoundtripPong
 
 On another terminal, start the application that will be sending the pings:
-    
-    $ ./RoundtripPing 0 0 0 
+
+    $ ./RoundtripPing 0 0 0
     # payloadSize: 0 | numSamples: 0 | timeOut: 0
     # Waiting for startup jitter to stabilise
     # Warm up complete.
@@ -186,12 +195,11 @@ point to it.  E.g. (on Linux):
 
     $ cat cyclonedds.xml
     <?xml version="1.0" encoding="UTF-8" ?>
-    <CycloneDDS xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://github.com/eclipse-cyclonedds/cyclonedds/etc/cyclonedds.xsd">
-    <CycloneDDS>
+    <CycloneDDS xmlns="https://cdds.io/config" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="https://cdds.io/config https://raw.githubusercontent.com/eclipse-cyclonedds/cyclonedds/master/etc/cyclonedds.xsd">
         <Domain id="any">
             <General>
                 <NetworkInterfaceAddress>auto</NetworkInterfaceAddress>
-                <AllowMulticast>auto</AllowMulticast>
+                <AllowMulticast>default</AllowMulticast>
                 <MaxMessageSize>65500B</MaxMessageSize>
                 <FragmentSize>4000B</FragmentSize>
             </General>
