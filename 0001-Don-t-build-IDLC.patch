@@ -1,4 +1,4 @@
-From 12b0d985297b9bef274949a202a48caa31b442d7 Mon Sep 17 00:00:00 2001
+From 331a48a565ac70639e77fac678e42627f7676561 Mon Sep 17 00:00:00 2001
 From: Michael Carroll <michael@openrobotics.org>
 Date: Wed, 23 Oct 2019 22:47:46 -0500
 Subject: [PATCH] Don't build IDLC
@@ -23,5 +23,5 @@ index aa010fa..d8f2309 100755
  override_dh_auto_build:
  	# In case we're installing to a non-standard location, look for a setup.sh
 -- 
-2.20.1
+2.17.1
 
