@@ -101,7 +101,7 @@ The default value is: "lax".
 
 
 ### //CycloneDDS/Domain/Discovery
-Children: [DSGracePeriod](#cycloneddsdomaindiscoverydsgraceperiod), [DefaultMulticastAddress](#cycloneddsdomaindiscoverydefaultmulticastaddress), [EnableTopicDiscovery](#cycloneddsdomaindiscoveryenabletopicdiscovery), [MaxAutoParticipantIndex](#cycloneddsdomaindiscoverymaxautoparticipantindex), [ParticipantIndex](#cycloneddsdomaindiscoveryparticipantindex), [Peers](#cycloneddsdomaindiscoverypeers), [Ports](#cycloneddsdomaindiscoveryports), [SPDPInterval](#cycloneddsdomaindiscoveryspdpinterval), [SPDPMulticastAddress](#cycloneddsdomaindiscoveryspdpmulticastaddress)
+Children: [DSGracePeriod](#cycloneddsdomaindiscoverydsgraceperiod), [DefaultMulticastAddress](#cycloneddsdomaindiscoverydefaultmulticastaddress), [EnableTopicDiscovery](#cycloneddsdomaindiscoveryenabletopicdiscovery), [ExternalDomainId](#cycloneddsdomaindiscoveryexternaldomainid), [MaxAutoParticipantIndex](#cycloneddsdomaindiscoverymaxautoparticipantindex), [ParticipantIndex](#cycloneddsdomaindiscoveryparticipantindex), [Peers](#cycloneddsdomaindiscoverypeers), [Ports](#cycloneddsdomaindiscoveryports), [SPDPInterval](#cycloneddsdomaindiscoveryspdpinterval), [SPDPMulticastAddress](#cycloneddsdomaindiscoveryspdpmulticastaddress), [Tag](#cycloneddsdomaindiscoverytag)
 
 
 The Discovery element allows specifying various parameters related to the
@@ -138,6 +138,17 @@ Boolean
 Do not use.
 
 The default value is: "true".
+
+
+#### //CycloneDDS/Domain/Discovery/ExternalDomainId
+Text
+
+An override for the domain id, to be used in discovery and for
+determining the port number mapping. This allows creating multiple
+domains in a single process while making them appear as a single domain
+on the network. The value "default" disables the override.
+
+The default value is: "default".
 
 
 #### //CycloneDDS/Domain/Discovery/MaxAutoParticipantIndex
@@ -261,7 +272,7 @@ The default value is: "250".
 ##### //CycloneDDS/Domain/Discovery/Ports/MulticastDataOffset
 Integer
 
-This element specifies the port number for multicast meta traffic (refer
+This element specifies the port number for multicast data traffic (refer
 to the DDSI 2.1 specification, section 9.6.1, constant d2).
 
 The default value is: "1".
@@ -289,7 +300,7 @@ The default value is: "2".
 ##### //CycloneDDS/Domain/Discovery/Ports/UnicastDataOffset
 Integer
 
-This element specifies the port number for unicast meta traffic (refer to
+This element specifies the port number for unicast data traffic (refer to
 the DDSI 2.1 specification, section 9.6.1, constant d3).
 
 The default value is: "11".
@@ -326,6 +337,15 @@ ff02::ffff:239.255.0.1, which is a non-standardised link-local multicast
 address.
 
 The default value is: "239.255.0.1".
+
+
+#### //CycloneDDS/Domain/Discovery/Tag
+Text
+
+String extension for domain id that remote participants must match to be
+discovered.
+
+The default value is: "".
 
 
 ### //CycloneDDS/Domain/General
@@ -672,6 +692,8 @@ The default value is: "false".
 
 
 #### //CycloneDDS/Domain/Internal/HeartbeatInterval
+Attributes: [max](#cycloneddsdomaininternalheartbeatintervalmax), [min](#cycloneddsdomaininternalheartbeatintervalmin), [minsched](#cycloneddsdomaininternalheartbeatintervalminsched)
+
 Number-with-unit
 
 This elemnents allows configuring the base interval for sending writer
@@ -681,6 +703,42 @@ Valid values are finite durations with an explicit unit or the keyword
 'inf' for infinity. Recognised units: ns, us, ms, s, min, hr, day.
 
 The default value is: "100 ms".
+
+
+#### //CycloneDDS/Domain/Internal/HeartbeatInterval[@max]
+Number-with-unit
+
+This attribute sets the maximum interval for periodic heartbeats.
+
+Valid values are finite durations with an explicit unit or the keyword
+'inf' for infinity. Recognised units: ns, us, ms, s, min, hr, day.
+
+The default value is: "8 s".
+
+
+#### //CycloneDDS/Domain/Internal/HeartbeatInterval[@min]
+Number-with-unit
+
+This attribute sets the minimum interval that must have passed since the
+most recent heartbeat from a writer, before another asynchronous (not
+directly related to writing) will be sent.
+
+Valid values are finite durations with an explicit unit or the keyword
+'inf' for infinity. Recognised units: ns, us, ms, s, min, hr, day.
+
+The default value is: "5 ms".
+
+
+#### //CycloneDDS/Domain/Internal/HeartbeatInterval[@minsched]
+Number-with-unit
+
+This attribute sets the minimum interval for periodic heartbeats. Other
+events may still cause heartbeats to go out.
+
+Valid values are finite durations with an explicit unit or the keyword
+'inf' for infinity. Recognised units: ns, us, ms, s, min, hr, day.
+
+The default value is: "20 ms".
 
 
 #### //CycloneDDS/Domain/Internal/LateAckMode
@@ -704,6 +762,8 @@ The default value is: "10 s".
 
 
 #### //CycloneDDS/Domain/Internal/LivelinessMonitoring
+Attributes: [Interval](#cycloneddsdomaininternallivelinessmonitoringinterval), [StackTraces](#cycloneddsdomaininternallivelinessmonitoringstacktraces)
+
 Boolean
 
 This element controls whether or not implementation should internally
@@ -712,6 +772,28 @@ traces can be dumped automatically when some thread appears to have
 stopped making progress.
 
 The default value is: "false".
+
+
+#### //CycloneDDS/Domain/Internal/LivelinessMonitoring[@Interval]
+Number-with-unit
+
+This element controls the interval at which to check whether threads have
+been making progress.
+
+The unit must be specified explicitly. Recognised units: ns, us, ms, s,
+min, hr, day.
+
+The default value is: "1s".
+
+
+#### //CycloneDDS/Domain/Internal/LivelinessMonitoring[@StackTraces]
+Boolean
+
+This element controls whether or not to write stack traces to the Cyclone
+DDS trace when a thread fails to make progress (on select platforms
+only).
+
+The default value is: "true".
 
 
 #### //CycloneDDS/Domain/Internal/MaxParticipants
@@ -819,15 +901,31 @@ The default value is: "-1".
 
 
 #### //CycloneDDS/Domain/Internal/MultipleReceiveThreads
-Boolean
+Attributes: [maxretries](#cycloneddsdomaininternalmultiplereceivethreadsmaxretries)
+
+One of: false, true, default
 
 This element controls whether all traffic is handled by a single receive
-thread or whether multiple receive threads may be used to improve
-latency. Currently multiple receive threads are only used for
-connectionless transport (e.g., UDP) and ManySocketsMode not set to
-single (the default).
+thread (false) or whether multiple receive threads may be used to improve
+latency (true). By default it is disabled on Windows because it appears
+that one cannot count on being able to send packets to oneself, which is
+necessary to stop the thread during shutdown. Currently multiple receive
+threads are only used for connectionless transport (e.g., UDP) and
+ManySocketsMode not set to single (the default).
 
-The default value is: "true".
+The default value is: "default".
+
+
+#### //CycloneDDS/Domain/Internal/MultipleReceiveThreads[@maxretries]
+Integer
+
+Receive threads dedicated to a single socket can only be triggered for
+termination by sending a packet. Reception of any packet will do, so
+termination failure due to packet loss is exceedingly unlikely, but to
+eliminate all risks, it will retry as many times as specified by this
+attribute before aborting.
+
+The default value is: "4294967295".
 
 
 #### //CycloneDDS/Domain/Internal/NackDelay
@@ -880,6 +978,8 @@ The default value is: "true".
 
 
 #### //CycloneDDS/Domain/Internal/RediscoveryBlacklistDuration
+Attributes: [enforce](#cycloneddsdomaininternalrediscoveryblacklistdurationenforce)
+
 Number-with-unit
 
 This element controls for how long a remote participant that was
@@ -896,6 +996,18 @@ Valid values are finite durations with an explicit unit or the keyword
 'inf' for infinity. Recognised units: ns, us, ms, s, min, hr, day.
 
 The default value is: "10s".
+
+
+#### //CycloneDDS/Domain/Internal/RediscoveryBlacklistDuration[@enforce]
+Boolean
+
+This attribute controls whether the configured time during which recently
+deleted participants will not be rediscovered (i.e., "black listed") is
+enforced and following complete removal of the participant in Cyclone
+DDS, or whether it can be rediscovered earlier provided all traces of
+that participant have been removed already.
+
+The default value is: "false".
 
 
 #### //CycloneDDS/Domain/Internal/RetransmitMerging
@@ -1538,7 +1650,7 @@ threads exist:
 
 * dq.CHAN: delivery thread for channel CHAN;
 
-* tev.CHAN: timed-even thread for channel CHAN.
+* tev.CHAN: timed-event thread for channel CHAN.
 
 
 ##### //CycloneDDS/Domain/Threads/Thread/Scheduling

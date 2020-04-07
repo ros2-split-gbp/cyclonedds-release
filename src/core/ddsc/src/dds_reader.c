@@ -14,6 +14,7 @@
 #include "dds/dds.h"
 #include "dds/version.h"
 #include "dds/ddsrt/static_assert.h"
+#include "dds__participant.h"
 #include "dds__subscriber.h"
 #include "dds__reader.h"
 #include "dds__listener.h"
@@ -25,9 +26,10 @@
 #include "dds__qos.h"
 #include "dds/ddsi/q_entity.h"
 #include "dds/ddsi/q_thread.h"
-#include "dds/ddsi/q_globals.h"
+#include "dds/ddsi/ddsi_domaingv.h"
 #include "dds__builtin.h"
 #include "dds/ddsi/ddsi_sertopic.h"
+#include "dds/ddsi/ddsi_entity_index.h"
 
 DECL_ENTITY_LOCK_UNLOCK (extern inline, dds_reader)
 
@@ -62,22 +64,36 @@ static dds_return_t dds_reader_delete (dds_entity *e) ddsrt_nonnull_all;
 static dds_return_t dds_reader_delete (dds_entity *e)
 {
   dds_reader * const rd = (dds_reader *) e;
-  (void) dds_delete (rd->m_topic->m_entity.m_hdllink.hdl);
   dds_free (rd->m_loan);
   thread_state_awake (lookup_thread_state (), &e->m_domain->gv);
   dds_rhc_free (rd->m_rhc);
   thread_state_asleep (lookup_thread_state ());
+  dds_entity_drop_ref (&rd->m_topic->m_entity);
+  return DDS_RETCODE_OK;
+}
+
+static dds_return_t validate_reader_qos (const dds_qos_t *rqos)
+{
+#ifndef DDSI_INCLUDE_DEADLINE_MISSED
+  if (rqos != NULL && (rqos->present & QP_DEADLINE) && rqos->deadline.deadline != DDS_INFINITY)
+    return DDS_RETCODE_BAD_PARAMETER;
+#else
+  DDSRT_UNUSED_ARG (rqos);
+#endif
   return DDS_RETCODE_OK;
 }
 
 static dds_return_t dds_reader_qos_set (dds_entity *e, const dds_qos_t *qos, bool enabled)
 {
   /* note: e->m_qos is still the old one to allow for failure here */
+  dds_return_t ret;
+  if ((ret = validate_reader_qos(qos)) != DDS_RETCODE_OK)
+    return ret;
   if (enabled)
   {
     struct reader *rd;
     thread_state_awake (lookup_thread_state (), &e->m_domain->gv);
-    if ((rd = ephash_lookup_reader_guid (e->m_domain->gv.guid_hash, &e->m_guid)) != NULL)
+    if ((rd = entidx_lookup_reader_guid (e->m_domain->gv.entity_index, &e->m_guid)) != NULL)
       update_reader_qos (rd, qos);
     thread_state_asleep (lookup_thread_state ());
   }
@@ -150,6 +166,7 @@ void dds_reader_data_available_cb (struct dds_reader *rd)
 
   rd->m_entity.m_cb_count--;
   rd->m_entity.m_cb_pending_count--;
+
   ddsrt_cond_broadcast (&rd->m_entity.m_observers_cond);
   ddsrt_mutex_unlock (&rd->m_entity.m_observers_lock);
 }
@@ -232,16 +249,44 @@ void dds_reader_status_cb (void *ventity, const status_cb_data_t *data)
     }
     case DDS_LIVELINESS_CHANGED_STATUS_ID: {
       struct dds_liveliness_changed_status * const st = vst = &rd->m_liveliness_changed_status;
-      if (data->add) {
-        st->alive_count++;
-        st->alive_count_change++;
-        if (st->not_alive_count > 0) {
+      DDSRT_STATIC_ASSERT ((uint32_t) LIVELINESS_CHANGED_ADD_ALIVE == 0 &&
+                           LIVELINESS_CHANGED_ADD_ALIVE < LIVELINESS_CHANGED_ADD_NOT_ALIVE &&
+                           LIVELINESS_CHANGED_ADD_NOT_ALIVE < LIVELINESS_CHANGED_REMOVE_NOT_ALIVE &&
+                           LIVELINESS_CHANGED_REMOVE_NOT_ALIVE < LIVELINESS_CHANGED_REMOVE_ALIVE &&
+                           LIVELINESS_CHANGED_REMOVE_ALIVE < LIVELINESS_CHANGED_ALIVE_TO_NOT_ALIVE &&
+                           LIVELINESS_CHANGED_ALIVE_TO_NOT_ALIVE < LIVELINESS_CHANGED_NOT_ALIVE_TO_ALIVE &&
+                           (uint32_t) LIVELINESS_CHANGED_NOT_ALIVE_TO_ALIVE < UINT32_MAX);
+      assert (data->extra <= (uint32_t) LIVELINESS_CHANGED_NOT_ALIVE_TO_ALIVE);
+      switch ((enum liveliness_changed_data_extra) data->extra)
+      {
+        case LIVELINESS_CHANGED_ADD_ALIVE:
+          st->alive_count++;
+          st->alive_count_change++;
+          break;
+        case LIVELINESS_CHANGED_ADD_NOT_ALIVE:
+          st->not_alive_count++;
+          st->not_alive_count_change++;
+          break;
+        case LIVELINESS_CHANGED_REMOVE_NOT_ALIVE:
           st->not_alive_count--;
-        }
-      } else {
-        st->alive_count--;
-        st->not_alive_count++;
-        st->not_alive_count_change++;
+          st->not_alive_count_change--;
+          break;
+        case LIVELINESS_CHANGED_REMOVE_ALIVE:
+          st->alive_count--;
+          st->alive_count_change--;
+          break;
+        case LIVELINESS_CHANGED_ALIVE_TO_NOT_ALIVE:
+          st->alive_count--;
+          st->alive_count_change--;
+          st->not_alive_count++;
+          st->not_alive_count_change++;
+          break;
+        case LIVELINESS_CHANGED_NOT_ALIVE_TO_ALIVE:
+          st->not_alive_count--;
+          st->not_alive_count_change--;
+          st->alive_count++;
+          st->alive_count_change++;
+          break;
       }
       st->last_publication_handle = data->handle;
       invoke = (lst->on_liveliness_changed != 0);
@@ -315,97 +360,105 @@ static dds_entity_t dds_create_reader_int (dds_entity_t participant_or_subscribe
 {
   dds_qos_t *rqos;
   dds_subscriber *sub = NULL;
-  dds_participant *pp;
   dds_entity_t subscriber;
-  dds_reader *rd;
   dds_topic *tp;
-  dds_entity_t reader;
-  dds_entity_t t;
-  dds_return_t ret = DDS_RETCODE_OK;
-  bool internal_topic;
+  dds_return_t rc;
+  dds_entity_t pseudo_topic = 0;
+  bool created_implicit_sub = false;
 
   switch (topic)
   {
-    case DDS_BUILTIN_TOPIC_DCPSPARTICIPANT:
     case DDS_BUILTIN_TOPIC_DCPSTOPIC:
+      /* not implemented yet */
+      return DDS_RETCODE_BAD_PARAMETER;
+
+    case DDS_BUILTIN_TOPIC_DCPSPARTICIPANT:
     case DDS_BUILTIN_TOPIC_DCPSPUBLICATION:
     case DDS_BUILTIN_TOPIC_DCPSSUBSCRIPTION:
-      internal_topic = true;
-      subscriber = dds__get_builtin_subscriber (participant_or_subscriber);
-      t = dds__get_builtin_topic (subscriber, topic);
+      /* translate provided pseudo-topic to a real one */
+      pseudo_topic = topic;
+      if ((subscriber = dds__get_builtin_subscriber (participant_or_subscriber)) < 0)
+        return subscriber;
+      if ((rc = dds_subscriber_lock (subscriber, &sub)) != DDS_RETCODE_OK)
+        return rc;
+      topic = dds__get_builtin_topic (subscriber, topic);
       break;
 
     default: {
       dds_entity *p_or_s;
-      if ((ret = dds_entity_pin (participant_or_subscriber, &p_or_s)) != DDS_RETCODE_OK)
-        return ret;
-      if (dds_entity_kind (p_or_s) == DDS_KIND_PARTICIPANT)
-        subscriber = dds_create_subscriber (participant_or_subscriber, qos, NULL);
-      else
-        subscriber = participant_or_subscriber;
-      dds_entity_unpin (p_or_s);
-      internal_topic = false;
-      t = topic;
+      if ((rc = dds_entity_lock (participant_or_subscriber, DDS_KIND_DONTCARE, &p_or_s)) != DDS_RETCODE_OK)
+        return rc;
+      switch (dds_entity_kind (p_or_s))
+      {
+        case DDS_KIND_SUBSCRIBER:
+          subscriber = participant_or_subscriber;
+          sub = (dds_subscriber *) p_or_s;
+          break;
+        case DDS_KIND_PARTICIPANT:
+          created_implicit_sub = true;
+          subscriber = dds__create_subscriber_l ((dds_participant *) p_or_s, true, qos, NULL);
+          dds_entity_unlock (p_or_s);
+          if ((rc = dds_subscriber_lock (subscriber, &sub)) < 0)
+            return rc;
+          break;
+        default:
+          dds_entity_unlock (p_or_s);
+          return DDS_RETCODE_ILLEGAL_OPERATION;
+      }
       break;
     }
   }
 
-  if ((ret = dds_subscriber_lock (subscriber, &sub)) != DDS_RETCODE_OK)
-  {
-    reader = ret;
-    goto err_sub_lock;
-  }
-
-  if (subscriber != participant_or_subscriber && !internal_topic)
-  {
-    /* Delete implicit subscriber if reader creation fails */
-    sub->m_entity.m_flags |= DDS_ENTITY_IMPLICIT;
-  }
-
-  if ((ret = dds_topic_lock (t, &tp)) != DDS_RETCODE_OK)
-  {
-    reader = ret;
-    goto err_tp_lock;
-  }
+  if ((rc = dds_topic_pin (topic, &tp)) < 0)
+    goto err_pin_topic;
   assert (tp->m_stopic);
-  pp = dds_entity_participant (&sub->m_entity);
-  if (pp != dds_entity_participant (&tp->m_entity))
+  if (dds_entity_participant (&sub->m_entity) != dds_entity_participant (&tp->m_entity))
   {
-    reader = DDS_RETCODE_BAD_PARAMETER;
+    rc = DDS_RETCODE_BAD_PARAMETER;
     goto err_pp_mismatch;
   }
+
+  /* Prevent set_qos on the topic until reader has been created and registered: we can't
+     allow a TOPIC_DATA change to ccur before the reader has been created because that
+     change would then not be published in the discovery/built-in topics.
+
+     Don't keep the participant (which protects the topic's QoS) locked because that
+     can cause deadlocks for applications creating a reader/writer from within a
+     subscription matched listener (whether the restrictions on what one can do in
+     listeners are reasonable or not, it used to work so it can be broken arbitrarily). */
+  dds_topic_defer_set_qos (tp);
 
   /* Merge qos from topic and subscriber, dds_copy_qos only fails when it is passed a null
      argument, but that isn't the case here */
   rqos = dds_create_qos ();
   if (qos)
-    nn_xqos_mergein_missing (rqos, qos, DDS_READER_QOS_MASK);
+    ddsi_xqos_mergein_missing (rqos, qos, DDS_READER_QOS_MASK);
   if (sub->m_entity.m_qos)
-    nn_xqos_mergein_missing (rqos, sub->m_entity.m_qos, ~(uint64_t)0);
-  if (tp->m_entity.m_qos)
-    nn_xqos_mergein_missing (rqos, tp->m_entity.m_qos, ~(uint64_t)0);
-  nn_xqos_mergein_missing (rqos, &sub->m_entity.m_domain->gv.default_xqos_rd, ~(uint64_t)0);
+    ddsi_xqos_mergein_missing (rqos, sub->m_entity.m_qos, ~(uint64_t)0);
+  if (tp->m_ktopic->qos)
+    ddsi_xqos_mergein_missing (rqos, tp->m_ktopic->qos, ~(uint64_t)0);
+  ddsi_xqos_mergein_missing (rqos, &sub->m_entity.m_domain->gv.default_xqos_rd, ~(uint64_t)0);
 
-  if ((ret = nn_xqos_valid (&sub->m_entity.m_domain->gv.logconfig, rqos)) != DDS_RETCODE_OK)
+  if ((rc = ddsi_xqos_valid (&sub->m_entity.m_domain->gv.logconfig, rqos)) < 0 ||
+      (rc = validate_reader_qos(rqos)) != DDS_RETCODE_OK)
   {
     dds_delete_qos (rqos);
-    reader = ret;
     goto err_bad_qos;
   }
 
   /* Additional checks required for built-in topics: we don't want to
      run into a resource limit on a built-in topic, it is a needless
      complication */
-  if (internal_topic && !dds__validate_builtin_reader_qos (tp->m_entity.m_domain, topic, rqos))
+  if (pseudo_topic && !dds__validate_builtin_reader_qos (tp->m_entity.m_domain, pseudo_topic, rqos))
   {
     dds_delete_qos (rqos);
-    reader = DDS_RETCODE_INCONSISTENT_POLICY;
+    rc = DDS_RETCODE_INCONSISTENT_POLICY;
     goto err_bad_qos;
   }
 
   /* Create reader and associated read cache (if not provided by caller) */
-  rd = dds_alloc (sizeof (*rd));
-  reader = dds_entity_init (&rd->m_entity, &sub->m_entity, DDS_KIND_READER, rqos, listener, DDS_READER_STATUS_MASK);
+  struct dds_reader * const rd = dds_alloc (sizeof (*rd));
+  const dds_entity_t reader = dds_entity_init (&rd->m_entity, &sub->m_entity, DDS_KIND_READER, false, rqos, listener, DDS_READER_STATUS_MASK);
   rd->m_sample_rejected_status.last_reason = DDS_NOT_REJECTED;
   rd->m_topic = tp;
   rd->m_rhc = rhc ? rhc : dds_rhc_default_new (rd, tp->m_stopic);
@@ -422,34 +475,27 @@ static dds_entity_t dds_create_reader_int (dds_entity_t participant_or_subscribe
   dds_entity_init_complete (&rd->m_entity);
 
   thread_state_awake (lookup_thread_state (), &sub->m_entity.m_domain->gv);
-  ret = new_reader (&rd->m_rd, &rd->m_entity.m_domain->gv, &rd->m_entity.m_guid, NULL, &pp->m_entity.m_guid, tp->m_stopic, rqos, &rd->m_rhc->common.rhc, dds_reader_status_cb, rd);
-  assert (ret == DDS_RETCODE_OK); /* FIXME: can be out-of-resources at the very least */
+  rc = new_reader (&rd->m_rd, &rd->m_entity.m_domain->gv, &rd->m_entity.m_guid, NULL, dds_entity_participant_guid (&sub->m_entity), tp->m_stopic, rqos, &rd->m_rhc->common.rhc, dds_reader_status_cb, rd);
+  assert (rc == DDS_RETCODE_OK); /* FIXME: can be out-of-resources at the very least */
   thread_state_asleep (lookup_thread_state ());
 
   rd->m_entity.m_iid = get_entity_instance_id (&rd->m_entity.m_domain->gv, &rd->m_entity.m_guid);
   dds_entity_register_child (&sub->m_entity, &rd->m_entity);
 
-  dds_topic_unlock (tp);
+  dds_topic_allow_set_qos (tp);
+  dds_topic_unpin (tp);
   dds_subscriber_unlock (sub);
-
-  if (internal_topic)
-  {
-    /* If topic is builtin, then the topic entity is local and should be deleted because the application won't. */
-    dds_delete (t);
-  }
   return reader;
 
 err_bad_qos:
+  dds_topic_allow_set_qos (tp);
 err_pp_mismatch:
-  dds_topic_unlock (tp);
-err_tp_lock:
+  dds_topic_unpin (tp);
+err_pin_topic:
   dds_subscriber_unlock (sub);
-  if ((sub->m_entity.m_flags & DDS_ENTITY_IMPLICIT) != 0)
+  if (created_implicit_sub)
     (void) dds_delete (subscriber);
-err_sub_lock:
-  if (internal_topic)
-    dds_delete (t);
-  return reader;
+  return rc;
 }
 
 void dds_reader_ddsi2direct (dds_entity_t entity, ddsi2direct_directread_cb_t cb, void *cbarg)
@@ -488,7 +534,7 @@ void dds_reader_ddsi2direct (dds_entity_t entity, ddsi2direct_directread_cb_t cb
       pwrguid_next.entityid.u = (pwrguid_next.entityid.u & ~(uint32_t)0xff) | NN_ENTITYID_KIND_WRITER_NO_KEY;
     }
     ddsrt_mutex_unlock (&rd->e.lock);
-    if ((pwr = ephash_lookup_proxy_writer_guid (dds_entity->m_domain->gv.guid_hash, &pwrguid)) != NULL)
+    if ((pwr = entidx_lookup_proxy_writer_guid (dds_entity->m_domain->gv.entity_index, &pwrguid)) != NULL)
     {
       ddsrt_mutex_lock (&pwr->e.lock);
       pwr->ddsi2direct_cb = cb;
