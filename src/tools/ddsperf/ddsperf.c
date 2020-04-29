@@ -283,7 +283,7 @@ struct ppant {
   ddsrt_avl_node_t avlnode;     /* embedded AVL node for handle index */
   ddsrt_fibheap_node_t fhnode;  /* prio queue for timeout handling */
   dds_instance_handle_t handle; /* participant instance handle */
-  dds_builtintopic_guid_t guid; /* participant GUID */
+  dds_guid_t guid;              /* participant GUID */
   char *hostname;               /* hostname is taken from user_data QoS */
   uint32_t pid;                 /* pid is also taken from user_data QoS */
   dds_time_t tdisc;             /* time at which it was discovered */
@@ -357,7 +357,7 @@ static void error3 (const char *fmt, ...)
   verrorx (3, fmt, ap);
 }
 
-static char *make_guidstr (struct guidstr *buf, const dds_builtintopic_guid_t *guid)
+static char *make_guidstr (struct guidstr *buf, const dds_guid_t *guid)
 {
   snprintf (buf->str, sizeof (buf->str), "%02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x_%02x%02x%02x%02x",
             guid->v[0], guid->v[1], guid->v[2], guid->v[3],
@@ -2051,8 +2051,15 @@ int main (int argc, char *argv[])
      has convenience functions for that ...) */
   if ((rd_participants = dds_create_reader (dp, DDS_BUILTIN_TOPIC_DCPSPARTICIPANT, NULL, NULL)) < 0)
     error2 ("dds_create_reader(participants) failed: %d\n", (int) rd_participants);
-  /* set listener later: DATA_AVAILABLE still has the nasty habit of potentially triggering
-     before the reader is accessible to the application via its handle */
+  if ((rd_subscriptions = dds_create_reader (dp, DDS_BUILTIN_TOPIC_DCPSSUBSCRIPTION, NULL, NULL)) < 0)
+    error2 ("dds_create_reader(subscriptions) failed: %d\n", (int) rd_subscriptions);
+  if ((rd_publications = dds_create_reader (dp, DDS_BUILTIN_TOPIC_DCPSPUBLICATION, NULL, NULL)) < 0)
+    error2 ("dds_create_reader(publications) failed: %d\n", (int) rd_publications);
+
+  /* Set DATA_AVAILABLE listener on participant later: it has the nasty habit of potentially
+     triggering before the reader is accessible to the application via its handle. Furthermore,
+     upon matching a participant, a new writer is created that gets a publication_matched
+     listener, which in turn depends on rd_subscriptions. */
   listener = dds_create_listener (NULL);
   dds_lset_data_available (listener, participant_data_listener);
   dds_set_listener (rd_participants, listener);
@@ -2060,10 +2067,6 @@ int main (int argc, char *argv[])
   /* then there is the matter of data arriving prior to setting the listener ... this state
      of affairs is undoubtedly a bug */
   participant_data_listener (rd_participants, NULL);
-  if ((rd_subscriptions = dds_create_reader (dp, DDS_BUILTIN_TOPIC_DCPSSUBSCRIPTION, NULL, NULL)) < 0)
-    error2 ("dds_create_reader(subscriptions) failed: %d\n", (int) rd_subscriptions);
-  if ((rd_publications = dds_create_reader (dp, DDS_BUILTIN_TOPIC_DCPSPUBLICATION, NULL, NULL)) < 0)
-    error2 ("dds_create_reader(publications) failed: %d\n", (int) rd_publications);
 
   /* stats writer always exists, reader only when we were requested to collect & print stats */
   qos = dds_create_qos ();

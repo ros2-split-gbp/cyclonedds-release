@@ -15,6 +15,7 @@ idlc_generate(RoundTrip RoundTrip.idl)
 idlc_generate(Space Space.idl)
 idlc_generate(TypesArrayKey TypesArrayKey.idl)
 idlc_generate(WriteTypes WriteTypes.idl)
+idlc_generate(InstanceHandleTypes InstanceHandleTypes.idl)
 
 set(ddsc_test_sources
     "basic.c"
@@ -28,8 +29,10 @@ set(ddsc_test_sources
     "entity_status.c"
     "err.c"
     "instance_get_key.c"
+    "instance_handle.c"
     "listener.c"
     "liveliness.c"
+    "loan.c"
     "multi_sertopic.c"
     "participant.c"
     "publisher.c"
@@ -41,7 +44,6 @@ set(ddsc_test_sources
     "reader_iterator.c"
     "read_instance.c"
     "register.c"
-    "return_loan.c"
     "subscriber.c"
     "take_instance.c"
     "time.c"
@@ -55,7 +57,9 @@ set(ddsc_test_sources
     "whc.c"
     "write.c"
     "write_various_types.c"
-    "writer.c")
+    "writer.c"
+    "test_common.c"
+    "test_common.h")
 
 if(ENABLE_LIFESPAN)
   list(APPEND ddsc_test_sources "lifespan.c")
@@ -71,7 +75,7 @@ target_include_directories(
   "$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/src/include/>"
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../ddsc/src>"
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../ddsi/include>")
-target_link_libraries(cunit_ddsc PRIVATE RoundTrip Space TypesArrayKey WriteTypes ddsc)
+target_link_libraries(cunit_ddsc PRIVATE RoundTrip Space TypesArrayKey WriteTypes InstanceHandleTypes ddsc)
 
 # Setup environment for config-tests
 get_test_property(CUnit_ddsc_config_simple_udp ENVIRONMENT CUnit_ddsc_config_simple_udp_env)

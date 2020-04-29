@@ -102,6 +102,13 @@ DDSRT_STATIC_ASSERT (sizeof (struct nn_rmsg) == offsetof (struct nn_rmsg, chunk)
 #define NN_RMSG_PAYLOAD(m) ((unsigned char *) (m + 1))
 #define NN_RMSG_PAYLOADOFF(m, o) (NN_RMSG_PAYLOAD (m) + (o))
 
+/* Align rmsg chunks to the larger of sizeof(void*) or 8.
+
+Ideally, we would use C11's alignof(struct nn_rmsg); however, to avoid dependency on C11,
+we ensure rmsg chunks are at least aligned to sizeof(void *) or 8,
+whichever is larger. */
+#define ALIGNOF_RMSG (sizeof(void *) > 8 ? sizeof(void *) : 8)
+
 struct receiver_state {
   ddsi_guid_prefix_t src_guid_prefix;       /* 12 */
   ddsi_guid_prefix_t dst_guid_prefix;       /* 12 */
@@ -120,10 +127,9 @@ struct nn_rsample_info {
   struct proxy_writer *pwr;
   uint32_t size;
   uint32_t fragsize;
-  nn_wctime_t timestamp;
-  nn_wctime_t reception_timestamp; /* OpenSplice extension -- but we get it essentially for free, so why not? */
+  ddsrt_wctime_t timestamp;
+  ddsrt_wctime_t reception_timestamp; /* OpenSplice extension -- but we get it essentially for free, so why not? */
   unsigned statusinfo: 2;       /* just the two defined bits from the status info */
-  unsigned pt_wr_info_zoff: 16; /* PrismTech writer info offset */
   unsigned bswap: 1;            /* so we can extract well formatted writer info quicker */
   unsigned complex_qos: 1;      /* includes QoS other than keyhash, 2-bit statusinfo, PT writer info */
 };
@@ -156,8 +162,6 @@ struct nn_rdata {
 #define NN_ZOFF_TO_OFF(zoff) ((unsigned) (zoff))
 #define NN_OFF_TO_ZOFF(off) ((unsigned short) (off))
 #endif
-#define NN_SAMPLEINFO_HAS_WRINFO(rsi) ((rsi)->pt_wr_info_zoff != NN_OFF_TO_ZOFF (0))
-#define NN_SAMPLEINFO_WRINFO_OFF(rsi) NN_ZOFF_TO_OFF ((rsi)->pt_wr_info_zoff)
 #define NN_RDATA_PAYLOAD_OFF(rdata) NN_ZOFF_TO_OFF ((rdata)->payload_zoff)
 #define NN_RDATA_SUBMSG_OFF(rdata) NN_ZOFF_TO_OFF ((rdata)->submsg_zoff)
 

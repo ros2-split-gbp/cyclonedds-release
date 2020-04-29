@@ -21,8 +21,8 @@
 #include "dds/ddsrt/fibheap.h"
 
 #include "dds/ddsi/ddsi_plist.h"
+#include "dds/ddsi/ddsi_ownip.h"
 #include "dds/ddsi/q_protocol.h"
-#include "dds/ddsi/q_nwif.h"
 #include "dds/ddsi/q_sockwaitset.h"
 #include "dds/ddsi/q_config.h"
 
@@ -240,7 +240,7 @@ struct ddsi_domaingv {
 
   /* Start time of the DDSI2 service, for logging relative time stamps,
      should I ever so desire. */
-  nn_wctime_t tstart;
+  ddsrt_wctime_t tstart;
 
   /* Default QoSs for participant, readers and writers (needed for
      eliminating default values in outgoing discovery packets, and for
