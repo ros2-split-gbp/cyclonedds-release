@@ -1,4 +1,4 @@
-From b5465483f8965805e521a5989af13e7a21e63198 Mon Sep 17 00:00:00 2001
+From 2f5553582c5e854ae9689848edfc709077c17239 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Steven!=20Ragnar=C3=B6k?= <steven@nuclearsandwich.com>
 Date: Tue, 28 Apr 2020 21:20:00 -0400
 Subject: [PATCH] Add IDL compiler dependencies.
@@ -21,5 +21,5 @@ index 9f058fe..6e3ec56 100644
      <depend>openssl</depend>
      <test_depend>libcunit-dev</test_depend>
 -- 
-2.26.1
+2.27.0
 
