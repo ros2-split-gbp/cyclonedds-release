@@ -1,4 +1,4 @@
-From 3c3fc40443062b61862330d9894e2b10467216e3 Mon Sep 17 00:00:00 2001
+From 746f25eb5ca87788c803d9b027df13b07748736f Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Steven!=20Ragnar=C3=B6k?= <steven@nuclearsandwich.com>
 Date: Tue, 28 Apr 2020 21:20:00 -0400
 Subject: [PATCH] Add IDL compiler dependencies.
