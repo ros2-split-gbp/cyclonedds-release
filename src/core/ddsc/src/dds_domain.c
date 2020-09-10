@@ -36,7 +36,9 @@ const struct dds_entity_deriver dds_entity_deriver_domain = {
   .close = dds_entity_deriver_dummy_close,
   .delete = dds_domain_free,
   .set_qos = dds_entity_deriver_dummy_set_qos,
-  .validate_status = dds_entity_deriver_dummy_validate_status
+  .validate_status = dds_entity_deriver_dummy_validate_status,
+  .create_statistics = dds_entity_deriver_dummy_create_statistics,
+  .refresh_statistics = dds_entity_deriver_dummy_refresh_statistics
 };
 
 static int dds_domain_compare (const void *va, const void *vb)
@@ -59,7 +61,7 @@ static dds_entity_t dds_domain_init (dds_domain *domain, dds_domainid_t domain_i
   domain->m_entity.m_domain = domain;
   domain->m_entity.m_iid = ddsi_iid_gen ();
 
-  domain->gv.tstart = now ();
+  domain->gv.tstart = ddsrt_time_wallclock ();
 
   /* | domain_id | domain id in config | result
      +-----------+---------------------+----------

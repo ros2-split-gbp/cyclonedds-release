@@ -22,7 +22,6 @@
 
 #include "dds/ddsi/q_entity.h"
 #include "dds/ddsi/q_config.h"
-#include "dds/ddsi/q_time.h"
 #include "dds/ddsi/q_misc.h"
 #include "dds/ddsi/q_log.h"
 #include "dds/ddsi/ddsi_plist.h"
@@ -276,8 +275,8 @@ static int print_proxy_participants (struct thread_state1 * const ts1, struct dd
         x += cpf (conn, "    last_seq %"PRId64" last_fragnum %"PRIu32"\n", w->last_seq, w->last_fragnum);
         for (m = ddsrt_avl_iter_first (&wr_readers_treedef, &w->readers, &rdit); m; m = ddsrt_avl_iter_next (&rdit))
         {
-          x += cpf (conn, "    rd "PGUIDFMT" (nack %"PRId64" %"PRId64")\n",
-                    PGUID (m->rd_guid), m->seq_last_nack, m->t_last_nack.v);
+          x += cpf (conn, "    rd "PGUIDFMT" (nack %"PRId64" frag %"PRIu32" %"PRId64")\n",
+                    PGUID (m->rd_guid), m->last_nack.seq_end_p1, m->last_nack.frag_end_p1, m->t_last_nack.v);
           switch (m->in_sync)
           {
             case PRMSS_SYNC:
@@ -370,8 +369,7 @@ struct debug_monitor *new_debug_monitor (struct ddsi_domaingv *gv, int32_t port)
     goto err_invalid_port;
   }
 
-  dm->servsock = ddsi_factory_create_listener (dm->tran_factory, (uint32_t) port, NULL);
-  if (dm->servsock == NULL)
+  if (ddsi_factory_create_listener (&dm->servsock, dm->tran_factory, (uint32_t) port, NULL) != DDS_RETCODE_OK)
   {
     GVWARNING ("debmon: can't create socket\n");
     goto err_servsock;
