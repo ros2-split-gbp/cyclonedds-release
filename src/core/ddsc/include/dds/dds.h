@@ -25,6 +25,7 @@
 #endif
 
 #include "dds/export.h"
+#include "dds/features.h"
 
 /**
  * Handle to an entity. A valid entity handle will always have a positive
@@ -89,6 +90,7 @@ typedef enum dds_status_id {
   DDS_PUBLICATION_MATCHED_STATUS_ID,
   DDS_SUBSCRIPTION_MATCHED_STATUS_ID
 } dds_status_id_t;
+#define DDS_STATUS_ID_MAX (DDS_SUBSCRIPTION_MATCHED_STATUS_ID)
 
 /** Another topic exists with the same name but with different characteristics. */
 #define DDS_INCONSISTENT_TOPIC_STATUS          (1u << DDS_INCONSISTENT_TOPIC_STATUS_ID)
@@ -186,17 +188,21 @@ typedef struct dds_builtintopic_guid
 }
 dds_builtintopic_guid_t;
 
+/* "dds_builtintopic_guid_t" is a bit of a weird name for what everyone just calls a GUID,
+   so let us try and switch to using the more logical one */
+typedef struct dds_builtintopic_guid dds_guid_t;
+
 typedef struct dds_builtintopic_participant
 {
-  dds_builtintopic_guid_t key;
+  dds_guid_t key;
   dds_qos_t *qos;
 }
 dds_builtintopic_participant_t;
 
 typedef struct dds_builtintopic_endpoint
 {
-  dds_builtintopic_guid_t key;
-  dds_builtintopic_guid_t participant_key;
+  dds_guid_t key;
+  dds_guid_t participant_key;
   dds_instance_handle_t participant_instance_handle;
   char *topic_name;
   char *type_name;
@@ -413,6 +419,26 @@ dds_get_mask(dds_entity_t condition, uint32_t *mask);
 /* TODO: Check list of return codes is complete. */
 DDS_EXPORT dds_return_t
 dds_get_instance_handle(dds_entity_t entity, dds_instance_handle_t *ihdl);
+
+/**
+ * @brief Returns the GUID that represents the entity in the network,
+ * and therefore only supports participants, readers and writers.
+ *
+ * @param[in]   entity  Entity of which to get the instance handle.
+ * @param[out]  guid    Where to store the GUID.
+ *
+ * @returns A dds_return_t indicating success or failure.
+ *
+ * @retval DDS_RETCODE_OK
+ *             Success.
+ * @retval DDS_RETCODE_ILLEGAL_OPERATION
+ *             The operation is invoked on an inappropriate object.
+ * @retval DDS_RETCODE_ERROR
+ *             An internal error has occurred.
+ */
+/* TODO: Check list of return codes is complete. */
+DDS_EXPORT dds_return_t
+dds_get_guid (dds_entity_t entity, dds_guid_t *guid);
 
 /*
   All entities have a set of "status conditions" (following the DCPS
@@ -738,8 +764,22 @@ dds_set_listener(dds_entity_t entity, const dds_listener_t * listener);
  *
  * @retval >0
  *             A valid participant handle.
+ * @retval DDS_RETCODE_NOT_ALLOWED_BY_SECURITY
+ *             An invalid DDS Security configuration was specified (whether
+ *             that be missing or incorrect entries, expired certificates,
+ *             or anything else related to the security settings and
+ *             implementation).
+ * @retval DDS_RETCODE_PRECONDITION_NOT_MET
+ *             Some security properties specified in the QoS, but the Cyclone
+ *             build does not include support for DDS Security.
+ * @retval DDS_RETCODE_OUT_OF_RESOURCES
+ *             Some resource limit (maximum participants, memory, handles,
+ *             &c.) prevented creation of the participant.
  * @retval DDS_RETCODE_ERROR
- *             An internal error has occurred.
+ *             The "CYCLONEDDS_URI" environment variable lists non-existent
+ *             or invalid configuration files, or contains invalid embedded
+ *             configuration items; or an unspecified internal error has
+ *             occurred.
  */
 DDS_EXPORT dds_entity_t
 dds_create_participant(
@@ -1102,31 +1142,83 @@ dds_get_type_name(dds_entity_t topic, char *name, size_t size);
 
 /** Topic filter function */
 typedef bool (*dds_topic_filter_fn) (const void * sample);
+typedef bool (*dds_topic_filter_arg_fn) (const void * sample, void * arg);
 
 /**
- * @brief Sets a filter on a topic.
+ * @brief Sets a filter on a topic. To be replaced by proper filtering on readers,
+ * no guarantee that this will be maintained for backwards compatibility.
+ *
+ * Not thread-safe with respect to data being read/written using readers/writers
+ * using this topic.  Be sure to create a topic entity specific to the reader you
+ * want to filter, then set the filter function, and only then create the reader.
+ * And don't change it unless you know there are no concurrent writes.
  *
  * @param[in]  topic   The topic on which the content filter is set.
  * @param[in]  filter  The filter function used to filter topic samples.
  */
-DDS_EXPORT void
+DDS_DEPRECATED_EXPORT void
 dds_set_topic_filter(dds_entity_t topic, dds_topic_filter_fn filter);
 
 DDS_DEPRECATED_EXPORT void
 dds_topic_set_filter(dds_entity_t topic, dds_topic_filter_fn filter);
 
 /**
- * @brief Gets the filter for a topic.
+ * @brief Sets a filter and filter argument on a topic. To be replaced by proper
+ * filtering on readers, no guarantee that this will be maintained for backwards
+ * compatibility.
+ *
+ * Not thread-safe with respect to data being read/written using readers/writers
+ * using this topic.  Be sure to create a topic entity specific to the reader you
+ * want to filter, then set the filter function, and only then create the reader.
+ * And don't change it unless you know there are no concurrent writes.
+ *
+ * @param[in]  topic   The topic on which the content filter is set.
+ * @param[in]  filter  The filter function used to filter topic samples.
+ * @param[in]  arg     Argument for the filter function.
+ *
+ * @returns A dds_return_t indicating success or failure.
+ *
+ * @retval DDS_RETCODE_OK  Filter set successfully
+ * @retval DDS_RETCODE_BAD_PARAMETER  The topic handle is invalid
+*/
+DDS_EXPORT dds_return_t
+dds_set_topic_filter_and_arg(
+  dds_entity_t topic,
+  dds_topic_filter_arg_fn filter,
+  void *arg);
+
+/**
+ * @brief Gets the filter for a topic. To be replaced by proper filtering on readers,
+ * no guarantee that this will be maintained for backwards compatibility.
  *
  * @param[in]  topic  The topic from which to get the filter.
  *
- * @returns The topic filter.
+ * @returns The topic filter, or 0 when not set or set using
+ *          dds_set_topic_filter_and_arg.
  */
-DDS_EXPORT dds_topic_filter_fn
+DDS_DEPRECATED_EXPORT dds_topic_filter_fn
 dds_get_topic_filter(dds_entity_t topic);
 
 DDS_DEPRECATED_EXPORT dds_topic_filter_fn
 dds_topic_get_filter(dds_entity_t topic);
+
+/**
+ * @brief Gets the filter for a topic. To be replaced by proper filtering on readers,
+ * no guarantee that this will be maintained for backwards compatibility.
+ *
+ * @param[in]  topic  The topic from which to get the filter.
+ * @param[out] fn     The topic filter function (fn may be NULL).
+ * @param[out] arg    Filter function argument (arg may be NULL).
+ *
+ * @retval DDS_RETCODE_OK  Filter set successfully
+ * @retval DDS_RETCODE_PRECONDITION_NOT_MET  Filter was set with dds_set_topic_filter
+ * @retval DDS_RETCODE_BAD_PARAMETER  The topic handle is invalid
+ */
+DDS_EXPORT dds_return_t
+dds_get_topic_filter_and_arg (
+  dds_entity_t topic,
+  dds_topic_filter_arg_fn *fn,
+  void **arg);
 
 /**
  * @brief Creates a new instance of a DDS subscriber
@@ -2715,6 +2807,53 @@ dds_take_mask_wl(
   void **buf,
   dds_sample_info_t *si,
   uint32_t maxs,
+  uint32_t mask);
+
+#define DDS_HAS_READCDR 1
+/**
+ * @brief Access the collection of serialized data values (of same type) and
+ *        sample info from the data reader, readcondition or querycondition.
+ *
+ * This call accesses the serialized data from the data reader, readcondition or
+ * querycondition and makes it available to the application. The serialized data
+ * is made available through \ref ddsi_serdata structures. Returned samples are
+ * marked as READ.
+ *
+ * Return value provides information about the number of samples read, which will
+ * be <= maxs. Based on the count, the buffer will contain serialized data to be
+ * read only when valid_data bit in sample info structure is set.
+ * The buffer required for data values, could be allocated explicitly or can
+ * use the memory from data reader to prevent copy. In the latter case, buffer and
+ * sample_info should be returned back, once it is no longer using the data.
+ *
+ * @param[in]  reader_or_condition Reader, readcondition or querycondition entity.
+ * @param[out] buf An array of pointers to \ref ddsi_serdata structures that contain
+ *                 the serialized data. The pointers can be NULL.
+ * @param[in]  maxs Maximum number of samples to read.
+ * @param[out] si Pointer to an array of \ref dds_sample_info_t returned for each data value.
+ * @param[in]  mask Filter the data based on dds_sample_state_t|dds_view_state_t|dds_instance_state_t.
+ *
+ * @returns A dds_return_t with the number of samples read or an error code.
+ *
+ * @retval >=0
+ *             Number of samples read.
+ * @retval DDS_RETCODE_ERROR
+ *             An internal error has occurred.
+ * @retval DDS_RETCODE_BAD_PARAMETER
+ *             One of the given arguments is not valid.
+ * @retval DDS_RETCODE_ILLEGAL_OPERATION
+ *             The operation is invoked on an inappropriate object.
+ * @retval DDS_RETCODE_ALREADY_DELETED
+ *             The entity has already been deleted.
+ * @retval DDS_RETCODE_PRECONDITION_NOT_MET
+ *             The precondition for this operation is not met.
+ */
+DDS_EXPORT dds_return_t
+dds_readcdr(
+  dds_entity_t reader_or_condition,
+  struct ddsi_serdata **buf,
+  uint32_t maxs,
+  dds_sample_info_t *si,
   uint32_t mask);
 
 /**

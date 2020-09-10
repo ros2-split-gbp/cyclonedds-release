@@ -13,7 +13,6 @@
 #include "dds/ddsi/ddsi_raweth.h"
 #include "dds/ddsi/ddsi_ipaddr.h"
 #include "dds/ddsi/ddsi_mcgroup.h"
-#include "dds/ddsi/q_nwif.h"
 #include "dds/ddsi/q_config.h"
 #include "dds/ddsi/q_log.h"
 #include "dds/ddsi/q_pcap.h"
@@ -175,7 +174,7 @@ static int ddsi_raweth_conn_locator (ddsi_tran_factory_t fact, ddsi_tran_base_t 
   return ret;
 }
 
-static ddsi_tran_conn_t ddsi_raweth_create_conn (ddsi_tran_factory_t fact, uint32_t port, const struct ddsi_tran_qos *qos)
+static dds_return_t ddsi_raweth_create_conn (ddsi_tran_conn_t *conn_out, ddsi_tran_factory_t fact, uint32_t port, const struct ddsi_tran_qos *qos)
 {
   ddsrt_socket_t sock;
   dds_return_t rc;
@@ -188,14 +187,14 @@ static ddsi_tran_conn_t ddsi_raweth_create_conn (ddsi_tran_factory_t fact, uint3
   if (port == 0 || port > 65535)
   {
     DDS_CERROR (&fact->gv->logconfig, "ddsi_raweth_create_conn %s port %u - using port number as ethernet type, %u won't do\n", mcast ? "multicast" : "unicast", port, port);
-    return NULL;
+    return DDS_RETCODE_ERROR;
   }
 
   rc = ddsrt_socket(&sock, PF_PACKET, SOCK_DGRAM, htons((uint16_t)port));
   if (rc != DDS_RETCODE_OK)
   {
     DDS_CERROR (&fact->gv->logconfig, "ddsi_raweth_create_conn %s port %u failed ... retcode = %d\n", mcast ? "multicast" : "unicast", port, rc);
-    return NULL;
+    return DDS_RETCODE_ERROR;
   }
 
   memset(&addr, 0, sizeof(addr));
@@ -208,13 +207,13 @@ static ddsi_tran_conn_t ddsi_raweth_create_conn (ddsi_tran_factory_t fact, uint3
   {
     ddsrt_close(sock);
     DDS_CERROR (&fact->gv->logconfig, "ddsi_raweth_create_conn %s bind port %u failed ... retcode = %d\n", mcast ? "multicast" : "unicast", port, rc);
-    return NULL;
+    return DDS_RETCODE_ERROR;
   }
 
   if ((uc = (ddsi_raweth_conn_t) ddsrt_malloc (sizeof (*uc))) == NULL)
   {
     ddsrt_close(sock);
-    return NULL;
+    return DDS_RETCODE_ERROR;
   }
 
   memset (uc, 0, sizeof (*uc));
@@ -231,7 +230,8 @@ static ddsi_tran_conn_t ddsi_raweth_create_conn (ddsi_tran_factory_t fact, uint3
   uc->m_base.m_disable_multiplexing_fn = 0;
 
   DDS_CTRACE (&fact->gv->logconfig, "ddsi_raweth_create_conn %s socket %d port %u\n", mcast ? "multicast" : "unicast", uc->m_sock, uc->m_base.m_base.m_port);
-  return &uc->m_base;
+  *conn_out = &uc->m_base;
+  return DDS_RETCODE_OK;
 }
 
 static int isbroadcast(const nn_locator_t *loc)
@@ -291,14 +291,14 @@ static void ddsi_raweth_release_conn (ddsi_tran_conn_t conn)
   ddsrt_free (conn);
 }
 
-static int ddsi_raweth_is_mcaddr (const ddsi_tran_factory_t tran, const nn_locator_t *loc)
+static int ddsi_raweth_is_mcaddr (const struct ddsi_tran_factory *tran, const nn_locator_t *loc)
 {
   (void) tran;
   assert (loc->kind == NN_LOCATOR_KIND_RAWETH);
   return (loc->address[10] & 1);
 }
 
-static int ddsi_raweth_is_ssm_mcaddr (const ddsi_tran_factory_t tran, const nn_locator_t *loc)
+static int ddsi_raweth_is_ssm_mcaddr (const struct ddsi_tran_factory *tran, const nn_locator_t *loc)
 {
   (void) tran;
   (void) loc;
@@ -314,7 +314,7 @@ static enum ddsi_nearby_address_result ddsi_raweth_is_nearby_address (const nn_l
   return DNAR_LOCAL;
 }
 
-static enum ddsi_locator_from_string_result ddsi_raweth_address_from_string (ddsi_tran_factory_t tran, nn_locator_t *loc, const char *str)
+static enum ddsi_locator_from_string_result ddsi_raweth_address_from_string (const struct ddsi_tran_factory *tran, nn_locator_t *loc, const char *str)
 {
   int i = 0;
   (void)tran;
@@ -356,10 +356,16 @@ static int ddsi_raweth_enumerate_interfaces (ddsi_tran_factory_t fact, enum tran
   return ddsrt_getifaddrs(ifs, afs);
 }
 
-static int ddsi_raweth_is_valid_port (ddsi_tran_factory_t fact, uint32_t port)
+static int ddsi_raweth_is_valid_port (const struct ddsi_tran_factory *fact, uint32_t port)
 {
   (void) fact;
   return (port >= 1 && port <= 65535);
+}
+
+static uint32_t ddsi_raweth_receive_buffer_size (const struct ddsi_tran_factory *fact)
+{
+  (void) fact;
+  return 0;
 }
 
 int ddsi_raweth_init (struct ddsi_domaingv *gv)
@@ -384,6 +390,7 @@ int ddsi_raweth_init (struct ddsi_domaingv *gv)
   fact->m_locator_to_string_fn = ddsi_raweth_to_string;
   fact->m_enumerate_interfaces_fn = ddsi_raweth_enumerate_interfaces;
   fact->m_is_valid_port_fn = ddsi_raweth_is_valid_port;
+  fact->m_receive_buffer_size_fn = ddsi_raweth_receive_buffer_size;
   ddsi_factory_add (gv, fact);
   GVLOG (DDS_LC_CONFIG, "raweth initialized\n");
   return 0;
