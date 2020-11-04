@@ -13,18 +13,18 @@ tracks:
       -i :{release_inc} --os-name debian --os-not-required
     - git-bloom-generate -y rosrpm --prefix release/:{ros_distro} :{ros_distro} -i
       :{release_inc}
-    devel_branch: releases/0.5.x
+    devel_branch: releases/0.7.x
     last_release: 76fa68808682a15dd8aff26da20622ac574fa1a1
     last_version: 0.5.1
     name: cyclonedds
     patches: null
     release_inc: '1'
-    release_repo_url: https://github.com/ros2-gbp/cyclonedds-release.git
-    release_tag: 0.5.1
+    release_repo_url: git@github.com:ros2-gbp/cyclonedds-release.git
+    release_tag: 0.7.0
     ros_distro: dashing
     vcs_type: git
     vcs_uri: https://github.com/eclipse-cyclonedds/cyclonedds.git
-    version: 0.5.1
+    version: 0.7.0
   eloquent:
     actions:
     - bloom-export-upstream :{vcs_local_uri} :{vcs_type} --tag :{release_tag} --display-uri
