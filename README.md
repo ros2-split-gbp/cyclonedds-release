@@ -1,3 +1,26 @@
+## cyclonedds (eloquent) - 0.7.0-3
+
+The packages in the `cyclonedds` repository were released into the `eloquent` distro by running `/usr/bin/bloom-release --rosdistro eloquent --track eloquent cyclonedds --edit` on `Wed, 04 Nov 2020 01:54:11 -0000`
+
+The `cyclonedds` package was released.
+
+Version of package(s) in repository `cyclonedds`:
+
+- upstream repository: https://github.com/eclipse-cyclonedds/cyclonedds.git
+- release repository: https://github.com/ros2-gbp/cyclonedds-release.git
+- rosdistro version: `0.5.1-2`
+- old version: `0.7.0-2`
+- new version: `0.7.0-3`
+
+Versions of tools used:
+
+- bloom version: `0.10.0`
+- catkin_pkg version: `0.4.23`
+- rosdep version: `0.19.0`
+- rosdistro version: `0.8.3`
+- vcstools version: `0.1.42`
+
+
 ## cyclonedds (eloquent) - 0.7.0-2
 
 The packages in the `cyclonedds` repository were released into the `eloquent` distro by running `/usr/bin/bloom-release --ros-distro eloquent --track eloquent cyclonedds --edit` on `Thu, 10 Sep 2020 00:19:08 -0000`
