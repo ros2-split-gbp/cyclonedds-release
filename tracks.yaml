@@ -15,7 +15,7 @@ tracks:
       :{release_inc}
     devel_branch: releases/0.7.x
     last_release: 76fa68808682a15dd8aff26da20622ac574fa1a1
-    last_version: 0.5.1
+    last_version: 0.7.0
     name: cyclonedds
     patches: null
     release_inc: '1'
