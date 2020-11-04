@@ -155,7 +155,7 @@ static bool pubsub_qos_eq_h (const dds_qos_t *a, dds_entity_t ent)
 
 static uint64_t reader_qos_delta (const dds_qos_t *a, const dds_qos_t *b)
 {
-  return ddsi_xqos_delta (a, b, QP_USER_DATA | QP_TOPIC_DATA | QP_GROUP_DATA | QP_DURABILITY | QP_HISTORY | QP_RESOURCE_LIMITS | QP_PRESENTATION | QP_DEADLINE | QP_LATENCY_BUDGET | QP_OWNERSHIP | QP_LIVELINESS | QP_TIME_BASED_FILTER | QP_PARTITION | QP_RELIABILITY | QP_DESTINATION_ORDER | QP_PRISMTECH_READER_DATA_LIFECYCLE);
+  return ddsi_xqos_delta (a, b, QP_USER_DATA | QP_TOPIC_DATA | QP_GROUP_DATA | QP_DURABILITY | QP_HISTORY | QP_RESOURCE_LIMITS | QP_PRESENTATION | QP_DEADLINE | QP_LATENCY_BUDGET | QP_OWNERSHIP | QP_LIVELINESS | QP_TIME_BASED_FILTER | QP_PARTITION | QP_RELIABILITY | QP_DESTINATION_ORDER | QP_ADLINK_READER_DATA_LIFECYCLE);
 }
 
 static bool reader_qos_eq_h (const dds_qos_t *a, dds_entity_t ent)
@@ -177,7 +177,7 @@ static bool reader_qos_eq_h (const dds_qos_t *a, dds_entity_t ent)
 
 static uint64_t writer_qos_delta (const dds_qos_t *a, const dds_qos_t *b)
 {
-  return ddsi_xqos_delta (a, b, QP_USER_DATA | QP_TOPIC_DATA | QP_GROUP_DATA | QP_DURABILITY | QP_HISTORY | QP_RESOURCE_LIMITS | QP_PRESENTATION | QP_LIFESPAN | QP_DEADLINE | QP_LATENCY_BUDGET | QP_OWNERSHIP | QP_OWNERSHIP_STRENGTH | QP_LIVELINESS | QP_PARTITION | QP_RELIABILITY | QP_DESTINATION_ORDER | QP_PRISMTECH_WRITER_DATA_LIFECYCLE);
+  return ddsi_xqos_delta (a, b, QP_USER_DATA | QP_TOPIC_DATA | QP_GROUP_DATA | QP_DURABILITY | QP_HISTORY | QP_RESOURCE_LIMITS | QP_PRESENTATION | QP_LIFESPAN | QP_DEADLINE | QP_LATENCY_BUDGET | QP_OWNERSHIP | QP_OWNERSHIP_STRENGTH | QP_LIVELINESS | QP_PARTITION | QP_RELIABILITY | QP_DESTINATION_ORDER | QP_ADLINK_WRITER_DATA_LIFECYCLE);
 }
 
 static bool writer_qos_eq_h (const dds_qos_t *a, dds_entity_t ent)
@@ -328,13 +328,12 @@ MPT_ProcessEntry (rw_publisher,
 
 static void wait_for_done (dds_entity_t rd, const char *userdata)
 {
-  int32_t n;
   void *raw = NULL;
   dds_sample_info_t si;
   bool done = false;
   while (!done)
   {
-    while (!done && (n = dds_take (rd, &raw, &si, 1, 1)) == 1)
+    while (!done && dds_take (rd, &raw, &si, 1, 1) == 1)
     {
       const dds_builtintopic_participant_t *sample = raw;
       void *ud = NULL;
