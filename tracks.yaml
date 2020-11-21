@@ -12,7 +12,9 @@ tracks:
     - git-bloom-generate -y rosdebian --prefix release/:{ros_distro} :{ros_distro}
       -i :{release_inc} --os-name debian --os-not-required
     - git-bloom-generate -y rosrpm --prefix release/:{ros_distro} :{ros_distro} -i
-      :{release_inc}
+      :{release_inc} --os-name fedora
+    - git-bloom-generate -y rosrpm --prefix release/:{ros_distro} :{ros_distro} -i
+      :{release_inc} --os-name rhel
     devel_branch: releases/0.7.x
     last_release: 76fa68808682a15dd8aff26da20622ac574fa1a1
     last_version: 0.7.0
