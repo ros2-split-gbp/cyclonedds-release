@@ -1,3 +1,26 @@
+## cyclonedds (dashing) - 0.7.0-2
+
+The packages in the `cyclonedds` repository were released into the `dashing` distro by running `/home/steven/.local/bin/bloom-release -r dashing cyclonedds` on `Sat, 21 Nov 2020 07:38:52 -0000`
+
+The `cyclonedds` package was released.
+
+Version of package(s) in repository `cyclonedds`:
+
+- upstream repository: https://github.com/eclipse-cyclonedds/cyclonedds.git
+- release repository: https://github.com/ros2-gbp/cyclonedds-release.git
+- rosdistro version: `0.7.0-1`
+- old version: `0.7.0-1`
+- new version: `0.7.0-2`
+
+Versions of tools used:
+
+- bloom version: `0.10.0`
+- catkin_pkg version: `0.4.16`
+- rosdep version: `0.18.0`
+- rosdistro version: `0.8.0`
+- vcstools version: `0.1.42`
+
+
 ## cyclonedds (dashing) - 0.7.0-1
 
 The packages in the `cyclonedds` repository were released into the `dashing` distro by running `/usr/bin/bloom-release --rosdistro dashing --track dashing cyclonedds --edit` on `Wed, 04 Nov 2020 02:03:44 -0000`
