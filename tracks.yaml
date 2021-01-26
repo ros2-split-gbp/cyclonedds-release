@@ -91,8 +91,10 @@ tracks:
     - git-bloom-generate -y rosdebian --prefix release/:{ros_distro} :{ros_distro}
       -i :{release_inc} --os-name debian --os-not-required
     - git-bloom-generate -y rosrpm --prefix release/:{ros_distro} :{ros_distro} -i
-      :{release_inc}
-    devel_branch: releases/0.6.x
+      :{release_inc} --os-name fedora
+    - git-bloom-generate -y rosrpm --prefix release/:{ros_distro} :{ros_distro} -i
+      :{release_inc} --os-name rhel
+    devel_branch: releases/0.7.x
     last_release: 004932817e111597db65e6b332f92ae9bbe9fe30
     last_version: 0.6.0
     name: cyclonedds
@@ -103,4 +105,4 @@ tracks:
     ros_distro: rolling
     vcs_type: git
     vcs_uri: https://github.com/eclipse-cyclonedds/cyclonedds.git
-    version: 0.6.0
+    version: 0.7.0
