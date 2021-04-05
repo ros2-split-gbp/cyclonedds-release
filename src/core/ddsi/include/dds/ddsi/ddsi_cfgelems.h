@@ -12,6 +12,8 @@
 #ifndef DDSI_CFGELEMS_H
 #define DDSI_CFGELEMS_H
 
+#include "dds/features.h"
+
 static struct cfgelem general_cfgelems[] = {
   STRING("NetworkInterfaceAddress", NULL, 1, "auto",
     MEMBER(networkAddressString),
@@ -192,10 +194,10 @@ static struct cfgelem general_cfgelems[] = {
   END_MARKER
 };
 
-#ifdef DDSI_INCLUDE_SECURITY
+#ifdef DDS_HAS_SECURITY
 static struct cfgelem authentication_library_attributes[] = {
   STRING("path", NULL, 1, "dds_security_auth",
-    MEMBEROF(config_omg_security_listelem, cfg.authentication_plugin.library_path),
+    MEMBEROF(ddsi_config_omg_security_listelem, cfg.authentication_plugin.library_path),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
       "<p>This element points to the path of Authentication plugin library.</p>\n"
@@ -207,7 +209,7 @@ static struct cfgelem authentication_library_attributes[] = {
       "PATH for Windows system.</p>"
     )),
   STRING("initFunction", NULL, 1, "init_authentication",
-    MEMBEROF(config_omg_security_listelem, cfg.authentication_plugin.library_init),
+    MEMBEROF(ddsi_config_omg_security_listelem, cfg.authentication_plugin.library_init),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
       "<p>This element names the initialization function of Authentication "
@@ -216,7 +218,7 @@ static struct cfgelem authentication_library_attributes[] = {
       "implements DDS Security Authentication interface.</p>"
     )),
   STRING("finalizeFunction", NULL, 1, "finalize_authentication",
-    MEMBEROF(config_omg_security_listelem, cfg.authentication_plugin.library_finalize),
+    MEMBEROF(ddsi_config_omg_security_listelem, cfg.authentication_plugin.library_finalize),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
       "<p>This element names the finalization function of Authentication "
@@ -228,7 +230,7 @@ static struct cfgelem authentication_library_attributes[] = {
 
 static struct cfgelem access_control_library_attributes[] = {
   STRING("path", NULL, 1, "dds_security_ac",
-    MEMBEROF(config_omg_security_listelem, cfg.access_control_plugin.library_path),
+    MEMBEROF(ddsi_config_omg_security_listelem, cfg.access_control_plugin.library_path),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
       "<p>This element points to the path of Access Control plugin library.</p>\n"
@@ -240,7 +242,7 @@ static struct cfgelem access_control_library_attributes[] = {
       "PATH for Windows systems.</p>"
     )),
   STRING("initFunction", NULL, 1, "init_access_control",
-    MEMBEROF(config_omg_security_listelem, cfg.access_control_plugin.library_init),
+    MEMBEROF(ddsi_config_omg_security_listelem, cfg.access_control_plugin.library_init),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
       "<p>This element names the initialization function of Access Control "
@@ -249,7 +251,7 @@ static struct cfgelem access_control_library_attributes[] = {
       "implements DDS Security Access Control interface.</p>"
     )),
   STRING("finalizeFunction", NULL, 1, "finalize_access_control",
-    MEMBEROF(config_omg_security_listelem, cfg.access_control_plugin.library_finalize),
+    MEMBEROF(ddsi_config_omg_security_listelem, cfg.access_control_plugin.library_finalize),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
       "<p>This element names the finalization function of Access Control "
@@ -261,7 +263,7 @@ static struct cfgelem access_control_library_attributes[] = {
 
 static struct cfgelem cryptography_library_attributes[] = {
   STRING("path", NULL, 1, "dds_security_crypto",
-    MEMBEROF(config_omg_security_listelem, cfg.cryptography_plugin.library_path),
+    MEMBEROF(ddsi_config_omg_security_listelem, cfg.cryptography_plugin.library_path),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
       "<p>This element points to the path of Cryptographic plugin library.</p>\n"
@@ -273,7 +275,7 @@ static struct cfgelem cryptography_library_attributes[] = {
       "PATH for Windows systems.</p>"
     )),
   STRING("initFunction", NULL, 1, "init_crypto",
-    MEMBEROF(config_omg_security_listelem, cfg.cryptography_plugin.library_init),
+    MEMBEROF(ddsi_config_omg_security_listelem, cfg.cryptography_plugin.library_init),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
       "<p>This element names the initialization function of Cryptographic "
@@ -282,7 +284,7 @@ static struct cfgelem cryptography_library_attributes[] = {
       "implements DDS Security Cryptographic interface.</p>"
     )),
   STRING("finalizeFunction", NULL, 1, "finalize_crypto",
-    MEMBEROF(config_omg_security_listelem, cfg.cryptography_plugin.library_finalize),
+    MEMBEROF(ddsi_config_omg_security_listelem, cfg.cryptography_plugin.library_finalize),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
       "<p>This element names the finalization function of Cryptographic "
@@ -294,14 +296,14 @@ static struct cfgelem cryptography_library_attributes[] = {
 
 static struct cfgelem authentication_config_elements[] = {
   STRING("Library", authentication_library_attributes, 1, "",
-    MEMBEROF(config_omg_security_listelem, cfg.authentication_plugin),
+    MEMBEROF(ddsi_config_omg_security_listelem, cfg.authentication_plugin),
     FUNCTIONS(0, 0, 0, pf_string),
     DESCRIPTION(
       "<p>This element specifies the library to be loaded as the DDS "
       "Security Access Control plugin.</p>"
     )),
   STRING("IdentityCertificate", NULL, 1, NULL,
-    MEMBEROF(config_omg_security_listelem, cfg.authentication_properties.identity_certificate),
+    MEMBEROF(ddsi_config_omg_security_listelem, cfg.authentication_properties.identity_certificate),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
       "<p>Identity certificate that will be used for identifying all "
@@ -316,7 +318,7 @@ static struct cfgelem authentication_config_elements[] = {
       "-----END CERTIFICATE-----</IdentityCertificate></p>"
     )),
   STRING("IdentityCA", NULL, 1, NULL,
-    MEMBEROF(config_omg_security_listelem, cfg.authentication_properties.identity_ca),
+    MEMBEROF(ddsi_config_omg_security_listelem, cfg.authentication_properties.identity_ca),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
       "<p>URI to the X509 certificate [39] of the Identity CA that is the "
@@ -331,7 +333,7 @@ static struct cfgelem authentication_config_elements[] = {
       "-----END CERTIFICATE-----</IdentityCA></p>"
     )),
   STRING("PrivateKey", NULL, 1, NULL,
-    MEMBEROF(config_omg_security_listelem, cfg.authentication_properties.private_key),
+    MEMBEROF(ddsi_config_omg_security_listelem, cfg.authentication_properties.private_key),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
       "<p>URI to access the private Private Key for all of the participants "
@@ -344,7 +346,7 @@ static struct cfgelem authentication_config_elements[] = {
       "-----END RSA PRIVATE KEY-----</PrivateKey></p>"
     )),
   STRING("Password", NULL, 1, "",
-    MEMBEROF(config_omg_security_listelem, cfg.authentication_properties.password),
+    MEMBEROF(ddsi_config_omg_security_listelem, cfg.authentication_properties.password),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
       "<p>A password used to decrypt the private_key.</p>\n"
@@ -355,14 +357,14 @@ static struct cfgelem authentication_config_elements[] = {
       "the private_key property must contain the unencrypted private key.</p>"
     )),
   STRING("TrustedCADirectory", NULL, 1, "",
-    MEMBEROF(config_omg_security_listelem, cfg.authentication_properties.trusted_ca_dir),
+    MEMBEROF(ddsi_config_omg_security_listelem, cfg.authentication_properties.trusted_ca_dir),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
       "<p>Trusted CA Directory which contains trusted CA certificates as "
       "separated files.</p>"
     )),
   BOOL("IncludeOptionalFields", NULL, 1, "false",
-    MEMBEROF(config_omg_security_listelem, cfg.authentication_properties.include_optional_fields),
+    MEMBEROF(ddsi_config_omg_security_listelem, cfg.authentication_properties.include_optional_fields),
     FUNCTIONS(0, uf_boolean, 0, pf_boolean),
     DESCRIPTION(
       "<p>The authentication handshake tokens may contain optional fields to "
@@ -375,14 +377,14 @@ static struct cfgelem authentication_config_elements[] = {
 
 static struct cfgelem access_control_config_elements[] = {
   STRING("Library", access_control_library_attributes, 1, "",
-    MEMBEROF(config_omg_security_listelem, cfg.access_control_plugin),
+    MEMBEROF(ddsi_config_omg_security_listelem, cfg.access_control_plugin),
     FUNCTIONS(0, 0, 0, pf_string),
     DESCRIPTION(
       "<p>This element specifies the library to be loaded as the "
       "DDS Security Access Control plugin.</p>"
     )),
   STRING("PermissionsCA", NULL, 1, "",
-    MEMBEROF(config_omg_security_listelem, cfg.access_control_properties.permissions_ca),
+    MEMBEROF(ddsi_config_omg_security_listelem, cfg.access_control_properties.permissions_ca),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
       "<p>URI to a X509 certificate for the PermissionsCA in PEM format.</p>\n"
@@ -397,7 +399,7 @@ static struct cfgelem access_control_config_elements[] = {
       "<p>-----END CERTIFICATE-----</PermissionsCA></p>"
     )),
   STRING("Governance", NULL, 1, "",
-    MEMBEROF(config_omg_security_listelem, cfg.access_control_properties.governance),
+    MEMBEROF(ddsi_config_omg_security_listelem, cfg.access_control_properties.governance),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
       "<p>URI to the shared Governance Document signed by the Permissions CA in S/MIME format</p>\n"
@@ -425,7 +427,7 @@ static struct cfgelem access_control_config_elements[] = {
       "<p>------F9A8A198D6F08E1285A292ADF14DD04F-]]</Governance></p>"
     )),
   STRING("Permissions", NULL, 1, "",
-    MEMBEROF(config_omg_security_listelem, cfg.access_control_properties.permissions),
+    MEMBEROF(ddsi_config_omg_security_listelem, cfg.access_control_properties.permissions),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
       "<p>URI to the DomainParticipant permissions document signed by the "
@@ -442,7 +444,7 @@ static struct cfgelem access_control_config_elements[] = {
 
 static struct cfgelem cryptography_config_elements[] = {
   STRING("Library", cryptography_library_attributes, 1, "",
-    MEMBEROF(config_omg_security_listelem, cfg.cryptography_plugin),
+    MEMBEROF(ddsi_config_omg_security_listelem, cfg.cryptography_plugin),
     FUNCTIONS(0, 0, 0, pf_string),
     DESCRIPTION(
       "<p>This element specifies the library to be loaded as the DDS Security Cryptographic plugin.</p>"
@@ -471,18 +473,18 @@ static struct cfgelem security_omg_config_elements[] = {
     )),
   END_MARKER
 };
-#endif /* DDSI_INCLUDE_SECURITY */
+#endif /* DDS_HAS_SECURITY */
 
-#ifdef DDSI_INCLUDE_NETWORK_PARTITIONS
+#ifdef DDS_HAS_NETWORK_PARTITIONS
 static struct cfgelem networkpartition_cfgattrs[] = {
   STRING("Name", NULL, 1, NULL,
-    MEMBEROF(config_networkpartition_listelem, name),
+    MEMBEROF(ddsi_config_networkpartition_listelem, name),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
       "<p>This attribute specifies the name of this Cyclone DDS network "
       "partition. Two network partitions cannot have the same name.</p>")),
   STRING("Address", NULL, 1, NULL,
-    MEMBEROF(config_networkpartition_listelem, address_string),
+    MEMBEROF(ddsi_config_networkpartition_listelem, address_string),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
       "<p>This attribute specifies the multicast addresses associated with "
@@ -491,10 +493,6 @@ static struct cfgelem networkpartition_cfgattrs[] = {
       "listen for multicasts on all of these addresses and advertise them "
       "in the discovery protocol. The writers will select the most suitable "
       "address from the addresses advertised by the readers.</p>")),
-  BOOL("Connected", NULL, 1, "true",
-    MEMBEROF(config_networkpartition_listelem, connected),
-    FUNCTIONS(0, uf_boolean, 0, pf_boolean),
-    DESCRIPTION("<p>This attribute is a placeholder.</p>")),
   END_MARKER
 };
 
@@ -510,7 +508,7 @@ static struct cfgelem networkpartitions_cfgelems[] = {
 
 static struct cfgelem ignoredpartitions_cfgattrs[] = {
   STRING("DCPSPartitionTopic", NULL, 1, NULL,
-    MEMBEROF(config_ignoredpartition_listelem, DCPSPartitionTopic),
+    MEMBEROF(ddsi_config_ignoredpartition_listelem, DCPSPartitionTopic),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
       "<p>This attribute specifies a partition and a topic expression, "
@@ -539,7 +537,7 @@ static struct cfgelem ignoredpartitions_cfgelems[] = {
 
 static struct cfgelem partitionmappings_cfgattrs[] = {
   STRING("NetworkPartition", NULL, 1, NULL,
-    MEMBEROF(config_partitionmapping_listelem, networkPartition),
+    MEMBEROF(ddsi_config_partitionmapping_listelem, networkPartition),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
       "<p>This attribute specifies which Cyclone DDS network partition is to be "
@@ -547,7 +545,7 @@ static struct cfgelem partitionmappings_cfgattrs[] = {
       "DCPSPartitionTopic attribute within this PartitionMapping element.</p>"
     )),
   STRING("DCPSPartitionTopic", NULL, 1, NULL,
-    MEMBEROF(config_partitionmapping_listelem, DCPSPartitionTopic),
+    MEMBEROF(ddsi_config_partitionmapping_listelem, DCPSPartitionTopic),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
       "<p>This attribute specifies a partition and a topic expression, "
@@ -598,23 +596,23 @@ static struct cfgelem partitioning_cfgelems[] = {
     )),
   END_MARKER
 };
-#endif /* DDSI_INCLUDE_NETWORK_PARTITIONS */
+#endif /* DDS_HAS_NETWORK_PARTITIONS */
 
-#ifdef DDSI_INCLUDE_NETWORK_CHANNELS
+#ifdef DDS_HAS_NETWORK_CHANNELS
 static struct cfgelem channel_cfgelems[] = {
-#ifdef DDSI_INCLUDE_BANDWIDTH_LIMITING
+#ifdef DDS_HAS_BANDWIDTH_LIMITING
   STRING("DataBandwidthLimit", NULL, 1, "inf",
-    MEMBEROF(config_channel_listelem, data_bandwidth_limit),
+    MEMBEROF(ddsi_config_channel_listelem, data_bandwidth_limit),
     FUNCTIONS(0, uf_bandwidth, 0, pf_bandwidth),
     DESCRIPTION(
       "<p>This element specifies the maximum transmit rate of new samples "
       "and directly related data, for this channel. Bandwidth limiting uses "
       "a leaky bucket scheme. The default value \"inf\" means Cyclone DDS imposes "
       "no limitation, the underlying operating system and hardware will "
-      "likely limit the maimum transmit rate.</p>")
+      "likely limit the maximum transmit rate.</p>")
     UNIT("bandwidth")),
   STRING("AuxiliaryBandwidthLimit", NULL, 1, "inf",
-    MEMBEROF(config_channel_listelem, auxiliary_bandwidth_limit),
+    MEMBEROF(ddsi_config_channel_listelem, auxiliary_bandwidth_limit),
     FUNCTIONS(0, uf_bandwidth, 0, pf_bandwidth),
     DESCRIPTION(
       "<p>This element specifies the maximum transmit rate of auxiliary "
@@ -625,7 +623,7 @@ static struct cfgelem channel_cfgelems[] = {
     UNIT("bandwidth")),
 #endif
   INT("DiffServField", NULL, 1, "0",
-    MEMBEROF(config_channel_listelem, diffserv_field),
+    MEMBEROF(ddsi_config_channel_listelem, diffserv_field),
     FUNCTIONS(0, uf_natint, 0, pf_int),
     DESCRIPTION(
       "<p>This element describes the DiffServ setting the channel will apply "
@@ -649,14 +647,14 @@ static struct cfgelem channel_cfgelems[] = {
 
 static struct cfgelem channel_cfgattrs[] = {
   STRING("Name", NULL, 1, NULL,
-    MEMBEROF(config_channel_listelem, name),
+    MEMBEROF(ddsi_config_channel_listelem, name),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
       "<p>This attribute specifies name of this channel. The name should "
       "uniquely identify the channel.</p>"
     )),
   INT("TransportPriority", NULL, 1, "0",
-    MEMBEROF(config_channel_listelem, priority),
+    MEMBEROF(ddsi_config_channel_listelem, priority),
     FUNCTIONS(0, uf_natint, 0, pf_int),
     DESCRIPTION(
       "<p>This attribute sets the transport priority threshold for the "
@@ -676,11 +674,11 @@ static struct cfgelem channels_cfgelems[] = {
     DESCRIPTION("<p>This element defines a channel.</p>")),
   END_MARKER
 };
-#endif /* DDSI_INCLUDE_NETWORK_CHANNELS */
+#endif /* DDS_HAS_NETWORK_CHANNELS */
 
 static struct cfgelem thread_properties_sched_cfgelems[] = {
   ENUM("Class", NULL, 1, "default",
-    MEMBEROF(config_thread_properties_listelem, sched_class),
+    MEMBEROF(ddsi_config_thread_properties_listelem, sched_class),
     FUNCTIONS(0, uf_sched_class, 0, pf_sched_class),
     DESCRIPTION(
       "<p>This element specifies the thread scheduling class "
@@ -689,7 +687,7 @@ static struct cfgelem thread_properties_sched_cfgelems[] = {
       "able to assign some of the privileged scheduling classes.</p>"),
     VALUES("realtime","timeshare","default")),
   STRING("Priority", NULL, 1, "default",
-    MEMBEROF(config_thread_properties_listelem, sched_priority),
+    MEMBEROF(ddsi_config_thread_properties_listelem, schedule_priority),
     FUNCTIONS(0, uf_maybe_int32, 0, pf_maybe_int32),
     DESCRIPTION(
       "<p>This element specifies the thread priority (decimal integer or "
@@ -703,7 +701,7 @@ static struct cfgelem thread_properties_sched_cfgelems[] = {
 
 static struct cfgelem thread_properties_cfgattrs[] = {
   STRING("Name", NULL, 1, NULL,
-    MEMBEROF(config_thread_properties_listelem, name),
+    MEMBEROF(ddsi_config_thread_properties_listelem, name),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
       "<p>The Name of the thread for which properties are being set. The "
@@ -740,7 +738,7 @@ static struct cfgelem thread_properties_cfgelems[] = {
       "<p>This element configures the scheduling properties of the thread.</p>"
     )),
   STRING("StackSize", NULL, 1, "default",
-    MEMBEROF(config_thread_properties_listelem, stack_size),
+    MEMBEROF(ddsi_config_thread_properties_listelem, stack_size),
     FUNCTIONS(0, uf_maybe_memsize, 0, pf_maybe_memsize),
     DESCRIPTION(
       "<p>This element configures the stack size for this thread. The "
@@ -996,13 +994,13 @@ static struct cfgelem multiple_recv_threads_attrs[] = {
 };
 
 static struct cfgelem internal_cfgelems[] = {
-  MOVED("MaxMessageSize", "CycloneDDS/General/MaxMessageSize"),
-  MOVED("FragmentSize", "CycloneDDS/General/FragmentSize"),
+  MOVED("MaxMessageSize", "CycloneDDS/Domain/General/MaxMessageSize"),
+  MOVED("FragmentSize", "CycloneDDS/Domain/General/FragmentSize"),
   INT("DeliveryQueueMaxSamples", NULL, 1, "256",
     MEMBER(delivery_queue_maxsamples),
     FUNCTIONS(0, uf_uint, 0, pf_uint),
     DESCRIPTION(
-      "<p>This element controls the Maximum size of a delivery queue, "
+      "<p>This element controls the maximum size of a delivery queue, "
       "expressed in samples. Once a delivery queue is full, incoming samples "
       "destined for that queue are dropped until space becomes available "
       "again.</p>")),
@@ -1238,7 +1236,7 @@ static struct cfgelem internal_cfgelems[] = {
       "scheduled exactly, whereas a value of 10ms would mean that events are "
       "rounded up to the nearest 10 milliseconds.</p>"),
     UNIT("duration")),
-#ifdef DDSI_INCLUDE_BANDWIDTH_LIMITING
+#ifdef DDS_HAS_BANDWIDTH_LIMITING
   STRING("AuxiliaryBandwidthLimit", NULL, 1, "inf",
     MEMBER(auxiliary_bandwidth_limit),
     FUNCTIONS(0, uf_bandwidth, 0, pf_bandwidth),
@@ -1249,7 +1247,7 @@ static struct cfgelem internal_cfgelems[] = {
       "channel has elected to share this global AuxiliaryBandwidthLimit. "
       "Bandwidth limiting uses a leaky bucket scheme. The default value "
       "\"inf\" means Cyclone DDS imposes no limitation, the underlying operating "
-      "system and hardware will likely limit the maimum transmit rate.</p>"
+      "system and hardware will likely limit the maximum transmit rate.</p>"
     )),
 #endif
   INT("DDSI2DirectMaxThreads", NULL, 1, "1",
@@ -1422,9 +1420,10 @@ static struct cfgelem internal_cfgelems[] = {
       "<ul>\n"
       "<li><i>whc</i>: writer history cache checking</li>\n"
       "<li><i>rhc</i>: reader history cache checking</li>\n"
+      "<li><i>xevent</i>: xevent checking</li>\n"
       "<p>In addition, there is the keyword <i>all</i> that enables all "
       "checks.</p>"),
-    VALUES("whc","rhc","all")),
+    VALUES("whc","rhc","xevent","all")),
   END_MARKER
 };
 
@@ -1559,7 +1558,7 @@ static struct cfgelem tcp_cfgelems[] = {
   END_MARKER
 };
 
-#ifdef DDSI_INCLUDE_SSL
+#ifdef DDS_HAS_SSL
 static struct cfgelem ssl_cfgelems[] = {
   BOOL("Enable", NULL, 1, "false",
     MEMBER(ssl_enable),
@@ -1615,25 +1614,9 @@ static struct cfgelem ssl_cfgelems[] = {
 };
 #endif
 
-static struct cfgelem tp_cfgelems[] = {
-  BOOL("Enable", NULL, 1, "false",
-    MEMBER(tp_enable),
-    FUNCTIONS(0, uf_boolean, 0, pf_boolean),
-    DESCRIPTION("<p>Enable optional use of a thread pool.</p>")),
-  INT("Threads", NULL, 1, "4",
-    MEMBER(tp_threads),
-    FUNCTIONS(0, uf_natint, 0, pf_int),
-    DESCRIPTION("<p>Initial number of threads in the thread pool.</p>")),
-  INT("ThreadMax", NULL, 1, "8",
-    MEMBER(tp_max_threads),
-    FUNCTIONS(0, uf_natint, 0, pf_int),
-    DESCRIPTION("<p>Maximum number of threads in the thread pool.</p>")),
-  END_MARKER
-};
-
 static struct cfgelem discovery_peer_cfgattrs[] = {
   STRING("Address", NULL, 1, NULL,
-    MEMBEROF(config_peer_listelem, peer),
+    MEMBEROF(ddsi_config_peer_listelem, peer),
     FUNCTIONS(0, uf_ipv4, ff_free, pf_string),
     DESCRIPTION(
       "<p>This element specifies an IP address to which discovery packets "
@@ -1770,6 +1753,15 @@ static struct cfgelem discovery_cfgelems[] = {
       "specified by the DDSI 2.1 specification and rarely need to be "
       "changed.</p>"
     )),
+#ifdef DDS_HAS_TOPIC_DISCOVERY
+  BOOL("EnableTopicDiscoveryEndpoints", NULL, 0, "false",
+    MEMBER(enable_topic_discovery_endpoints),
+    FUNCTIONS(0, uf_boolean, 0, pf_boolean),
+    DESCRIPTION(
+      "<p>This element controls whether the built-in endpoints for topic "
+      "discovery are created and used to exchange topic discovery information.</p>"
+    )),
+#endif
   END_MARKER
 };
 
@@ -1888,7 +1880,7 @@ static struct cfgelem domain_cfgelems[] = {
     DESCRIPTION(
       "<p>The General element specifies overall Cyclone DDS service settings.</p>"
     )),
-#ifdef DDSI_INCLUDE_SECURITY
+#ifdef DDS_HAS_SECURITY
   GROUP("Security|DDSSecurity", security_omg_config_elements, NULL, INT_MAX,
     MEMBER(omg_security_configuration),
     FUNCTIONS(if_omg_security, 0, 0, 0),
@@ -1899,7 +1891,7 @@ static struct cfgelem domain_cfgelems[] = {
     MAXIMUM(1)), /* Security must occur at most once, but INT_MAX is required
                     because of the way its processed (for now) */
 #endif
-#ifdef DDSI_INCLUDE_NETWORK_PARTITIONS
+#ifdef DDS_HAS_NETWORK_PARTITIONS
   GROUP("Partitioning", partitioning_cfgelems, NULL, 1,
     NOMEMBER,
     NOFUNCTIONS,
@@ -1909,7 +1901,7 @@ static struct cfgelem domain_cfgelems[] = {
       "partitions.</p>"
     )),
 #endif
-#ifdef DDSI_INCLUDE_NETWORK_CHANNELS
+#ifdef DDS_HAS_NETWORK_CHANNELS
   GROUP("Channels", channels_cfgelems, NULL, 1,
     NOMEMBER,
     NOFUNCTIONS,
@@ -1975,15 +1967,7 @@ static struct cfgelem domain_cfgelems[] = {
       "<p>The TCP element allows specifying various parameters related to "
       "running DDSI over TCP.</p>"
     )),
-  GROUP("ThreadPool", tp_cfgelems, NULL, 1,
-    NOMEMBER,
-    NOFUNCTIONS,
-    DESCRIPTION(
-      "<p>The ThreadPool element allows specifying various parameters "
-      "related to using a thread pool to send DDSI messages to multiple "
-      "unicast addresses (TCP or UDP).</p>"
-    )),
-#ifdef DDSI_INCLUDE_SSL
+#ifdef DDS_HAS_SSL
   GROUP("SSL", ssl_cfgelems, NULL, 1,
     NOMEMBER,
     NOFUNCTIONS,
@@ -2003,10 +1987,10 @@ static struct cfgelem root_cfgelems[] = {
       "<p>The General element specifying Domain related settings.</p>"
     )),
   MOVED("General", "CycloneDDS/Domain/General"),
-#if DDSI_INCLUDE_NETWORK_PARTITIONS
+#if DDS_HAS_NETWORK_PARTITIONS
   MOVED("Partitioning", "CycloneDDS/Domain/Partitioning"),
 #endif
-#if DDSI_INCLUDE_NETWORK_CHANNELS
+#if DDS_HAS_NETWORK_CHANNELS
   MOVED("Channels", "CycloneDDS/Domain/Channels"),
 #endif
   MOVED("Threads", "CycloneDDS/Domain/Threads"),
@@ -2017,10 +2001,10 @@ static struct cfgelem root_cfgelems[] = {
   MOVED("Internal|Unsupported", "CycloneDDS/Domain/Internal"),
   MOVED("TCP", "CycloneDDS/Domain/TCP"),
   MOVED("ThreadPool", "CycloneDDS/Domain/ThreadPool"),
-#if DDSI_INCLUDE_SECURITY
+#if DDS_HAS_SECURITY
   MOVED("DDSSecurity", "CycloneDDS/Domain/Security"),
 #endif
-#if DDSI_INCLUDE_SSL
+#if DDS_HAS_SSL
   MOVED("SSL", "CycloneDDS/Domain/SSL"),
 #endif
   MOVED("DDSI2E|DDSI2", "CycloneDDS/Domain"),

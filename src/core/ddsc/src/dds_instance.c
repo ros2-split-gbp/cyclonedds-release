@@ -40,7 +40,9 @@ dds_return_t dds_dispose_ih (dds_entity_t writer, dds_instance_handle_t handle)
 
 static struct ddsi_tkmap_instance *dds_instance_find (const dds_topic *topic, const void *data, const bool create)
 {
-  struct ddsi_serdata *sd = ddsi_serdata_from_sample (topic->m_stopic, SDK_KEY, data);
+  struct ddsi_serdata *sd = ddsi_serdata_from_sample (topic->m_stype, SDK_KEY, data);
+  if (sd == NULL)
+    return NULL;
   struct ddsi_tkmap_instance *inst = ddsi_tkmap_find (topic->m_entity.m_domain->gv.m_tkmap, sd, create);
   ddsi_serdata_unref (sd);
   return inst;
@@ -77,7 +79,7 @@ dds_return_t dds_register_instance (dds_entity_t writer, dds_instance_handle_t *
   thread_state_awake (ts1, &wr->m_entity.m_domain->gv);
   struct ddsi_tkmap_instance * const inst = dds_instance_find (wr->m_topic, data, true);
   if (inst == NULL)
-    ret = DDS_RETCODE_ERROR;
+    ret = DDS_RETCODE_BAD_PARAMETER;
   else
   {
     *handle = inst->m_iid;
@@ -152,12 +154,12 @@ dds_return_t dds_unregister_instance_ih_ts (dds_entity_t writer, dds_instance_ha
     ret = DDS_RETCODE_PRECONDITION_NOT_MET;
   else
   {
-    struct ddsi_sertopic *tp = wr->m_topic->m_stopic;
-    void *sample = ddsi_sertopic_alloc_sample (tp);
-    ddsi_serdata_topicless_to_sample (tp, tk->m_sample, sample, NULL, NULL);
+    struct ddsi_sertype *tp = wr->m_topic->m_stype;
+    void *sample = ddsi_sertype_alloc_sample (tp);
+    ddsi_serdata_untyped_to_sample (tp, tk->m_sample, sample, NULL, NULL);
     ddsi_tkmap_instance_unref (wr->m_entity.m_domain->gv.m_tkmap, tk);
     ret = dds_write_impl (wr, sample, timestamp, action);
-    ddsi_sertopic_free_sample (tp, sample, DDS_FREE_ALL);
+    ddsi_sertype_free_sample (tp, sample, DDS_FREE_ALL);
   }
   thread_state_asleep (ts1);
   dds_writer_unlock (wr);
@@ -226,12 +228,12 @@ dds_return_t dds_dispose_ih_ts (dds_entity_t writer, dds_instance_handle_t handl
     ret = DDS_RETCODE_PRECONDITION_NOT_MET;
   else
   {
-    struct ddsi_sertopic *tp = wr->m_topic->m_stopic;
-    void *sample = ddsi_sertopic_alloc_sample (tp);
-    ddsi_serdata_topicless_to_sample (tp, tk->m_sample, sample, NULL, NULL);
+    struct ddsi_sertype *tp = wr->m_topic->m_stype;
+    void *sample = ddsi_sertype_alloc_sample (tp);
+    ddsi_serdata_untyped_to_sample (tp, tk->m_sample, sample, NULL, NULL);
     ddsi_tkmap_instance_unref (wr->m_entity.m_domain->gv.m_tkmap, tk);
     ret = dds_dispose_impl (wr, sample, handle, timestamp);
-    ddsi_sertopic_free_sample (tp, sample, DDS_FREE_ALL);
+    ddsi_sertype_free_sample (tp, sample, DDS_FREE_ALL);
   }
   thread_state_asleep (ts1);
   dds_writer_unlock (wr);
@@ -241,7 +243,6 @@ dds_return_t dds_dispose_ih_ts (dds_entity_t writer, dds_instance_handle_t handl
 dds_instance_handle_t dds_lookup_instance (dds_entity_t entity, const void *data)
 {
   struct thread_state1 * const ts1 = lookup_thread_state ();
-  dds_instance_handle_t ih = DDS_HANDLE_NIL;
   const dds_topic *topic;
   struct ddsi_serdata *sd;
   dds_entity *w_or_r;
@@ -264,10 +265,15 @@ dds_instance_handle_t dds_lookup_instance (dds_entity_t entity, const void *data
       return DDS_HANDLE_NIL;
   }
 
+  dds_instance_handle_t ih;
   thread_state_awake (ts1, &w_or_r->m_domain->gv);
-  sd = ddsi_serdata_from_sample (topic->m_stopic, SDK_KEY, data);
-  ih = ddsi_tkmap_lookup (w_or_r->m_domain->gv.m_tkmap, sd);
-  ddsi_serdata_unref (sd);
+  if ((sd = ddsi_serdata_from_sample (topic->m_stype, SDK_KEY, data)) == NULL)
+    ih = DDS_HANDLE_NIL;
+  else
+  {
+    ih = ddsi_tkmap_lookup (w_or_r->m_domain->gv.m_tkmap, sd);
+    ddsi_serdata_unref (sd);
+  }
   thread_state_asleep (ts1);
   dds_entity_unlock (w_or_r);
   return ih;
@@ -313,8 +319,8 @@ dds_return_t dds_instance_get_key (dds_entity_t entity, dds_instance_handle_t ih
     ret = DDS_RETCODE_BAD_PARAMETER;
   else
   {
-    ddsi_sertopic_zero_sample (topic->m_stopic, data);
-    ddsi_serdata_topicless_to_sample (topic->m_stopic, tk->m_sample, data, NULL, NULL);
+    ddsi_sertype_zero_sample (topic->m_stype, data);
+    ddsi_serdata_untyped_to_sample (topic->m_stype, tk->m_sample, data, NULL, NULL);
     ddsi_tkmap_instance_unref (e->m_domain->gv.m_tkmap, tk);
     ret = DDS_RETCODE_OK;
   }

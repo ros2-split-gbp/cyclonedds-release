@@ -319,7 +319,7 @@ static bool read_prefix(unsigned char **ptr, uint32_t *remain)
 
   prefix = (struct submsg_header *)(*ptr);
 
-  if (prefix->id != SMID_SEC_PREFIX_KIND)
+  if (prefix->id != SMID_SEC_PREFIX)
   {
     printf("check_encoded_data: prefix incorrect smid 0x%x02\n", prefix->id);
     return false;
@@ -385,7 +385,7 @@ static bool read_body(DDS_Security_OctetSeq *contents, bool encrypted, unsigned 
   {
     struct encrypted_data *enc;
 
-    if (body->id != SMID_SEC_BODY_KIND)
+    if (body->id != SMID_SEC_BODY)
     {
       printf("check_encoded_data: submessage SEC_BODY missing\n");
       return false;
@@ -398,7 +398,7 @@ static bool read_body(DDS_Security_OctetSeq *contents, bool encrypted, unsigned 
   }
   else
   {
-    if (body->id == SMID_SEC_BODY_KIND)
+    if (body->id == SMID_SEC_BODY)
     {
       printf("check_encoded_data: submessage SEC_BODY not expected\n");
       return false;
@@ -427,7 +427,7 @@ static bool read_postfix(unsigned char **ptr,uint32_t *remain)
 
   postfix = (struct submsg_header *)(*ptr);
 
-  if (postfix->id != SMID_SEC_POSTFIX_KIND)
+  if (postfix->id != SMID_SEC_POSTFIX)
   {
     printf("check_encoded_data: postfix invalid smid\n");
     return false;
@@ -546,108 +546,87 @@ fail_ctx_new:
 
 static bool crypto_decrypt_data(uint32_t session_id, unsigned char *iv, DDS_Security_CryptoTransformKind transformation_kind, master_key_material *key_material, DDS_Security_OctetSeq *encrypted, DDS_Security_OctetSeq *decoded, unsigned char *tag)
 {
-  bool result = true;
   EVP_CIPHER_CTX *ctx;
   crypto_session_key_t session_key;
   uint32_t key_size = crypto_get_key_size(CRYPTO_TRANSFORM_KIND(transformation_kind));
+  assert (key_size);
   int len = 0;
+
+  if (!key_size)
+    return false;
 
   if (!crypto_calculate_session_key_test(&session_key, session_id, key_material->master_salt, key_material->master_sender_key, key_material->transformation_kind))
     return false;
 
   /* create the cipher context */
   ctx = EVP_CIPHER_CTX_new();
-  if (ctx)
+  if (!ctx)
   {
-    if (key_size == 128)
-    {
-      if (!EVP_DecryptInit_ex(ctx, EVP_aes_128_gcm(), NULL, NULL, NULL))
-      {
-        ERR_print_errors_fp(stderr);
-        result = false;
-      }
-    }
-    else if (key_size == 256)
-    {
-      if (!EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL, NULL))
-      {
-        ERR_print_errors_fp(stderr);
-        result = false;
-      }
-    }
+    ERR_print_errors_fp(stderr);
+    return false;
   }
 
-  if (result)
+  if (key_size == 128 && !EVP_DecryptInit_ex(ctx, EVP_aes_128_gcm(), NULL, NULL, NULL))
   {
-    if (!EVP_DecryptInit_ex(ctx, NULL, NULL, session_key.data, iv))
+    ERR_print_errors_fp(stderr);
+    goto err;
+  }
+  if (key_size == 256 && !EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL, NULL))
+  {
+    ERR_print_errors_fp(stderr);
+    goto err;
+  }
+  if (!EVP_DecryptInit_ex(ctx, NULL, NULL, session_key.data, iv))
+  {
+    ERR_print_errors_fp(stderr);
+    goto err;
+  }
+
+  if (decoded)
+  {
+    if (!EVP_DecryptUpdate(ctx, decoded->_buffer, &len, encrypted->_buffer, (int)encrypted->_length))
     {
       ERR_print_errors_fp(stderr);
-      result = false;
+      goto err;
     }
+    decoded->_length = (uint32_t) len;
+  }
+  else if (!EVP_DecryptUpdate(ctx, NULL, &len, encrypted->_buffer, (int) encrypted->_length))
+  {
+    ERR_print_errors_fp(stderr);
+    goto err;
   }
 
-  if (result)
+  if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, CRYPTO_HMAC_SIZE, tag))
   {
-    if (decoded)
-    {
-      if (EVP_DecryptUpdate(ctx, decoded->_buffer, &len, encrypted->_buffer, (int)encrypted->_length))
-      {
-        decoded->_length = (uint32_t) len;
-      }
-      else
-      {
-        ERR_print_errors_fp(stderr);
-        result = false;
-      }
-    }
-    else
-    {
-      if (!EVP_DecryptUpdate(ctx, NULL, &len, encrypted->_buffer, (int) encrypted->_length))
-      {
-        ERR_print_errors_fp(stderr);
-        result = false;
-      }
-    }
+    ERR_print_errors_fp(stderr);
+    goto err;
   }
 
-  if (result)
+  if (decoded)
   {
-    if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, CRYPTO_HMAC_SIZE, tag))
+    if (!EVP_DecryptFinal_ex(ctx, decoded->_buffer + len, &len))
     {
       ERR_print_errors_fp(stderr);
-      result = false;
+      goto err;
     }
+    decoded->_length += (uint32_t) len;
   }
-
-  if (result)
+  else
   {
-    if (decoded)
+    unsigned char temp[32];
+    if (!EVP_DecryptFinal_ex(ctx, temp, &len))
     {
-      if (EVP_DecryptFinal_ex(ctx, decoded->_buffer + len, &len))
-      {
-        decoded->_length += (uint32_t) len;
-      }
-      else
-      {
-        ERR_print_errors_fp(stderr);
-        result = false;
-      }
-    }
-    else
-    {
-      unsigned char temp[32];
-      if (!EVP_DecryptFinal_ex(ctx, temp, &len))
-      {
-        ERR_print_errors_fp(stderr);
-        result = false;
-      }
+      ERR_print_errors_fp(stderr);
+      goto err;
     }
   }
+  EVP_CIPHER_CTX_free(ctx);
+  return true;
 
-  if (ctx)
-    EVP_CIPHER_CTX_free(ctx);
-
-  return result;
+err:
+  EVP_CIPHER_CTX_free(ctx);
+  return false;
 }
 
 static session_key_material * get_datawriter_session(DDS_Security_DatawriterCryptoHandle writer_crypto)
@@ -662,23 +641,26 @@ static master_key_material * get_datareader_key_material(DDS_Security_Datareader
   return reader_crypto_impl->writer2reader_key_material_message;
 }
 
-static void initialize_data_submessage(DDS_Security_OctetSeq *submsg, bool be)
+static unsigned char submsg_header_endianness_flag (enum ddsrt_byte_order_selector bo)
+{
+#if DDSRT_ENDIAN == DDSRT_LITTLE_ENDIAN
+  return (unsigned char) ((bo == DDSRT_BOSEL_BE) ? 0 : SMFLAG_ENDIANNESS);
+#else
+  return (unsigned char) ((bo == DDSRT_BO_LE) ? SMFLAG_ENDIANNESS : 0);
+#endif
+}
+
+static void initialize_data_submessage(DDS_Security_OctetSeq *submsg, enum ddsrt_byte_order_selector bo)
 {
   size_t length = strlen(sample_test_data) + 1;
   struct submsg_header *header;
-  int swap;
   unsigned char *buffer, *ptr;
-
-  if (be)
-    swap = (DDSRT_ENDIAN == DDSRT_LITTLE_ENDIAN);
-  else
-    swap = (DDSRT_ENDIAN != DDSRT_LITTLE_ENDIAN);
 
   buffer = ddsrt_malloc(length + sizeof(struct submsg_header));
   header = (struct submsg_header *)buffer;
   header->id = 0x15;
-  header->flags = be ? 0x00 : 0x01;
-  header->length = swap ? ddsrt_bswap2u((uint16_t)length) : (uint16_t)length;
+  header->flags = submsg_header_endianness_flag(bo);
+  header->length = ddsrt_toBO2u(bo, (uint16_t)length);
   ptr = (unsigned char *)(header + 1);
 
   memcpy((char *)ptr, sample_test_data, length);
@@ -756,7 +738,8 @@ static void suite_encode_datawriter_submessage_init(void)
   CU_ASSERT_FATAL ((plugins = load_plugins(
                       NULL    /* Access Control */,
                       NULL    /* Authentication */,
-                      &crypto /* Cryptograpy    */)) != NULL);
+                      &crypto /* Cryptograpy    */,
+                      NULL)) != NULL);
   CU_ASSERT_EQUAL_FATAL (register_local_participant(), 0);
   CU_ASSERT_EQUAL_FATAL (register_remote_participant(), 0);
 }
@@ -808,7 +791,7 @@ static void encode_datawriter_submessage_not_signed(DDS_Security_CryptoTransform
 
   prepare_endpoint_security_attributes_and_properties(&datawriter_security_attributes, &datawriter_properties, transformation_kind, false);
 
-  initialize_data_submessage(&plain_buffer, false);
+  initialize_data_submessage(&plain_buffer, DDSRT_BOSEL_NATIVE);
 
   writer_crypto = register_local_datawriter(&datawriter_security_attributes, &datawriter_properties);
   CU_ASSERT_FATAL(writer_crypto != 0);
@@ -967,7 +950,7 @@ static void encode_datawriter_submessage_sign(DDS_Security_CryptoTransformKind_E
 
   prepare_endpoint_security_attributes_and_properties(&datawriter_security_attributes, &datawriter_properties, transformation_kind, true);
 
-  initialize_data_submessage(&plain_buffer, false);
+  initialize_data_submessage(&plain_buffer, DDSRT_BOSEL_NATIVE);
 
   writer_crypto = register_local_datawriter(&datawriter_security_attributes, &datawriter_properties);
   CU_ASSERT_FATAL(writer_crypto != 0);
@@ -1121,7 +1104,7 @@ CU_Test(ddssec_builtin_encode_datawriter_submessage, invalid_args, .init = suite
 
   prepare_endpoint_security_attributes_and_properties(&datawriter_security_attributes, &datawriter_properties, CRYPTO_TRANSFORMATION_KIND_AES256_GCM, true);
 
-  initialize_data_submessage(&plain_buffer, false);
+  initialize_data_submessage(&plain_buffer, DDSRT_BOSEL_NATIVE);
   memset(&empty_reader_list, 0, sizeof(empty_reader_list));
 
   writer_crypto = register_local_datawriter(&datawriter_security_attributes, &datawriter_properties);
@@ -1137,69 +1120,6 @@ CU_Test(ddssec_builtin_encode_datawriter_submessage, invalid_args, .init = suite
   reader_list._buffer[0] = reader_crypto;
   index = 0;
 
-  /* encoded_buffer NULL */
-  result = crypto->crypto_transform->encode_datawriter_submessage(
-      crypto->crypto_transform,
-      NULL,
-      &plain_buffer,
-      writer_crypto,
-      &reader_list,
-      &index,
-      &exception);
-
-  if (!result)
-  {
-    printf("encode_datawriter_submessage: %s\n", exception.message ? exception.message : "Error message missing");
-  }
-
-  CU_ASSERT(!result);
-  CU_ASSERT(exception.code != 0);
-  CU_ASSERT(exception.message != NULL);
-
-  reset_exception(&exception);
-
-  /* plain_buffer NULL */
-  result = crypto->crypto_transform->encode_datawriter_submessage(
-      crypto->crypto_transform,
-      &encoded_buffer,
-      NULL,
-      writer_crypto,
-      &reader_list,
-      &index,
-      &exception);
-
-  if (!result)
-  {
-    printf("encode_datawriter_submessage: %s\n", exception.message ? exception.message : "Error message missing");
-  }
-
-  CU_ASSERT(!result);
-  CU_ASSERT(exception.code != 0);
-  CU_ASSERT(exception.message != NULL);
-
-  reset_exception(&exception);
-
-  /* writer crypto 0 */
-  result = crypto->crypto_transform->encode_datawriter_submessage(
-      crypto->crypto_transform,
-      &encoded_buffer,
-      &plain_buffer,
-      0,
-      &reader_list,
-      &index,
-      &exception);
-
-  if (!result)
-  {
-    printf("encode_datawriter_submessage: %s\n", exception.message ? exception.message : "Error message missing");
-  }
-
-  CU_ASSERT(!result);
-  CU_ASSERT(exception.code != 0);
-  CU_ASSERT(exception.message != NULL);
-
-  reset_exception(&exception);
-
   /* writer crypto unknown */
   result = crypto->crypto_transform->encode_datawriter_submessage(
       crypto->crypto_transform,
@@ -1207,48 +1127,6 @@ CU_Test(ddssec_builtin_encode_datawriter_submessage, invalid_args, .init = suite
       &plain_buffer,
       1,
       &reader_list,
-      &index,
-      &exception);
-
-  if (!result)
-  {
-    printf("encode_datawriter_submessage: %s\n", exception.message ? exception.message : "Error message missing");
-  }
-
-  CU_ASSERT(!result);
-  CU_ASSERT(exception.code != 0);
-  CU_ASSERT(exception.message != NULL);
-
-  reset_exception(&exception);
-
-  /* reader crypto list NULL*/
-  result = crypto->crypto_transform->encode_datawriter_submessage(
-      crypto->crypto_transform,
-      &encoded_buffer,
-      &plain_buffer,
-      writer_crypto,
-      NULL,
-      &index,
-      &exception);
-
-  if (!result)
-  {
-    printf("encode_datawriter_submessage: %s\n", exception.message ? exception.message : "Error message missing");
-  }
-
-  CU_ASSERT(!result);
-  CU_ASSERT(exception.code != 0);
-  CU_ASSERT(exception.message != NULL);
-
-  reset_exception(&exception);
-
-  /* empty reader crypto list */
-  result = crypto->crypto_transform->encode_datawriter_submessage(
-      crypto->crypto_transform,
-      &encoded_buffer,
-      &plain_buffer,
-      writer_crypto,
-      &empty_reader_list,
       &index,
       &exception);
 
@@ -1307,54 +1185,6 @@ CU_Test(ddssec_builtin_encode_datawriter_submessage, invalid_args, .init = suite
 
   reset_exception(&exception);
   reader_list._buffer[0] = reader_crypto;
-
-  /* index NULL*/
-  result = crypto->crypto_transform->encode_datawriter_submessage(
-      crypto->crypto_transform,
-      &encoded_buffer,
-      &plain_buffer,
-      writer_crypto,
-      &reader_list,
-      NULL,
-      &exception);
-
-  if (!result)
-  {
-    printf("encode_datawriter_submessage: %s\n", exception.message ? exception.message : "Error message missing");
-  }
-
-  CU_ASSERT(!result);
-  CU_ASSERT(exception.code != 0);
-  CU_ASSERT(exception.message != NULL);
-
-  reset_exception(&exception);
-
-  /* invalid index */
-  index = 2;
-  result = crypto->crypto_transform->encode_datawriter_submessage(
-      crypto->crypto_transform,
-      &encoded_buffer,
-      &plain_buffer,
-      writer_crypto,
-      &reader_list,
-      &index,
-      &exception);
-
-  if (!result)
-  {
-    printf("encode_datawriter_submessage: %s\n", exception.message ? exception.message : "Error message missing");
-  }
-
-  unregister_datareader(reader_list._buffer[0]);
-  reader_list._buffer[0] = 0;
-
-  unregister_datawriter(writer_crypto);
-
-  CU_ASSERT(!result);
-  CU_ASSERT(exception.code != 0);
-  CU_ASSERT(exception.message != NULL);
-
-  reset_exception(&exception);
 
   ddsrt_free(datawriter_properties._buffer[0].name);
   ddsrt_free(datawriter_properties._buffer[0].value);

@@ -18,6 +18,7 @@
 
 #include "dds/ddsi/q_rtps.h"
 #include "dds/ddsi/ddsi_time.h"
+#include "dds/ddsi/ddsi_locator.h"
 
 #if defined (__cplusplus)
 extern "C" {
@@ -56,13 +57,6 @@ typedef struct nn_fragment_number_set_header {
 #define NN_FRAGMENT_NUMBER_SET_BITS_SIZE(numbits) ((unsigned) (4 * (((numbits) + 31) / 32)))
 #define NN_FRAGMENT_NUMBER_SET_SIZE(numbits) (sizeof (nn_fragment_number_set_header_t) + NN_FRAGMENT_NUMBER_SET_BITS_SIZE (numbits))
 typedef uint32_t nn_count_t;
-/* address field in locator maintained in network byte order, the rest in host */
-typedef struct {
-  const struct ddsi_tran_factory *tran;
-  int32_t kind;
-  uint32_t port;
-  unsigned char address[16];
-} nn_locator_t;
 
 #define NN_STATUSINFO_DISPOSE      0x1u
 #define NN_STATUSINFO_UNREGISTER   0x2u
@@ -84,8 +78,12 @@ typedef struct {
 #define NN_DISC_BUILTIN_ENDPOINT_PARTICIPANT_STATE_DETECTOR (1u << 9) /* undefined meaning */
 #define NN_BUILTIN_ENDPOINT_PARTICIPANT_MESSAGE_DATA_WRITER (1u << 10)
 #define NN_BUILTIN_ENDPOINT_PARTICIPANT_MESSAGE_DATA_READER (1u << 11)
-#define NN_DISC_BUILTIN_ENDPOINT_TOPIC_ANNOUNCER (1u << 12)
-#define NN_DISC_BUILTIN_ENDPOINT_TOPIC_DETECTOR (1u << 13)
+#define NN_BUILTIN_ENDPOINT_TL_SVC_REQUEST_DATA_WRITER (1u << 12)
+#define NN_BUILTIN_ENDPOINT_TL_SVC_REQUEST_DATA_READER (1u << 13)
+#define NN_BUILTIN_ENDPOINT_TL_SVC_REPLY_DATA_WRITER (1u << 14)
+#define NN_BUILTIN_ENDPOINT_TL_SVC_REPLY_DATA_READER (1u << 15)
+#define NN_DISC_BUILTIN_ENDPOINT_TOPICS_ANNOUNCER (1u << 28)
+#define NN_DISC_BUILTIN_ENDPOINT_TOPICS_DETECTOR (1u << 29)
 
 /* Security extensions: */
 #define NN_BUILTIN_ENDPOINT_PUBLICATION_MESSAGE_SECURE_ANNOUNCER (1u<<16)
@@ -384,6 +382,8 @@ typedef union Submessage {
 #define PID_DIRECTED_WRITE                      0x57u
 #define PID_ORIGINAL_WRITER_INFO                0x61u
 #define PID_ENDPOINT_GUID                       0x5au /* !SPEC <=> ADLINK_ENDPOINT_GUID */
+#define PID_TYPE_CONSISTENCY_ENFORCEMENT        0x74u
+#define PID_TYPE_INFORMATION                    0x75u
 
 /* Security related PID values. */
 #define PID_IDENTITY_TOKEN                      0x1001u
@@ -393,7 +393,7 @@ typedef union Submessage {
 #define PID_PARTICIPANT_SECURITY_INFO           0x1005u
 #define PID_IDENTITY_STATUS_TOKEN               0x1006u
 
-#ifdef DDSI_INCLUDE_SSM
+#ifdef DDS_HAS_SSM
 /* To indicate whether a reader favours the use of SSM.  Iff the
    reader favours SSM, it will use SSM if available. */
 #define PID_READER_FAVOURS_SSM                  0x72u
@@ -448,8 +448,25 @@ typedef union Submessage {
 #define PID_ADLINK_EOTINFO                      (PID_VENDORSPECIFIC_FLAG | 0x16u)
 #define PID_ADLINK_PART_CERT_NAME               (PID_VENDORSPECIFIC_FLAG | 0x17u)
 #define PID_ADLINK_LAN_CERT_NAME                (PID_VENDORSPECIFIC_FLAG | 0x18u)
-
 #define PID_CYCLONE_RECEIVE_BUFFER_SIZE         (PID_VENDORSPECIFIC_FLAG | 0x19u)
+#define PID_CYCLONE_TYPE_INFORMATION            (PID_VENDORSPECIFIC_FLAG | 0x1au)
+#define PID_CYCLONE_TOPIC_GUID                  (PID_VENDORSPECIFIC_FLAG | 0x1bu)
+
+/* Names of the built-in topics */
+#define DDS_BUILTIN_TOPIC_PARTICIPANT_NAME "DCPSParticipant"
+#define DDS_BUILTIN_TOPIC_PUBLICATION_NAME "DCPSPublication"
+#define DDS_BUILTIN_TOPIC_SUBSCRIPTION_NAME "DCPSSubscription"
+#define DDS_BUILTIN_TOPIC_TOPIC_NAME "DCPSTopic"
+#define DDS_BUILTIN_TOPIC_PARTICIPANT_MESSAGE_NAME "DCPSParticipantMessage"
+#define DDS_BUILTIN_TOPIC_TYPELOOKUP_REQUEST_NAME "DCPSTypeLookupRequest"
+#define DDS_BUILTIN_TOPIC_TYPELOOKUP_REPLY_NAME "DCPSTypeLookupReply"
+#define DDS_BUILTIN_TOPIC_PARTICIPANT_SECURE_NAME "DCPSParticipantsSecure"
+#define DDS_BUILTIN_TOPIC_PUBLICATION_SECURE_NAME "DCPSPublicationsSecure"
+#define DDS_BUILTIN_TOPIC_SUBSCRIPTION_SECURE_NAME "DCPSSubscriptionsSecure"
+#define DDS_BUILTIN_TOPIC_PARTICIPANT_MESSAGE_SECURE_NAME "DCPSParticipantMessageSecure"
+#define DDS_BUILTIN_TOPIC_PARTICIPANT_STATELESS_MESSAGE_NAME "DCPSParticipantStatelessMessage"
+#define DDS_BUILTIN_TOPIC_PARTICIPANT_VOLATILE_MESSAGE_SECURE_NAME "DCPSParticipantVolatileMessageSecure"
+#define DDS_BUILTIN_TOPIC_NULL_NAME NULL
 
 #if defined (__cplusplus)
 }

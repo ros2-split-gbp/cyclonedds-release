@@ -12,9 +12,14 @@
 #ifndef NN_RADMIN_H
 #define NN_RADMIN_H
 
+#include <stddef.h>
+
+#include "dds/ddsrt/time.h"
 #include "dds/ddsrt/atomics.h"
 #include "dds/ddsrt/threads.h"
-#include "dds/ddsi/ddsi_tran.h"
+#include "dds/ddsrt/static_assert.h"
+#include "dds/ddsi/ddsi_locator.h"
+#include "dds/ddsi/q_rtps.h"
 
 #if defined (__cplusplus)
 extern "C" {
@@ -31,6 +36,7 @@ struct nn_defrag;
 struct nn_reorder;
 struct nn_dqueue;
 struct ddsi_guid;
+struct ddsi_tran_conn;
 
 struct proxy_writer;
 
@@ -117,8 +123,8 @@ struct receiver_state {
   uint32_t rtps_encoded:1;                /* - */
   nn_vendorid_t vendor;                   /* 2 */
   nn_protocol_version_t protocol_version; /* 2 => 44/48 */
-  ddsi_tran_conn_t conn;                  /* Connection for request */
-  nn_locator_t srcloc;
+  struct ddsi_tran_conn *conn;            /* Connection for request */
+  ddsi_locator_t srcloc;
   struct ddsi_domaingv *gv;
 };
 
@@ -204,6 +210,10 @@ typedef int32_t nn_reorder_result_t;
 
 typedef void (*nn_dqueue_callback_t) (void *arg);
 
+struct ddsrt_log_cfg;
+struct nn_fragment_number_set_header;
+struct nn_sequence_number_set_header;
+
 struct nn_rbufpool *nn_rbufpool_new (const struct ddsrt_log_cfg *logcfg, uint32_t rbuf_size, uint32_t max_rmsg_size);
 void nn_rbufpool_setowner (struct nn_rbufpool *rbp, ddsrt_thread_t tid);
 void nn_rbufpool_free (struct nn_rbufpool *rbp);
@@ -240,6 +250,7 @@ struct nn_rsample *nn_reorder_rsample_dup_first (struct nn_rmsg *rmsg, struct nn
 struct nn_rdata *nn_rsample_fragchain (struct nn_rsample *rsample);
 nn_reorder_result_t nn_reorder_rsample (struct nn_rsample_chain *sc, struct nn_reorder *reorder, struct nn_rsample *rsampleiv, int *refcount_adjust, int delivery_queue_full_p);
 nn_reorder_result_t nn_reorder_gap (struct nn_rsample_chain *sc, struct nn_reorder *reorder, struct nn_rdata *rdata, seqno_t min, seqno_t maxp1, int *refcount_adjust);
+void nn_reorder_drop_upto (struct nn_reorder *reorder, seqno_t maxp1); // drops [1,maxp1); next_seq' = maxp1
 int nn_reorder_wantsample (const struct nn_reorder *reorder, seqno_t seq);
 unsigned nn_reorder_nackmap (const struct nn_reorder *reorder, seqno_t base, seqno_t maxseq, struct nn_sequence_number_set_header *map, uint32_t *mapbits, uint32_t maxsz, int notail);
 seqno_t nn_reorder_next_seq (const struct nn_reorder *reorder);

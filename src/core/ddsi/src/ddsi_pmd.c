@@ -76,7 +76,7 @@ void write_pmd_message (struct thread_state1 * const ts1, struct nn_xpack *xp, s
   pmd.kind = pmd_kind;
   pmd.value.length = (uint32_t) sizeof (data);
   pmd.value.value = data;
-  serdata = ddsi_serdata_from_sample (gv->pmd_topic, SDK_DATA, &pmd);
+  serdata = ddsi_serdata_from_sample (gv->pmd_type, SDK_DATA, &pmd);
   serdata->timestamp = ddsrt_time_wallclock ();
 
   tk = ddsi_tkmap_lookup_instance_ref (gv->m_tkmap, serdata);
@@ -92,7 +92,7 @@ void handle_pmd_message (const struct receiver_state *rst, struct ddsi_serdata *
   struct proxy_participant *proxypp;
   ddsi_guid_t ppguid;
   struct lease *l;
-  RSTTRACE (" PMD ST%x", sample->c.statusinfo);
+  RSTTRACE (" PMD ST%"PRIx32, sample->c.statusinfo);
   switch (sample->c.statusinfo & (NN_STATUSINFO_DISPOSE | NN_STATUSINFO_UNREGISTER))
   {
     case 0: {
