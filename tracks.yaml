@@ -95,8 +95,8 @@ tracks:
     - git-bloom-generate -y rosrpm --prefix release/:{ros_distro} :{ros_distro} -i
       :{release_inc} --os-name rhel
     devel_branch: master
-    last_release: 004932817e111597db65e6b332f92ae9bbe9fe30
-    last_version: 0.7.0
+    last_release: 0.8.0beta2
+    last_version: 0.8.0
     name: cyclonedds
     patches: null
     release_inc: '1'
