@@ -9,7 +9,9 @@
  *
  * SPDX-License-Identifier: EPL-2.0 OR BSD-3-Clause
  */
-#ifdef DDSI_INCLUDE_SECURITY
+#include "dds/features.h"
+
+#ifdef DDS_HAS_SECURITY
 
 #include <string.h>
 #include <stdarg.h>
@@ -30,7 +32,7 @@
 #include "dds/ddsi/ddsi_security_util.h"
 #include "dds/ddsi/ddsi_security_exchange.h"
 #include "dds/ddsi/ddsi_handshake.h"
-#include "dds/ddsi/ddsi_sertopic.h"
+#include "dds/ddsi/ddsi_sertype.h"
 #include "dds/ddsi/q_config.h"
 #include "dds/ddsi/q_log.h"
 #include "dds/ddsrt/sync.h"
@@ -771,7 +773,17 @@ static void release_plugins (struct ddsi_domaingv *gv, dds_security_context *sc)
 
 void q_omg_security_stop (struct ddsi_domaingv *gv)
 {
+  dds_security_context *sc = gv->security_context;
+
   ddsi_handshake_admin_stop(gv);
+
+  if (sc)
+  {
+    if (sc->authentication_context)
+      sc->authentication_context->set_listener (sc->authentication_context, NULL, NULL);
+    if (sc->access_control_context)
+      sc->access_control_context->set_listener (sc->access_control_context, NULL, NULL);
+  }
 }
 
 void q_omg_security_deinit (struct dds_security_context *sc)
@@ -1302,6 +1314,10 @@ bool q_omg_participant_is_liveliness_protected(const struct participant *pp)
   return ((pp->sec_attr != NULL) && pp->sec_attr->attr.is_liveliness_protected);
 }
 
+bool q_omg_participant_is_discovery_protected(const struct participant *pp)
+{
+  return ((pp->sec_attr != NULL) && pp->sec_attr->attr.is_discovery_protected);
+}
 
 static bool maybe_rtps_protected(ddsi_entityid_t entityid)
 {
@@ -1507,7 +1523,7 @@ void q_omg_security_register_writer(struct writer *wr)
     memset(&(partitions), 0, sizeof(DDS_Security_PartitionQosPolicy));
 
   wr->sec_attr = writer_sec_attributes_new();
-  if (!sc->access_control_context->get_datawriter_sec_attributes(sc->access_control_context, pp->sec_attr->permissions_handle, wr->topic->name, &partitions, NULL, &wr->sec_attr->attr, &exception))
+  if (!sc->access_control_context->get_datawriter_sec_attributes(sc->access_control_context, pp->sec_attr->permissions_handle, wr->xqos->topic_name, &partitions, NULL, &wr->sec_attr->attr, &exception))
   {
     EXCEPTION_ERROR(pp->e.gv, &exception, "Failed to retrieve writer security attributes");
     goto no_attr;
@@ -1623,7 +1639,7 @@ void q_omg_security_register_reader(struct reader *rd)
 
   rd->sec_attr = reader_sec_attributes_new();
 
-  if (!sc->access_control_context->get_datareader_sec_attributes(sc->access_control_context, pp->sec_attr->permissions_handle, rd->topic->name, &partitions, NULL, &rd->sec_attr->attr, &exception))
+  if (!sc->access_control_context->get_datareader_sec_attributes(sc->access_control_context, pp->sec_attr->permissions_handle, rd->xqos->topic_name, &partitions, NULL, &rd->sec_attr->attr, &exception))
   {
     EXCEPTION_ERROR(pp->e.gv, &exception, "Failed to retrieve reader security attributes");
     goto no_attr;
@@ -1711,6 +1727,15 @@ unsigned determine_publication_writer (const struct writer *wr)
   else
     return NN_ENTITYID_SEDP_BUILTIN_PUBLICATIONS_WRITER;
 }
+
+#ifdef DDS_HAS_TOPIC_DISCOVERY
+unsigned determine_topic_writer (const struct topic *tp)
+{
+  if (q_omg_participant_is_discovery_protected (tp->pp))
+    abort (); /* FIXME: not implemented */
+  return NN_ENTITYID_SEDP_BUILTIN_TOPIC_WRITER;
+}
+#endif
 
 static int64_t check_remote_participant_permissions(uint32_t domain_id, struct participant *pp, struct proxy_participant *proxypp, int64_t remote_identity_handle)
 {
@@ -2812,7 +2837,7 @@ static bool q_omg_security_encode_datareader_submessage(struct reader *rd, const
   const struct dds_security_context *sc = q_omg_security_get_secure_context (rd->c.pp);
   assert (sc);
 
-  GVTRACE (" encode_datareader_submessage "PGUIDFMT" %s/%s", PGUID (rd->e.guid), rd->topic->name, rd->topic->type_name);
+  GVTRACE (" encode_datareader_submessage "PGUIDFMT" %s/%s", PGUID (rd->e.guid), rd->xqos->topic_name, rd->type->type_name);
   // FIXME: print_buf(src_buf, src_len, "q_omg_security_encode_datareader_submessage(SOURCE)");
 
   ddsrt_mutex_lock (&rd->e.lock);
@@ -2827,7 +2852,7 @@ static bool q_omg_security_encode_datareader_submessage(struct reader *rd, const
 
   if ((hdls._length = (DDS_Security_unsigned_long) idx) == 0)
   {
-    GVTRACE ("Submsg encoding failed for datareader "PGUIDFMT" %s/%s: no matching writers\n", PGUID (rd->e.guid), rd->topic->name, rd->topic->type_name);
+    GVTRACE ("Submsg encoding failed for datareader "PGUIDFMT" %s/%s: no matching writers\n", PGUID (rd->e.guid), rd->xqos->topic_name, rd->type->type_name);
     goto err_enc_drd_subm;
   }
 
@@ -2839,8 +2864,8 @@ static bool q_omg_security_encode_datareader_submessage(struct reader *rd, const
   if (!(result = sc->crypto_context->crypto_transform->encode_datareader_submessage (
       sc->crypto_context->crypto_transform, &encoded_buffer, &plain_buffer, rd->sec_attr->crypto_handle, &hdls, &ex)))
   {
-    GVWARNING ("Submsg encoding failed for datareader "PGUIDFMT" %s/%s: %s", PGUID (rd->e.guid), rd->topic->name,
-        rd->topic->type_name, ex.message ? ex.message : "Unknown error");
+    GVWARNING ("Submsg encoding failed for datareader "PGUIDFMT" %s/%s: %s", PGUID (rd->e.guid), rd->xqos->topic_name,
+        rd->type->type_name, ex.message ? ex.message : "Unknown error");
     GVTRACE ("\n");
     DDS_Security_Exception_reset (&ex);
     goto err_enc_drd_subm;
@@ -2884,7 +2909,7 @@ static bool q_omg_security_encode_datawriter_submessage (struct writer *wr, cons
   const struct dds_security_context *sc = q_omg_security_get_secure_context (wr->c.pp);
   assert (sc);
 
-  GVTRACE (" encode_datawriter_submessage "PGUIDFMT" %s/%s", PGUID (wr->e.guid), wr->topic->name, wr->topic->type_name);
+  GVTRACE (" encode_datawriter_submessage "PGUIDFMT" %s/%s", PGUID (wr->e.guid), wr->xqos->topic_name, wr->type->type_name);
 
   // FIXME: print_buf(src_buf, src_len, "q_omg_security_encode_datawriter_submessage(SOURCE)");
 
@@ -2899,7 +2924,7 @@ static bool q_omg_security_encode_datawriter_submessage (struct writer *wr, cons
   if ((hdls._length = (DDS_Security_unsigned_long) idx) == 0)
   {
     GVTRACE ("Submsg encoding failed for datawriter "PGUIDFMT" %s/%s: no matching readers\n", PGUID (wr->e.guid),
-        wr->topic->name, wr->topic->type_name);
+        wr->xqos->topic_name, wr->type->type_name);
     goto err_enc_dwr_subm;
   }
 
@@ -2923,7 +2948,7 @@ static bool q_omg_security_encode_datawriter_submessage (struct writer *wr, cons
 
   if (!result)
   {
-    GVWARNING ("Submsg encoding failed for datawriter "PGUIDFMT" %s/%s: %s", PGUID (wr->e.guid), wr->topic->name, wr->topic->type_name, ex.message ? ex.message : "Unknown error");
+    GVWARNING ("Submsg encoding failed for datawriter "PGUIDFMT" %s/%s: %s", PGUID (wr->e.guid), wr->xqos->topic_name, wr->type->type_name, ex.message ? ex.message : "Unknown error");
     GVTRACE ("\n");
     DDS_Security_Exception_reset (&ex);
     goto err_enc_dwr_subm;
@@ -3076,7 +3101,7 @@ static bool q_omg_security_encode_serialized_payload (const struct writer *wr, c
 
   // FIXME: print_buf(src_buf, src_len, "q_omg_security_encode_serialized_payload(SOURCE)");
 
-  GVTRACE (" encode_payload "PGUIDFMT" %s/%s\n", PGUID (wr->e.guid), wr->topic->name, wr->topic->type_name);
+  GVTRACE (" encode_payload "PGUIDFMT" %s/%s\n", PGUID (wr->e.guid), wr->xqos->topic_name, wr->type->type_name);
 
   memset (&extra_inline_qos, 0, sizeof (extra_inline_qos));
   memset (&encoded_buffer, 0, sizeof (encoded_buffer));
@@ -3740,7 +3765,7 @@ ssize_t
 secure_conn_write(
     const struct ddsi_domaingv *gv,
     ddsi_tran_conn_t conn,
-    const nn_locator_t *dst,
+    const ddsi_locator_t *dst,
     size_t niov,
     const ddsrt_iovec_t *iov,
     uint32_t flags,
@@ -3871,7 +3896,7 @@ void q_omg_log_endpoint_protection(struct ddsi_domaingv * const gv, const ddsi_p
   GVLOGDISC (")");
 }
 
-#else /* DDSI_INCLUDE_SECURITY */
+#else /* DDS_HAS_SECURITY */
 
 #include "dds/ddsi/ddsi_security_omg.h"
 
@@ -3880,10 +3905,9 @@ extern inline bool q_omg_security_enabled(void);
 extern inline bool q_omg_participant_is_access_protected(UNUSED_ARG(const struct participant *pp));
 extern inline bool q_omg_participant_is_rtps_protected(UNUSED_ARG(const struct participant *pp));
 extern inline bool q_omg_participant_is_liveliness_protected(UNUSED_ARG(const struct participant *pp));
+extern inline bool q_omg_participant_is_discovery_protected(UNUSED_ARG(const struct participant *pp));
 extern inline bool q_omg_participant_is_secure(UNUSED_ARG(const struct participant *pp));
 extern inline bool q_omg_proxy_participant_is_secure(UNUSED_ARG(const struct proxy_participant *proxypp));
-
-extern inline unsigned determine_subscription_writer(UNUSED_ARG(const struct reader *rd));
 
 extern inline bool q_omg_security_match_remote_writer_enabled(UNUSED_ARG(struct reader *rd), UNUSED_ARG(struct proxy_writer *pwr), UNUSED_ARG(int64_t *crypto_handle));
 extern inline bool q_omg_security_match_remote_reader_enabled(UNUSED_ARG(struct writer *wr), UNUSED_ARG(struct proxy_reader *prd), UNUSED_ARG(bool relay_only), UNUSED_ARG(int64_t *crypto_handle));
@@ -3899,7 +3923,11 @@ extern inline void q_omg_get_proxy_reader_security_info(UNUSED_ARG(struct proxy_
 extern inline bool q_omg_security_check_remote_reader_permissions(UNUSED_ARG(const struct proxy_reader *prd), UNUSED_ARG(uint32_t domain_id), UNUSED_ARG(struct participant *par), UNUSED_ARG(bool *relay_only));
 extern inline void q_omg_security_deregister_remote_reader_match(UNUSED_ARG(const struct proxy_reader *prd), UNUSED_ARG(const struct writer *wr), UNUSED_ARG(struct wr_prd_match *match));
 
+extern inline unsigned determine_subscription_writer(UNUSED_ARG(const struct reader *rd));
 extern inline unsigned determine_publication_writer(UNUSED_ARG(const struct writer *wr));
+#ifdef DDS_HAS_TOPIC_DISCOVERY
+extern inline unsigned determine_topic_writer(UNUSED_ARG(const struct topic *tp));
+#endif
 
 extern inline bool is_proxy_participant_deletion_allowed(UNUSED_ARG(struct ddsi_domaingv * const gv), UNUSED_ARG(const struct ddsi_guid *guid), UNUSED_ARG(const ddsi_entityid_t pwr_entityid));
 
@@ -4011,4 +4039,4 @@ extern inline bool q_omg_is_endpoint_protected(UNUSED_ARG(const ddsi_plist_t *pl
 extern inline void q_omg_log_endpoint_protection(UNUSED_ARG(struct ddsi_domaingv * const gv), UNUSED_ARG(const ddsi_plist_t *plist));
 
 
-#endif /* DDSI_INCLUDE_SECURITY */
+#endif /* DDS_HAS_SECURITY */

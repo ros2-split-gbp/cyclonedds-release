@@ -54,7 +54,7 @@ typedef struct ddsi_tcp_conn {
   uint32_t m_peer_port;
   ddsrt_mutex_t m_mutex;
   ddsrt_socket_t m_sock;
-#ifdef DDSI_INCLUDE_SSL
+#ifdef DDS_HAS_SSL
   SSL * m_ssl;
 #endif
 } *ddsi_tcp_conn_t;
@@ -62,7 +62,7 @@ typedef struct ddsi_tcp_conn {
 typedef struct ddsi_tcp_listener {
   struct ddsi_tran_listener m_base;
   ddsrt_socket_t m_sock;
-#ifdef DDSI_INCLUDE_SSL
+#ifdef DDS_HAS_SSL
   BIO * m_bio;
 #endif
 } *ddsi_tcp_listener_t;
@@ -72,7 +72,7 @@ struct ddsi_tran_factory_tcp {
   ddsrt_mutex_t ddsi_tcp_cache_lock_g;
   ddsrt_avl_tree_t ddsi_tcp_cache_g;
   struct ddsi_tcp_conn ddsi_tcp_conn_client;
-#ifdef DDSI_INCLUDE_SSL
+#ifdef DDS_HAS_SSL
   struct ddsi_ssl_plugins ddsi_tcp_ssl_plugin;
 #endif
 };
@@ -110,7 +110,7 @@ static ddsi_tcp_conn_t ddsi_tcp_new_conn (struct ddsi_tran_factory_tcp *fact, dd
 
 static char *sockaddr_to_string_with_port (struct ddsi_tran_factory_tcp *fact, char *dst, size_t sizeof_dst, const struct sockaddr *src)
 {
-  nn_locator_t loc;
+  ddsi_locator_t loc;
   ddsi_ipaddr_to_loc(&fact->fact, &loc, src, src->sa_family == AF_INET ? NN_LOCATOR_KIND_TCPv4 : NN_LOCATOR_KIND_TCPv6);
   ddsi_locator_to_string(dst, sizeof_dst, &loc);
   return dst;
@@ -269,7 +269,7 @@ static void ddsi_tcp_conn_connect (ddsi_tcp_conn_t conn, const ddsrt_msghdr_t * 
     goto fail_w_socket;
 
   ddsi_tcp_conn_set_socket (conn, sock);
-#ifdef DDSI_INCLUDE_SSL
+#ifdef DDS_HAS_SSL
   if (fact->ddsi_tcp_ssl_plugin.connect)
   {
     conn->m_ssl = (fact->ddsi_tcp_ssl_plugin.connect) (conn->m_base.m_base.gv, sock);
@@ -409,7 +409,7 @@ static ssize_t ddsi_tcp_conn_read_plain (ddsi_tcp_conn_t tcp, void * buf, size_t
   return (*rc == DDS_RETCODE_OK ? rcvd : -1);
 }
 
-#ifdef DDSI_INCLUDE_SSL
+#ifdef DDS_HAS_SSL
 static ssize_t ddsi_tcp_conn_read_ssl (ddsi_tcp_conn_t tcp, void * buf, size_t len, dds_return_t *rc)
 {
   struct ddsi_tran_factory_tcp * const fact = (struct ddsi_tran_factory_tcp *) tcp->m_base.m_factory;
@@ -454,7 +454,7 @@ static int32_t addrfam_to_locator_kind (int af)
   return (af == AF_INET) ? NN_LOCATOR_KIND_TCPv4 : NN_LOCATOR_KIND_TCPv6;
 }
 
-static ssize_t ddsi_tcp_conn_read (ddsi_tran_conn_t conn, unsigned char *buf, size_t len, bool allow_spurious, nn_locator_t *srcloc)
+static ssize_t ddsi_tcp_conn_read (ddsi_tran_conn_t conn, unsigned char *buf, size_t len, bool allow_spurious, ddsi_locator_t *srcloc)
 {
   struct ddsi_tran_factory_tcp * const fact = (struct ddsi_tran_factory_tcp *) conn->m_factory;
   struct ddsi_domaingv const * const gv = fact->fact.gv;
@@ -464,7 +464,7 @@ static ssize_t ddsi_tcp_conn_read (ddsi_tran_conn_t conn, unsigned char *buf, si
   size_t pos = 0;
   ssize_t n;
 
-#ifdef DDSI_INCLUDE_SSL
+#ifdef DDS_HAS_SSL
   if (fact->ddsi_tcp_ssl_plugin.read)
   {
     rd = ddsi_tcp_conn_read_ssl;
@@ -530,7 +530,7 @@ static ssize_t ddsi_tcp_conn_write_plain (ddsi_tcp_conn_t conn, const void * buf
   return (*rc == DDS_RETCODE_OK ? sent : -1);
 }
 
-#ifdef DDSI_INCLUDE_SSL
+#ifdef DDS_HAS_SSL
 static ssize_t ddsi_tcp_conn_write_ssl (ddsi_tcp_conn_t conn, const void * buf, size_t len, dds_return_t *rc)
 {
   struct ddsi_tran_factory_tcp * const fact = (struct ddsi_tran_factory_tcp *) conn->m_base.m_factory;
@@ -592,11 +592,11 @@ static void set_msghdr_iov (ddsrt_msghdr_t *mhdr, ddsrt_iovec_t *iov, size_t iov
   mhdr->msg_iovlen = (ddsrt_msg_iovlen_t)iovlen;
 }
 
-static ssize_t ddsi_tcp_conn_write (ddsi_tran_conn_t base, const nn_locator_t *dst, size_t niov, const ddsrt_iovec_t *iov, uint32_t flags)
+static ssize_t ddsi_tcp_conn_write (ddsi_tran_conn_t base, const ddsi_locator_t *dst, size_t niov, const ddsrt_iovec_t *iov, uint32_t flags)
 {
   struct ddsi_tran_factory_tcp * const fact = (struct ddsi_tran_factory_tcp *) base->m_factory;
   struct ddsi_domaingv const * const gv = fact->fact.gv;
-#ifdef DDSI_INCLUDE_SSL
+#ifdef DDS_HAS_SSL
   char msgbuf[4096]; /* stack buffer for merging smallish writes without requiring allocations */
   ddsrt_iovec_t iovec; /* iovec used for msgbuf */
 #endif
@@ -653,7 +653,7 @@ static ssize_t ddsi_tcp_conn_write (ddsi_tran_conn_t base, const nn_locator_t *d
     return (ssize_t) len;
   }
 
-#ifdef DDSI_INCLUDE_SSL
+#ifdef DDS_HAS_SSL
   if (gv->config.ssl_enable)
   {
     /* SSL doesn't have sendmsg, ret = 0 so writing starts at first byte.
@@ -730,7 +730,7 @@ static ssize_t ddsi_tcp_conn_write (ddsi_tran_conn_t base, const nn_locator_t *d
   {
     ssize_t (*wr) (ddsi_tcp_conn_t, const void *, size_t, dds_return_t *) = ddsi_tcp_conn_write_plain;
     int i = 0;
-#ifdef DDSI_INCLUDE_SSL
+#ifdef DDS_HAS_SSL
     if (fact->ddsi_tcp_ssl_plugin.write)
     {
       wr = ddsi_tcp_conn_write_ssl;
@@ -750,7 +750,7 @@ static ssize_t ddsi_tcp_conn_write (ddsi_tran_conn_t base, const nn_locator_t *d
     }
   }
 
-#ifdef DDSI_INCLUDE_SSL
+#ifdef DDS_HAS_SSL
   /* If allocated memory for merging original fragments into a single buffer, free it */
   if (msg.msg_iov == &iovec && iovec.iov_base != msgbuf)
   {
@@ -779,7 +779,7 @@ static bool ddsi_tcp_supports (const struct ddsi_tran_factory *fact_cmn, int32_t
   return kind == fact_cmn->m_kind;
 }
 
-static int ddsi_tcp_locator (struct ddsi_tran_factory *fact_cmn, ddsi_tran_base_t base, nn_locator_t *loc)
+static int ddsi_tcp_locator (struct ddsi_tran_factory *fact_cmn, ddsi_tran_base_t base, ddsi_locator_t *loc)
 {
   loc->tran = fact_cmn;
   loc->kind = fact_cmn->m_kind;
@@ -799,13 +799,13 @@ static dds_return_t ddsi_tcp_create_conn (ddsi_tran_conn_t *conn_out, struct dds
 
 static int ddsi_tcp_listen (ddsi_tran_listener_t listener)
 {
-#ifdef DDSI_INCLUDE_SSL
+#ifdef DDS_HAS_SSL
   struct ddsi_tran_factory_tcp * const fact = (struct ddsi_tran_factory_tcp *) listener->m_factory;
 #endif
   ddsi_tcp_listener_t tl = (ddsi_tcp_listener_t) listener;
   int ret = listen (tl->m_sock, 4);
 
-#ifdef DDSI_INCLUDE_SSL
+#ifdef DDS_HAS_SSL
   if ((ret == 0) && fact->ddsi_tcp_ssl_plugin.listen)
   {
     tl->m_bio = (fact->ddsi_tcp_ssl_plugin.listen) (tl->m_sock);
@@ -826,13 +826,13 @@ static ddsi_tran_conn_t ddsi_tcp_accept (ddsi_tran_listener_t listener)
   socklen_t addrlen = sizeof (addr);
   char buff[DDSI_LOCSTRLEN];
   dds_return_t rc = DDS_RETCODE_OK;
-#ifdef DDSI_INCLUDE_SSL
+#ifdef DDS_HAS_SSL
   SSL * ssl = NULL;
 #endif
 
   memset (&addr, 0, addrlen);
   do {
-#ifdef DDSI_INCLUDE_SSL
+#ifdef DDS_HAS_SSL
     if (fact->ddsi_tcp_ssl_plugin.accept)
     {
       ssl = (fact->ddsi_tcp_ssl_plugin.accept) (listener->m_base.gv, tl->m_bio, &sock);
@@ -871,7 +871,7 @@ static ddsi_tran_conn_t ddsi_tcp_accept (ddsi_tran_listener_t listener)
 
     (void)ddsrt_setsocknonblocking (sock, true);
     tcp = ddsi_tcp_new_conn (fact, sock, true, &addr.a);
-#ifdef DDSI_INCLUDE_SSL
+#ifdef DDS_HAS_SSL
     tcp->m_ssl = ssl;
 #endif
     tcp->m_base.m_listener = listener;
@@ -898,12 +898,12 @@ static ddsrt_socket_t ddsi_tcp_listener_handle (ddsi_tran_base_t base)
   caller (supporting call back over NAT).
 */
 
-static void addr_to_loc (const struct ddsi_tran_factory *fact, nn_locator_t *loc, const union addr *addr)
+static void addr_to_loc (const struct ddsi_tran_factory *fact, ddsi_locator_t *loc, const union addr *addr)
 {
   ddsi_ipaddr_to_loc (fact, loc, &addr->a, addrfam_to_locator_kind (addr->a.sa_family));
 }
 
-static void ddsi_tcp_conn_peer_locator (ddsi_tran_conn_t conn, nn_locator_t * loc)
+static void ddsi_tcp_conn_peer_locator (ddsi_tran_conn_t conn, ddsi_locator_t * loc)
 {
   struct ddsi_domaingv const * const gv = conn->m_base.gv;
   char buff[DDSI_LOCSTRLEN];
@@ -990,9 +990,9 @@ static void ddsi_tcp_conn_delete (ddsi_tcp_conn_t conn)
   struct ddsi_domaingv const * const gv = fact->fact.gv;
   char buff[DDSI_LOCSTRLEN];
   sockaddr_to_string_with_port(fact, buff, sizeof(buff), &conn->m_peer_addr.a);
-  GVLOG (DDS_LC_TCP, "tcp free %s connnection on socket %"PRIdSOCK" to %s\n", conn->m_base.m_server ? "server" : "client", conn->m_sock, buff);
+  GVLOG (DDS_LC_TCP, "tcp free %s connection on socket %"PRIdSOCK" to %s\n", conn->m_base.m_server ? "server" : "client", conn->m_sock, buff);
 
-#ifdef DDSI_INCLUDE_SSL
+#ifdef DDS_HAS_SSL
   if (fact->ddsi_tcp_ssl_plugin.ssl_free)
   {
     (fact->ddsi_tcp_ssl_plugin.ssl_free) (conn->m_ssl);
@@ -1013,10 +1013,10 @@ static void ddsi_tcp_close_conn (ddsi_tran_conn_t tc)
   if (tc != &fact_tcp->ddsi_tcp_conn_client.m_base)
   {
     char buff[DDSI_LOCSTRLEN];
-    nn_locator_t loc;
+    ddsi_locator_t loc;
     ddsi_tcp_conn_t conn = (ddsi_tcp_conn_t) tc;
     sockaddr_to_string_with_port(fact_tcp, buff, sizeof(buff), &conn->m_peer_addr.a);
-    GVLOG (DDS_LC_TCP, "tcp close %s connnection on socket %"PRIdSOCK" to %s\n", conn->m_base.m_server ? "server" : "client", conn->m_sock, buff);
+    GVLOG (DDS_LC_TCP, "tcp close %s connection on socket %"PRIdSOCK" to %s\n", conn->m_base.m_server ? "server" : "client", conn->m_sock, buff);
     (void) shutdown (conn->m_sock, 2);
     ddsi_ipaddr_to_loc(&fact_tcp->fact, &loc, &conn->m_peer_addr.a, addrfam_to_locator_kind(conn->m_peer_addr.a.sa_family));
     loc.port = conn->m_peer_port;
@@ -1087,7 +1087,7 @@ static void ddsi_tcp_release_listener (ddsi_tran_listener_t listener)
 {
   ddsi_tcp_listener_t tl = (ddsi_tcp_listener_t) listener;
   struct ddsi_domaingv const * const gv = tl->m_base.m_base.gv;
-#ifdef DDSI_INCLUDE_SSL
+#ifdef DDS_HAS_SSL
   struct ddsi_tran_factory_tcp * const fact = (struct ddsi_tran_factory_tcp *) listener->m_factory;
   if (fact->ddsi_tcp_ssl_plugin.bio_vfree)
   {
@@ -1104,7 +1104,7 @@ static void ddsi_tcp_release_factory (struct ddsi_tran_factory *fact_cmn)
   struct ddsi_domaingv const * const gv = fact->fact.gv;
   ddsrt_avl_free (&ddsi_tcp_treedef, &fact->ddsi_tcp_cache_g, ddsi_tcp_node_free);
   ddsrt_mutex_destroy (&fact->ddsi_tcp_cache_lock_g);
-#ifdef DDSI_INCLUDE_SSL
+#ifdef DDS_HAS_SSL
   if (fact->ddsi_tcp_ssl_plugin.fini)
   {
     (fact->ddsi_tcp_ssl_plugin.fini) ();
@@ -1114,26 +1114,26 @@ static void ddsi_tcp_release_factory (struct ddsi_tran_factory *fact_cmn)
   ddsrt_free (fact);
 }
 
-static enum ddsi_locator_from_string_result ddsi_tcp_address_from_string (const struct ddsi_tran_factory *fact, nn_locator_t *loc, const char *str)
+static enum ddsi_locator_from_string_result ddsi_tcp_address_from_string (const struct ddsi_tran_factory *fact, ddsi_locator_t *loc, const char *str)
 {
   return ddsi_ipaddr_from_string(fact, loc, str, fact->m_kind);
 }
 
-static int ddsi_tcp_is_mcaddr (const struct ddsi_tran_factory *tran, const nn_locator_t *loc)
+static int ddsi_tcp_is_mcaddr (const struct ddsi_tran_factory *tran, const ddsi_locator_t *loc)
 {
   (void) tran;
   (void) loc;
   return 0;
 }
 
-static int ddsi_tcp_is_ssm_mcaddr (const struct ddsi_tran_factory *tran, const nn_locator_t *loc)
+static int ddsi_tcp_is_ssm_mcaddr (const struct ddsi_tran_factory *tran, const ddsi_locator_t *loc)
 {
   (void) tran;
   (void) loc;
   return 0;
 }
 
-static enum ddsi_nearby_address_result ddsi_tcp_is_nearby_address (const nn_locator_t *loc, const nn_locator_t *ownloc, size_t ninterf, const struct nn_interface interf[])
+static enum ddsi_nearby_address_result ddsi_tcp_is_nearby_address (const ddsi_locator_t *loc, const ddsi_locator_t *ownloc, size_t ninterf, const struct nn_interface interf[])
 {
   return ddsi_ipaddr_is_nearby_address(loc, ownloc, ninterf, interf);
 }
@@ -1179,7 +1179,7 @@ int ddsi_tcp_init (struct ddsi_domaingv *gv)
   ddsi_factory_add (gv, &fact->fact);
 
 #if DDSRT_HAVE_IPV6
-  if (gv->config.transport_selector == TRANS_TCP6)
+  if (gv->config.transport_selector == DDSI_TRANS_TCP6)
   {
     fact->fact.m_kind = NN_LOCATOR_KIND_TCPv6;
     fact->fact.m_typename = "tcp6";
@@ -1189,7 +1189,7 @@ int ddsi_tcp_init (struct ddsi_domaingv *gv)
   memset (&fact->ddsi_tcp_conn_client, 0, sizeof (fact->ddsi_tcp_conn_client));
   ddsi_tcp_base_init (fact, &fact->ddsi_tcp_conn_client.m_base);
 
-#ifdef DDSI_INCLUDE_SSL
+#ifdef DDS_HAS_SSL
   if (gv->config.ssl_enable)
   {
     ddsi_ssl_config_plugin (&fact->ddsi_tcp_ssl_plugin);

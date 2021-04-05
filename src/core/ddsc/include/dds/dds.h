@@ -52,10 +52,16 @@ extern "C" {
 
 struct dds_rhc;
 struct ddsi_plist;
-struct ddsi_sertopic;
+struct ddsi_sertype;
 struct ddsi_serdata;
+struct ddsi_sertopic; // deprecated, binary compatibility only
 
 #define DDS_MIN_PSEUDO_HANDLE ((dds_entity_t) 0x7fff0000)
+
+/** Indicates that the library uses ddsi_sertype (as a replacement for ddsi_sertopic). If sertype
+ *  is used, the function dds_create_topic_sertype requires a topic name parameter, as this field
+ *  is not included in ddsi_sertype. */
+#define DDS_HAS_DDSI_SERTYPE 1
 
 /* @defgroup builtintopic_constants Convenience constants for referring to builtin topics
  *
@@ -198,6 +204,19 @@ typedef struct dds_builtintopic_participant
   dds_qos_t *qos;
 }
 dds_builtintopic_participant_t;
+
+typedef struct dds_builtintopic_topic_key {
+  unsigned char d[16];
+} dds_builtintopic_topic_key_t;
+
+typedef struct dds_builtintopic_topic
+{
+  dds_builtintopic_topic_key_t key;
+  char *topic_name;
+  char *type_name;
+  dds_qos_t *qos;
+}
+dds_builtintopic_topic_t;
 
 typedef struct dds_builtintopic_endpoint
 {
@@ -837,6 +856,39 @@ dds_create_participant(
 DDS_EXPORT dds_entity_t
 dds_create_domain(const dds_domainid_t domain, const char *config);
 
+struct ddsi_config;
+/**
+ * @brief Creates a domain with a given configuration, specified as an
+ * initializer (unstable interface)
+ *
+ * To explicitly create a domain based on a configuration passed as a raw
+ * initializer rather than as an XML string. This allows bypassing the XML
+ * parsing, but tightly couples the initializing to implementation.  See
+ * dds/ddsi/ddsi_config.h:ddsi_config_init_default for a way to initialize
+ * the default configuration.
+ *
+ * It will not be created if a domain with the given domain id already exists.
+ * This could have been created implicitly by a dds_create_participant().
+ *
+ * Please be aware that the given domain_id always takes precedence over the
+ * configuration.
+ *
+ * @param[in]  domain The domain to be created. DEFAULT_DOMAIN is not allowed.
+ * @param[in]  config A configuration initializer.  The lifetime of any pointers
+ *             in config must be at least that of the lifetime of the domain.
+ *
+ * @returns A valid entity handle or an error code.
+ *
+ * @retval DDS_RETCODE_BAD_PARAMETER
+ *             Illegal value for domain id or the config parameter is NULL.
+ * @retval DDS_RETCODE_PRECONDITION_NOT_MET
+ *             The domain already existed and cannot be created again.
+ * @retval DDS_RETCODE_ERROR
+ *             An internal error has occurred.
+ */
+DDS_EXPORT dds_entity_t
+dds_create_domain_with_rawconfig(const dds_domainid_t domain, const struct ddsi_config *config);
+
 /**
  * @brief Get entity parent.
  *
@@ -1038,24 +1090,24 @@ dds_create_topic(
   const dds_qos_t *qos,
   const dds_listener_t *listener);
 
-
-#define DDS_HAS_CREATE_TOPIC_GENERIC 1
+#define DDS_HAS_CREATE_TOPIC_SERTYPE 1
 /**
  * @brief Creates a new topic with provided type handling.
  *
- * The type name for the topic is taken from the provided "sertopic" object. Topic
+ * The name for the type is taken from the provided "sertype" object. Type
  * matching is done on a combination of topic name and type name. Each successful
  * call to dds_create_topic creates a new topic entity sharing the same QoS
  * settings with all other topics of the same name.
  *
  * In case this function returns a valid handle, the ownership of the provided
- * sertopic is handed over to Cyclone. On return, the caller gets in the sertopic parameter a
- * pointer to the sertopic that is actually used by the topic. This can be the provided sertopic
- * (if this sertopic was not yet known in the domain), or a sertopic thas was
+ * sertype is handed over to Cyclone. On return, the caller gets in the sertype parameter a
+ * pointer to the sertype that is actually used by the topic. This can be the provided sertype
+ * (if this sertype was not yet known in the domain), or a sertype thas was
  * already known in the domain.
  *
  * @param[in]     participant  Participant on which to create the topic.
- * @param[in,out] sertopic     Internal description of the topic type (includes name). On return, the sertopic parameter is set to the actual sertopic that is used by the topic.
+ * @param[in]     name         Topic name
+ * @param[in,out] sertype      Internal description of the type . On return, the sertype parameter is set to the actual sertype that is used by the topic.
  * @param[in]     qos          QoS to set on the new topic (can be NULL).
  * @param[in]     listener     Any listener functions associated with the new topic (can be NULL).
  * @param[in]     sedp_plist   Topic description to be published as part of discovery (if NULL, not published).
@@ -1071,7 +1123,51 @@ dds_create_topic(
  * @retval DDS_RETCODE_INCONSISTENT_POLICY
  *             QoS mismatch between qos and an existing topic's QoS.
  * @retval DDS_RETCODE_PRECONDITION_NOT_MET
- *             Mismatch between type name in sertopic and pre-existing
+ *             Mismatch between type name in sertype and pre-existing
+ *             topic's type name.
+ */
+DDS_EXPORT dds_entity_t
+dds_create_topic_sertype (
+  dds_entity_t participant,
+  const char *name,
+  struct ddsi_sertype **sertype,
+  const dds_qos_t *qos,
+  const dds_listener_t *listener,
+  const struct ddsi_plist *sedp_plist);
+
+#define DDS_HAS_CREATE_TOPIC_GENERIC 1
+/**
+ * @brief Creates a new topic with provided type handling.
+ *
+ * The name for the type is taken from the provided "sertype" object. Type
+ * matching is done on a combination of topic name and type name. Each successful
+ * call to dds_create_topic creates a new topic entity sharing the same QoS
+ * settings with all other topics of the same name.
+ *
+ * In case this function returns a valid handle, the ownership of the provided
+ * sertype is handed over to Cyclone. On return, the caller gets in the sertype parameter a
+ * pointer to the sertype that is actually used by the topic. This can be the provided sertype
+ * (if this sertype was not yet known in the domain), or a sertype thas was
+ * already known in the domain.
+ *
+ * @param[in]     participant  Participant on which to create the topic.
+ * @param[in,out] sertopic     Legacy internal description of the type. On return, the sertype parameter is set to the actual sertype that is used by the topic.
+ * @param[in]     qos          QoS to set on the new topic (can be NULL).
+ * @param[in]     listener     Any listener functions associated with the new topic (can be NULL).
+ * @param[in]     sedp_plist   Topic description to be published as part of discovery (if NULL, not published).
+ *
+ * @returns A valid, unique topic handle or an error code. Iff a valid handle, the domain takes ownership of provided serdata.
+ *
+ * @retval >=0
+ *             A valid unique topic handle.
+ * @retval DDS_RETCODE_BAD_PARAMETER
+ *             Either participant, descriptor, name or qos is invalid.
+ * @retval DDS_RETCODE_BAD_PARAMETER
+ *             Either participant, descriptor, name or qos is invalid.
+ * @retval DDS_RETCODE_INCONSISTENT_POLICY
+ *             QoS mismatch between qos and an existing topic's QoS.
+ * @retval DDS_RETCODE_PRECONDITION_NOT_MET
+ *             Mismatch between type name in sertype and pre-existing
  *             topic's type name.
  */
 DDS_EXPORT dds_entity_t
@@ -1093,7 +1189,7 @@ dds_create_topic_arbitrary (
 /**
  * @brief Finds a named topic.
  *
- * The returned topic should be released with dds_delete.
+ * Finds a locally created topic based on the topic name.
  *
  * @param[in]  participant  The participant on which to find the topic.
  * @param[in]  name         The name of the topic to find.
@@ -1107,8 +1203,41 @@ dds_create_topic_arbitrary (
  * @retval DDS_RETCODE_PRECONDITION_NOT_MET
  *             No topic of this name existed yet in the participant
  */
-DDS_EXPORT dds_entity_t
+DDS_DEPRECATED_EXPORT dds_entity_t
 dds_find_topic(dds_entity_t participant, const char *name);
+
+/**
+ * @brief Finds a locally created or discovered remote topic by topic name
+ *
+ * Finds a locally created topic or a discovered remote topic based on the topic
+ * name. In case the topic is not found, this function will wait for
+ * the topic to become available until the provided time out.
+ *
+ * In case multiple (discovered) topics are found with the provided name,
+ * this function will return an error code. The caller can decide to
+ * read DCPSTopic data itself and select one of the topic definitions
+ * to create the topic.
+ *
+ * The returned topic should be released with dds_delete.
+ *
+ * @param[in]  scope        The scope used to find the topic
+ * @param[in]  participant  The handle of the participant the found topic will be created in
+ * @param[in]  name         The name of the topic to find.
+ * @param[in]  timeout      The timeout for waiting for the topic to become available
+ *
+ * @returns A valid topic handle or an error code.
+ *
+ * @retval >0
+ *             A valid topic handle.
+ * @retval 0
+ *             No topic of this name existed yet
+ * @retval DDS_RETCODE_BAD_PARAMETER
+ *             Participant handle or scope invalid
+ * @retval DDS_RETCODE_PRECONDITION_NOT_MET
+ *             Multiple topics with the provided name were found.
+ */
+DDS_EXPORT dds_entity_t
+dds_find_topic_scoped (dds_find_scope_t scope, dds_entity_t participant, const char *name, dds_duration_t timeout);
 
 /**
  * @brief Returns the name of a given topic.
@@ -1140,9 +1269,57 @@ dds_get_name(dds_entity_t topic, char *name, size_t size);
 DDS_EXPORT dds_return_t
 dds_get_type_name(dds_entity_t topic, char *name, size_t size);
 
-/** Topic filter function */
-typedef bool (*dds_topic_filter_fn) (const void * sample);
-typedef bool (*dds_topic_filter_arg_fn) (const void * sample, void * arg);
+/** Topic filter functions, as with the setters/getters: no guarantee that any
+    of this will be maintained for backwards compatibility.
+
+    Sampleinfo is all zero when filtering in a write call (i.e., writer created
+    using a filtered topic, which one perhaps shouldn't be doing), otherwise it
+    has as much filled in correctly as is possible given the context and the rest
+    fixed:
+    - sample_state         DDS_SST_NOT_READ;
+    - publication_handle   set to writer's instance handle
+    - source_timestamp     set to source timestamp of sample
+    - ranks                0
+    - valid_data           true
+    - instance_handle      set to instance handle of existing instance if the
+                           sample matches an existing instance, otherwise to what
+                           the instance handle will be if it passes the filter
+    - view_state           set to instance view state if sample being filtered
+                           matches an existing instance, NEW if not
+    - instance_state       set to instance state if sample being filtered
+                           matches an existing instance, NEW if not
+    - generation counts    set to instance's generation counts if the sample
+                           matches an existing instance instance, 0 if not */
+typedef bool (*dds_topic_filter_sample_fn) (const void * sample);
+typedef bool (*dds_topic_filter_sample_arg_fn) (const void * sample, void * arg);
+typedef bool (*dds_topic_filter_sampleinfo_arg_fn) (const dds_sample_info_t * sampleinfo, void * arg);
+typedef bool (*dds_topic_filter_sample_sampleinfo_arg_fn) (const void * sample, const dds_sample_info_t * sampleinfo, void * arg);
+typedef dds_topic_filter_sample_fn dds_topic_filter_fn;
+typedef dds_topic_filter_sample_arg_fn dds_topic_filter_arg_fn;
+
+/** Topic filter mode; no guarantee of backwards compatibility */
+enum dds_topic_filter_mode {
+  DDS_TOPIC_FILTER_NONE,
+  DDS_TOPIC_FILTER_SAMPLE,
+  DDS_TOPIC_FILTER_SAMPLE_ARG,
+  DDS_TOPIC_FILTER_SAMPLEINFO_ARG,
+  DDS_TOPIC_FILTER_SAMPLE_SAMPLEINFO_ARG,
+};
+
+/** Union of all filter function types; no guarantee of backwards compatibility */
+union dds_topic_filter_function_union {
+  dds_topic_filter_sample_fn sample;
+  dds_topic_filter_sample_arg_fn sample_arg;
+  dds_topic_filter_sampleinfo_arg_fn sampleinfo_arg;
+  dds_topic_filter_sample_sampleinfo_arg_fn sample_sampleinfo_arg;
+};
+
+/** Filter description: mode, function pointer, argument; no guarantee of backwards compatibility */
+struct dds_topic_filter {
+  enum dds_topic_filter_mode mode;
+  union dds_topic_filter_function_union f;
+  void *arg;
+};
 
 /**
  * @brief Sets a filter on a topic. To be replaced by proper filtering on readers,
@@ -1188,13 +1365,35 @@ dds_set_topic_filter_and_arg(
   void *arg);
 
 /**
+ * @brief Sets a filter and filter argument on a topic. To be replaced by proper
+ * filtering on readers, no guarantee that this will be maintained for backwards
+ * compatibility.
+ *
+ * Not thread-safe with respect to data being read/written using readers/writers
+ * using this topic.  Be sure to create a topic entity specific to the reader you
+ * want to filter, then set the filter function, and only then create the reader.
+ * And don't change it unless you know there are no concurrent writes.
+ *
+ * @param[in]  topic   The topic on which the content filter is set.
+ * @param[in]  filter  The filter specification.
+ *
+ * @returns A dds_return_t indicating success or failure.
+ *
+ * @retval DDS_RETCODE_OK  Filter set successfully
+ * @retval DDS_RETCODE_BAD_PARAMETER  The topic handle is invalid
+*/
+DDS_EXPORT dds_return_t
+dds_set_topic_filter_extended(
+  dds_entity_t topic,
+  const struct dds_topic_filter *filter);
+
+/**
  * @brief Gets the filter for a topic. To be replaced by proper filtering on readers,
  * no guarantee that this will be maintained for backwards compatibility.
  *
  * @param[in]  topic  The topic from which to get the filter.
  *
- * @returns The topic filter, or 0 when not set or set using
- *          dds_set_topic_filter_and_arg.
+ * @returns The topic filter, or 0 when of type other than "sample".
  */
 DDS_DEPRECATED_EXPORT dds_topic_filter_fn
 dds_get_topic_filter(dds_entity_t topic);
@@ -1211,7 +1410,7 @@ dds_topic_get_filter(dds_entity_t topic);
  * @param[out] arg    Filter function argument (arg may be NULL).
  *
  * @retval DDS_RETCODE_OK  Filter set successfully
- * @retval DDS_RETCODE_PRECONDITION_NOT_MET  Filter was set with dds_set_topic_filter
+ * @retval DDS_RETCODE_PRECONDITION_NOT_MET  Filter is not of "none" or "sample_arg"
  * @retval DDS_RETCODE_BAD_PARAMETER  The topic handle is invalid
  */
 DDS_EXPORT dds_return_t
@@ -1219,6 +1418,21 @@ dds_get_topic_filter_and_arg (
   dds_entity_t topic,
   dds_topic_filter_arg_fn *fn,
   void **arg);
+
+/**
+ * @brief Gets the filter for a topic. To be replaced by proper filtering on readers,
+ * no guarantee that this will be maintained for backwards compatibility.
+ *
+ * @param[in]  topic  The topic from which to get the filter.
+ * @param[out] filter The topic filter specification.
+ *
+ * @retval DDS_RETCODE_OK  Filter set successfully
+ * @retval DDS_RETCODE_BAD_PARAMETER  The topic handle is invalid
+ */
+DDS_EXPORT dds_return_t
+dds_get_topic_filter_extended (
+  dds_entity_t topic,
+  struct dds_topic_filter *filter);
 
 /**
  * @brief Creates a new instance of a DDS subscriber
@@ -1840,7 +2054,8 @@ dds_write_flush(dds_entity_t writer);
  * @brief Write a serialized value of a data instance
  *
  * This call causes the writer to write the serialized value that is provided
- * in the serdata argument.
+ * in the serdata argument.  Timestamp and statusinfo fields are set to the
+ * current time and 0 (indicating a regular write), respectively.
  *
  * @param[in]  writer The writer entity.
  * @param[in]  serdata Serialized value to be written.
@@ -1862,6 +2077,33 @@ dds_write_flush(dds_entity_t writer);
  */
 DDS_EXPORT dds_return_t
 dds_writecdr(dds_entity_t writer, struct ddsi_serdata *serdata);
+
+/**
+ * @brief Write a serialized value of a data instance
+ *
+ * This call causes the writer to write the serialized value that is provided
+ * in the serdata argument.  Timestamp and statusinfo are used as is.
+ *
+ * @param[in]  writer The writer entity.
+ * @param[in]  serdata Serialized value to be written.
+ *
+ * @returns A dds_return_t indicating success or failure.
+ *
+ * @retval DDS_RETCODE_OK
+ *             The writer successfully wrote the serialized value.
+ * @retval DDS_RETCODE_ERROR
+ *             An internal error has occurred.
+ * @retval DDS_RETCODE_BAD_PARAMETER
+ *             One of the given arguments is not valid.
+ * @retval DDS_RETCODE_ILLEGAL_OPERATION
+ *             The operation is invoked on an inappropriate object.
+ * @retval DDS_RETCODE_ALREADY_DELETED
+ *             The entity has already been deleted.
+ * @retval DDS_RETCODE_TIMEOUT
+ *             The writer failed to write the serialized value reliably within the specified max_blocking_time.
+ */
+DDS_EXPORT dds_return_t
+dds_forwardcdr(dds_entity_t writer, struct ddsi_serdata *serdata);
 
 /**
  * @brief Write the value of a data instance along with the source timestamp passed.
@@ -2858,6 +3100,54 @@ dds_readcdr(
 
 /**
  * @brief Access the collection of serialized data values (of same type) and
+ *        sample info from the data reader, readcondition or querycondition
+ *        scoped by the provided instance handle..
+ *
+ * This operation implements the same functionality as dds_read_instance_wl, except that
+ * samples are now in their serialized form. The serialized data is made available through
+ * \ref ddsi_serdata structures. Returned samples are marked as READ.
+ *
+ * Return value provides information about the number of samples read, which will
+ * be <= maxs. Based on the count, the buffer will contain serialized data to be
+ * read only when valid_data bit in sample info structure is set.
+ * The buffer required for data values, could be allocated explicitly or can
+ * use the memory from data reader to prevent copy. In the latter case, buffer and
+ * sample_info should be returned back, once it is no longer using the data.
+ *
+ * @param[in]  reader_or_condition Reader, readcondition or querycondition entity.
+ * @param[out] buf An array of pointers to \ref ddsi_serdata structures that contain
+ *                 the serialized data. The pointers can be NULL.
+ * @param[in]  maxs Maximum number of samples to read.
+ * @param[out] si Pointer to an array of \ref dds_sample_info_t returned for each data value.
+ * @param[in]  handle Instance handle related to the samples to read.
+ * @param[in]  mask Filter the data based on dds_sample_state_t|dds_view_state_t|dds_instance_state_t.
+ *
+ * @returns A dds_return_t with the number of samples read or an error code.
+ *
+ * @retval >=0
+ *             Number of samples read.
+ * @retval DDS_RETCODE_ERROR
+ *             An internal error has occurred.
+ * @retval DDS_RETCODE_BAD_PARAMETER
+ *             One of the given arguments is not valid.
+ * @retval DDS_RETCODE_ILLEGAL_OPERATION
+ *             The operation is invoked on an inappropriate object.
+ * @retval DDS_RETCODE_ALREADY_DELETED
+ *             The entity has already been deleted.
+ * @retval DDS_RETCODE_PRECONDITION_NOT_MET
+ *             The instance handle has not been registered with this reader.
+ */
+DDS_EXPORT dds_return_t
+dds_readcdr_instance (
+    dds_entity_t reader_or_condition,
+    struct ddsi_serdata **buf,
+    uint32_t maxs,
+    dds_sample_info_t *si,
+    dds_instance_handle_t handle,
+    uint32_t mask);
+
+/**
+ * @brief Access the collection of serialized data values (of same type) and
  *        sample info from the data reader, readcondition or querycondition.
  *
  * This call accesses the serialized data from the data reader, readcondition or
@@ -2901,6 +3191,55 @@ dds_takecdr(
   uint32_t maxs,
   dds_sample_info_t *si,
   uint32_t mask);
+
+/**
+ * @brief Access the collection of serialized data values (of same type) and
+ *        sample info from the data reader, readcondition or querycondition
+ *        scoped by the provided instance handle..
+ *
+ * This operation implements the same functionality as dds_take_instance_wl, except that
+ * samples are now in their serialized form. The serialized data is made available through
+ * \ref ddsi_serdata structures. Returned samples are marked as READ.
+ *
+ * Return value provides information about the number of samples read, which will
+ * be <= maxs. Based on the count, the buffer will contain serialized data to be
+ * read only when valid_data bit in sample info structure is set.
+ * The buffer required for data values, could be allocated explicitly or can
+ * use the memory from data reader to prevent copy. In the latter case, buffer and
+ * sample_info should be returned back, once it is no longer using the data.
+ *
+ * @param[in]  reader_or_condition Reader, readcondition or querycondition entity.
+ * @param[out] buf An array of pointers to \ref ddsi_serdata structures that contain
+ *                 the serialized data. The pointers can be NULL.
+ * @param[in]  maxs Maximum number of samples to read.
+ * @param[out] si Pointer to an array of \ref dds_sample_info_t returned for each data value.
+ * @param[in]  handle Instance handle related to the samples to read.
+ * @param[in]  mask Filter the data based on dds_sample_state_t|dds_view_state_t|dds_instance_state_t.
+ *
+ * @returns A dds_return_t with the number of samples read or an error code.
+ *
+ * @retval >=0
+ *             Number of samples read.
+ * @retval DDS_RETCODE_ERROR
+ *             An internal error has occurred.
+ * @retval DDS_RETCODE_BAD_PARAMETER
+ *             One of the given arguments is not valid.
+ * @retval DDS_RETCODE_ILLEGAL_OPERATION
+ *             The operation is invoked on an inappropriate object.
+ * @retval DDS_RETCODE_ALREADY_DELETED
+ *             The entity has already been deleted.
+ * @retval DDS_RETCODE_PRECONDITION_NOT_MET
+ *             The instance handle has not been registered with this reader.
+ */
+DDS_EXPORT dds_return_t
+dds_takecdr_instance (
+    dds_entity_t reader_or_condition,
+    struct ddsi_serdata **buf,
+    uint32_t maxs,
+    dds_sample_info_t *si,
+    dds_instance_handle_t handle,
+    uint32_t mask);
+
 
 /**
  * @brief Access the collection of data values (of same type) and sample info from the
@@ -3395,7 +3734,7 @@ dds_get_matched_subscriptions (
  * readers matched with the specified writer, returning a freshly
  * allocated sample of the DCPSSubscription built-in topic if found,
  * and NULL if not.  The caller is responsible for freeing the
- * memory allocated.
+ * memory allocated, e.g. using dds_builtintopic_free_endpoint.
  *
  * This operation is similar to performing a read of the given
  * instance handle on a reader of the DCPSSubscription built-in
@@ -3462,7 +3801,7 @@ dds_get_matched_publications (
  * writers matched with the specified reader, returning a freshly
  * allocated sample of the DCPSPublication built-in topic if found,
  * and NULL if not.  The caller is responsible for freeing the
- * memory allocated.
+ * memory allocated, e.g. using dds_builtintopic_free_endpoint.
  *
  * This operation is similar to performing a read of the given
  * instance handle on a reader of the DCPSPublication built-in
@@ -3485,6 +3824,63 @@ DDS_EXPORT dds_builtintopic_endpoint_t *
 dds_get_matched_publication_data (
   dds_entity_t reader,
   dds_instance_handle_t ih);
+
+#ifdef DDS_HAS_TYPE_DISCOVERY
+/**
+ * @brief Gets the type identifier from endpoint information that was
+ * retrieved by dds_get_matched_subscription_data or
+ * dds_get_matched_publication_data
+ *
+ * @param[in] builtintopic_endpoint  The builtintopic endpoint struct
+ * @param[out] type_identifier       Buffer that will be allocated for the type identifier. Needs to be freed by the caller of this function.
+ * @param[out] size                  Number of bytes in type_identifier buffer
+ */
+DDS_EXPORT dds_return_t
+dds_builtintopic_get_endpoint_typeid (
+  dds_builtintopic_endpoint_t * builtintopic_endpoint,
+  unsigned char **type_identifier,
+  size_t *size);
+#endif
+
+/**
+ * @brief Free the endpoint information that was retrieved by
+ * dds_get_matched_subscription_data or dds_get_matched_publication_data
+ *
+ * This operation deallocates the memory of the fields in a
+ * dds_builtintopic_endpoint_t struct and deallocates the
+ * struct itself.
+ *
+ * @param[in] builtintopic_endpoint  The builtintopic endpoint struct
+ */
+DDS_EXPORT void
+dds_builtintopic_free_endpoint (
+  dds_builtintopic_endpoint_t * builtintopic_endpoint);
+
+/**
+ * @brief Free the provided topic information
+ *
+ * This operation deallocates the memory of the fields in a
+ * dds_builtintopic_topic_t struct and deallocates the
+ * struct itself.
+ *
+ * @param[in] builtintopic_topic  The builtintopic topic struct
+ */
+DDS_EXPORT void
+dds_builtintopic_free_topic (
+  dds_builtintopic_topic_t * builtintopic_topic);
+
+/**
+ * @brief Free the provided participant information
+ *
+ * This operation deallocates the memory of the fields in a
+ * dds_builtintopic_participant_t struct and deallocates the
+ * struct itself.
+ *
+ * @param[in] builtintopic_participant  The builtintopic participant struct
+ */
+DDS_EXPORT void
+dds_builtintopic_free_participant (
+  dds_builtintopic_participant_t * builtintopic_participant);
 
 /**
  * @brief This operation manually asserts the liveliness of a writer
@@ -3542,6 +3938,48 @@ dds_domain_set_deafmute (
   bool deaf,
   bool mute,
   dds_duration_t reset_after);
+
+
+#ifdef DDS_HAS_TYPE_DISCOVERY
+
+/**
+ * @brief This function resolves the type information for the provided
+ * type identifier.
+ *
+ * @param[in]   entity              A domain entity or an entity bound to a domain, such
+ *                                  as a participant, reader or writer.
+ * @param[in]   type_identifier     Type identifier data
+ * @param[in]   type_identifier_sz  Length of the type identifier data
+ * @param[in]   timeout             Timeout for waiting for requested type information to be available
+ * @param[out]  sertype             The type information, or NULL if the type could not be resolved
+ *
+ * @remark The resulting type from the sertype out parameter is
+ * refcounted and needs to be dereferenced at some point. This
+ * can be done by creating a topic using dds_create_topic_generic,
+ * which takes over the ownership of the type or alternatively by
+ * using ddsi_sertype_unref to release the reference.
+ *
+ * @returns A dds_return_t indicating success or failure.
+ *
+ * @retval DDS_RETCODE_OK
+ *             The operation was successful.
+ * @retval DDS_BAD_PARAMETER
+ *             The entity parameter is not a valid parameter, the type_identifier is not provided or
+ *             its length is incorrect, or the sertype out parameter is NULL
+ * @retval DDS_RETCODE_NOT_FOUND
+ *             A type with the provided type_identifier was not found
+ * @retval DDS_RETCODE_ILLEGAL_OPERATION
+ *             The operation is invoked on an inappropriate object.
+*/
+DDS_EXPORT dds_return_t
+dds_domain_resolve_type (
+  dds_entity_t entity,
+  unsigned char *type_identifier,
+  size_t type_identifier_sz,
+  dds_duration_t timeout,
+  struct ddsi_sertype **sertype);
+
+#endif /* DDS_HAS_TYPE_DISCOVERY */
 
 #if defined (__cplusplus)
 }

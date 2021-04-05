@@ -244,9 +244,15 @@ static dds_return_t check_status_change_fields_are_0 (int ll, dds_entity_t ent)
 #define TOK_INVALID -7
 
 static int setresult (struct oneliner_ctx *ctx, int result, const char *msg, ...) ddsrt_attribute_format((printf, 3, 4));
-static void error (struct oneliner_ctx *ctx, const char *msg, ...) ddsrt_attribute_format((printf, 2, 3));
-static void error_dds (struct oneliner_ctx *ctx, dds_return_t ret, const char *msg, ...) ddsrt_attribute_format((printf, 3, 4));
-static void testfail (struct oneliner_ctx *ctx, const char *msg, ...) ddsrt_attribute_format((printf, 2, 3));
+static void error (struct oneliner_ctx *ctx, const char *msg, ...)
+  ddsrt_attribute_noreturn
+  ddsrt_attribute_format((printf, 2, 3));
+static void error_dds (struct oneliner_ctx *ctx, dds_return_t ret, const char *msg, ...)
+  ddsrt_attribute_noreturn
+  ddsrt_attribute_format((printf, 3, 4));
+static void testfail (struct oneliner_ctx *ctx, const char *msg, ...)
+  ddsrt_attribute_noreturn
+  ddsrt_attribute_format((printf, 2, 3));
 
 static void vsetresult (struct oneliner_ctx *ctx, int result, const char *msg, va_list ap)
 {
@@ -315,6 +321,11 @@ static bool lookingatnum (const struct oneliner_lex *l)
   return (isdigit ((unsigned char) l->inp[(l->inp[0] == '-')]));
 }
 
+static bool lookingatinf (const struct oneliner_lex *l)
+{
+  return strncmp (l->inp, "inf", 3) == 0 && !issymchar (l->inp[3]);
+}
+
 static int nexttok_dur (struct oneliner_lex *l, union oneliner_tokval *v, bool expecting_duration)
 {
   advancetok (l);
@@ -336,7 +347,7 @@ static int nexttok_dur (struct oneliner_lex *l, union oneliner_tokval *v, bool e
     if (v) *v = l->v;
     l->tok = TOK_INT;
   }
-  else if (l->inp[0] == '@' || (expecting_duration && lookingatnum (l)))
+  else if (l->inp[0] == '@' || (expecting_duration && (lookingatnum (l) || lookingatinf (l))))
   {
     const int ists = (l->inp[0] == '@');
     char *endp;
