@@ -447,8 +447,18 @@ static dds_return_t really_delete_pinned_closed_locked (struct dds_entity *e, en
 
   /* Pin count dropped to one with CLOSING flag set: no other threads still
      in operations involving this entity */
-  dds_entity_observers_signal_delete (e);
+  if (dds_entity_kind (e) == DDS_KIND_WAITSET)
+  {
+    /* This takes care of the rare and deprecated case of a waitset attached
+       to itself. Those only ever get triggered by pinning the waitset, and
+       so this call should be safe, even if it isn't for, e.g., read
+       conditions which get signalled from deep inside the RHC code.  The
+       list is empty after this call, which turns the "normal" call after the
+       close() into a no-op. */
+    dds_entity_observers_signal_delete (e);
+  }
   dds_entity_deriver_close (e);
+  dds_entity_observers_signal_delete (e);
 
   /*
    * Recursively delete children.
@@ -679,7 +689,7 @@ dds_return_t dds_get_qos (dds_entity_t entity, dds_qos_t *qos)
     }
 
     dds_reset_qos (qos);
-    ddsi_xqos_mergein_missing (qos, entity_qos, ~(QP_TOPIC_NAME | QP_TYPE_NAME));
+    ddsi_xqos_mergein_missing (qos, entity_qos, ~(QP_TOPIC_NAME | QP_TYPE_NAME | QP_CYCLONE_TYPE_INFORMATION));
     ret = DDS_RETCODE_OK;
   }
   dds_entity_unlock(e);
@@ -1237,7 +1247,8 @@ dds_return_t dds_get_guid (dds_entity_t entity, dds_guid_t *guid)
   {
     case DDS_KIND_PARTICIPANT:
     case DDS_KIND_READER:
-    case DDS_KIND_WRITER: {
+    case DDS_KIND_WRITER:
+    case DDS_KIND_TOPIC: {
       DDSRT_STATIC_ASSERT (sizeof (dds_guid_t) == sizeof (ddsi_guid_t));
       ddsi_guid_t tmp = nn_ntoh_guid (e->m_guid);
       memcpy (guid, &tmp, sizeof (*guid));

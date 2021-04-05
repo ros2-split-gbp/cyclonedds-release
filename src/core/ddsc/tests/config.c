@@ -25,9 +25,6 @@
 
 #define FORCE_ENV
 
-#define URI_VARIABLE DDS_PROJECT_NAME_NOSPACE_CAPS"_URI"
-#define MAX_PARTICIPANTS_VARIABLE "MAX_PARTICIPANTS"
-
 static void config__check_env (const char *env_variable, const char *expected_value)
 {
   const char *env_uri = NULL;
@@ -58,8 +55,8 @@ static void config__check_env (const char *env_variable, const char *expected_va
 CU_Test (ddsc_config, simple_udp, .init = ddsrt_init, .fini = ddsrt_fini)
 {
   dds_entity_t participant;
-  config__check_env (URI_VARIABLE, CONFIG_ENV_SIMPLE_UDP);
-  config__check_env (MAX_PARTICIPANTS_VARIABLE, CONFIG_ENV_MAX_PARTICIPANTS);
+  config__check_env ("CYCLONEDDS_URI", CONFIG_ENV_SIMPLE_UDP);
+  config__check_env ("MAX_PARTICIPANTS", CONFIG_ENV_MAX_PARTICIPANTS);
   participant = dds_create_participant (DDS_DOMAIN_DEFAULT, NULL, NULL);
   CU_ASSERT_FATAL (participant> 0);
   dds_delete (participant);
@@ -69,9 +66,9 @@ CU_Test (ddsc_config, user_config, .init = ddsrt_init, .fini = ddsrt_fini)
 {
   dds_entity_t domain;
   domain = dds_create_domain (1,
-                              "<"DDS_PROJECT_NAME"><Domain><Id>any</Id></Domain>"
+                              "<CycloneDDS><Domain><Id>any</Id></Domain>"
                               "<DDSI2E><Internal><MaxParticipants>2</MaxParticipants></Internal></DDSI2E>"
-                              "</"DDS_PROJECT_NAME">");
+                              "</CycloneDDS>");
   CU_ASSERT_FATAL (domain > 0);
 
   dds_entity_t participant_1 = dds_create_participant (1, NULL, NULL);
@@ -109,7 +106,7 @@ CU_Test(ddsc_security_config, empty, .init = ddsrt_init, .fini = ddsrt_fini)
      test this one here to be sure that it refuses to start when security is configured
      but the implementation doesn't include support for it. */
   const char *log_expected[] = {
-#ifndef DDSI_INCLUDE_SECURITY
+#ifndef DDS_HAS_SECURITY
     "config: //CycloneDDS/Domain: Security: unknown element*",
 #else
     "config: //CycloneDDS/Domain/Security/Authentication/IdentityCertificate/#text: element missing in configuration*",
@@ -128,15 +125,15 @@ CU_Test(ddsc_security_config, empty, .init = ddsrt_init, .fini = ddsrt_fini)
 
   /* Create participant with an empty security element. */
   found = 0;
-  ddsrt_setenv(URI_VARIABLE, "<Security/>");
+  ddsrt_setenv("CYCLONEDDS_URI", "<Security/>");
   participant = dds_create_participant(DDS_DOMAIN_DEFAULT, NULL, NULL);
-  ddsrt_setenv(URI_VARIABLE, "");
+  ddsrt_setenv("CYCLONEDDS_URI", "");
   CU_ASSERT_FATAL(participant < 0);
   dds_set_log_sink(NULL, NULL);
   dds_set_trace_sink(NULL, NULL);
 
   /* All traces should have been provided. */
-#ifndef DDSI_INCLUDE_SECURITY
+#ifndef DDS_HAS_SECURITY
   CU_ASSERT_FATAL(found == 0x1);
 #else
   CU_ASSERT_FATAL(found == 0x7);
@@ -150,7 +147,7 @@ CU_Test(ddsc_security_qos, empty, .init = ddsrt_init, .fini = ddsrt_fini)
      start when security is configured but the implementation doesn't include
      support for it. */
   const char *log_expected[] = {
-#ifdef DDSI_INCLUDE_SECURITY
+#ifdef DDS_HAS_SECURITY
     "new_participant(*): using security settings from QoS*",
     "new_participant(*): required security property * missing*",
 #endif
@@ -176,7 +173,7 @@ CU_Test(ddsc_security_qos, empty, .init = ddsrt_init, .fini = ddsrt_fini)
   dds_set_trace_sink (NULL, NULL);
 
   /* All traces should have been provided. */
-#ifndef DDSI_INCLUDE_SECURITY
+#ifndef DDS_HAS_SECURITY
   CU_ASSERT_FATAL (found == 0x0);
 #else
   CU_ASSERT_FATAL (found == 0x3);

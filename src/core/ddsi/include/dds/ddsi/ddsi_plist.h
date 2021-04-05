@@ -12,10 +12,12 @@
 #ifndef DDSI_PLIST_H
 #define DDSI_PLIST_H
 
+#include "dds/ddsrt/bswap.h"
 #include "dds/ddsi/q_feature_check.h"
 #include "dds/ddsi/ddsi_xqos.h"
 #include "dds/ddsi/ddsi_keyhash.h"
 #include "dds/ddsi/ddsi_tran.h" /* FIXME: eliminate */
+#include "dds/ddsi/ddsi_typelookup.h"
 
 #if defined (__cplusplus)
 extern "C" {
@@ -49,7 +51,7 @@ extern "C" {
 #define PP_ADLINK_PARTICIPANT_VERSION_INFO      ((uint64_t)1 << 26)
 #define PP_ADLINK_TYPE_DESCRIPTION              ((uint64_t)1 << 27)
 #define PP_COHERENT_SET                         ((uint64_t)1 << 28)
-#ifdef DDSI_INCLUDE_SSM
+#ifdef DDS_HAS_SSM
 #define PP_READER_FAVOURS_SSM                   ((uint64_t)1 << 29)
 #endif
 #define PP_DOMAIN_ID                            ((uint64_t)1 << 30)
@@ -62,6 +64,8 @@ extern "C" {
 #define PP_IDENTITY_STATUS_TOKEN                ((uint64_t)1 << 36)
 #define PP_DATA_TAGS                            ((uint64_t)1 << 37)
 #define PP_CYCLONE_RECEIVE_BUFFER_SIZE          ((uint64_t)1 << 38)
+#define PP_CYCLONE_TOPIC_GUID                   ((uint64_t)1 << 39)
+
 /* Set for unrecognized parameters that are in the reserved space or
    in our own vendor-specific space that have the
    PID_UNRECOGNIZED_INCOMPATIBLE_FLAG set (see DDSI 2.1 9.6.2.2.1) */
@@ -86,7 +90,7 @@ extern "C" {
    the same thing. */
 struct nn_locators_one {
   struct nn_locators_one *next;
-  nn_locator_t loc;
+  ddsi_locator_t loc;
 };
 
 typedef struct nn_locators {
@@ -99,7 +103,7 @@ typedef uint32_t nn_ipv4address_t;
 
 typedef uint32_t nn_port_t;
 
-#ifdef DDSI_INCLUDE_SECURITY
+#ifdef DDS_HAS_SECURITY
 typedef struct nn_tag {
   char *name;
   char *value;
@@ -115,13 +119,13 @@ typedef struct nn_datatags {
 } nn_datatags_t;
 #endif
 
-#ifdef DDSI_INCLUDE_SSM
+#ifdef DDS_HAS_SSM
 typedef struct nn_reader_favours_ssm {
   uint32_t state; /* default is false */
 } nn_reader_favours_ssm_t;
 #endif
 
-#ifdef DDSI_INCLUDE_SECURITY
+#ifdef DDS_HAS_SECURITY
 typedef struct nn_dataholder
 {
   char *class_id;
@@ -203,6 +207,7 @@ typedef struct ddsi_plist {
   ddsi_guid_t participant_guid;
   ddsi_guid_t endpoint_guid;
   ddsi_guid_t group_guid;
+  ddsi_guid_t topic_guid;
 #if 0 /* reserved, rather than NIY */
   nn_entityid_t participant_entityid;
   nn_entityid_t group_entityid;
@@ -215,7 +220,7 @@ typedef struct ddsi_plist {
   nn_adlink_participant_version_info_t adlink_participant_version_info;
   char *type_description;
   nn_sequence_number_t coherent_set_seqno;
-#ifdef DDSI_INCLUDE_SECURITY
+#ifdef DDS_HAS_SECURITY
   nn_token_t identity_token;
   nn_token_t permissions_token;
   nn_security_info_t endpoint_security_info;
@@ -223,7 +228,7 @@ typedef struct ddsi_plist {
   nn_token_t identity_status_token;
   nn_datatags_t data_tags;
 #endif
-#ifdef DDSI_INCLUDE_SSM
+#ifdef DDS_HAS_SSM
   nn_reader_favours_ssm_t reader_favours_ssm;
 #endif
   uint32_t domain_id;
@@ -411,9 +416,9 @@ DDS_EXPORT void ddsi_plist_addtomsg (struct nn_xmsg *m, const ddsi_plist_t *ps, 
  * @param[in]     ps       source
  * @param[in]     pwanted  subset of non-QoS part of ps (if PP_X is set, add X if present)
  * @param[in]     qwanted  subset of QoS part of ps (if QP_X is set, add X if present)
- * @param[in]     be       use native endianness if false, big-endian if true
+ * @param[in]     bo       byte order
  */
-DDS_EXPORT void ddsi_plist_addtomsg_bo (struct nn_xmsg *m, const ddsi_plist_t *ps, uint64_t pwanted, uint64_t qwanted, bool be);
+DDS_EXPORT void ddsi_plist_addtomsg_bo (struct nn_xmsg *m, const ddsi_plist_t *ps, uint64_t pwanted, uint64_t qwanted, enum ddsrt_byte_order_selector bo);
 
 /**
  * @brief Initialize plist to match default settings for a participant

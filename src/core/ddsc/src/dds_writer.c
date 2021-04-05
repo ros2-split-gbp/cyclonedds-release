@@ -167,8 +167,8 @@ void dds_writer_status_cb (void *entity, const struct status_cb_data *data)
 
 static uint32_t get_bandwidth_limit (dds_transport_priority_qospolicy_t transport_priority)
 {
-#ifdef DDSI_INCLUDE_NETWORK_CHANNELS
-  struct config_channel_listelem *channel = find_channel (&config, transport_priority);
+#ifdef DDS_HAS_NETWORK_CHANNELS
+  struct ddsi_config_channel_listelem *channel = find_channel (&config, transport_priority);
   return channel->data_bandwidth_limit;
 #else
   (void) transport_priority;
@@ -219,15 +219,15 @@ static dds_return_t dds_writer_delete (dds_entity *e)
 
 static dds_return_t validate_writer_qos (const dds_qos_t *wqos)
 {
-#ifndef DDSI_INCLUDE_LIFESPAN
+#ifndef DDS_HAS_LIFESPAN
   if (wqos != NULL && (wqos->present & QP_LIFESPAN) && wqos->lifespan.duration != DDS_INFINITY)
     return DDS_RETCODE_BAD_PARAMETER;
 #endif
-#ifndef DDSI_INCLUDE_DEADLINE_MISSED
+#ifndef DDS_HAS_DEADLINE_MISSED
   if (wqos != NULL && (wqos->present & QP_DEADLINE) && wqos->deadline.deadline != DDS_INFINITY)
     return DDS_RETCODE_BAD_PARAMETER;
 #endif
-#if defined(DDSI_INCLUDE_LIFESPAN) && defined(DDSI_INCLUDE_DEADLINE_MISSED)
+#if defined(DDS_HAS_LIFESPAN) && defined(DDS_HAS_DEADLINE_MISSED)
   DDSRT_UNUSED_ARG (wqos);
 #endif
   return DDS_RETCODE_OK;
@@ -319,7 +319,7 @@ dds_entity_t dds_create_writer (dds_entity_t participant_or_publisher, dds_entit
 
   if ((rc = dds_topic_pin (topic, &tp)) != DDS_RETCODE_OK)
     goto err_pin_topic;
-  assert (tp->m_stopic);
+  assert (tp->m_stype);
   if (dds_entity_participant (&pub->m_entity) != dds_entity_participant (&tp->m_entity))
   {
     rc = DDS_RETCODE_BAD_PARAMETER;
@@ -358,12 +358,12 @@ dds_entity_t dds_create_writer (dds_entity_t participant_or_publisher, dds_entit
      the publisher lock, we can assert that the participant exists. */
   assert (pp != NULL);
 
-#ifdef DDSI_INCLUDE_SECURITY
+#ifdef DDS_HAS_SECURITY
   /* Check if DDS Security is enabled */
   if (q_omg_participant_is_secure (pp))
   {
     /* ask to access control security plugin for create writer permissions */
-    if (!q_omg_security_check_create_writer (pp, gv->config.domainId, tp->m_stopic->name, wqos))
+    if (!q_omg_security_check_create_writer (pp, gv->config.domainId, tp->m_name, wqos))
     {
       rc = DDS_RETCODE_NOT_ALLOWED_BY_SECURITY;
       goto err_not_allowed;
@@ -383,7 +383,7 @@ dds_entity_t dds_create_writer (dds_entity_t participant_or_publisher, dds_entit
   whc_free_wrinfo (wrinfo);
   wr->whc_batch = gv->config.whc_batch;
 
-  rc = new_writer (&wr->m_wr, &wr->m_entity.m_guid, NULL, pp, tp->m_stopic, wqos, wr->m_whc, dds_writer_status_cb, wr);
+  rc = new_writer (&wr->m_wr, &wr->m_entity.m_guid, NULL, pp, tp->m_name, tp->m_stype, wqos, wr->m_whc, dds_writer_status_cb, wr);
   assert(rc == DDS_RETCODE_OK);
   thread_state_asleep (lookup_thread_state ());
 
@@ -397,7 +397,7 @@ dds_entity_t dds_create_writer (dds_entity_t participant_or_publisher, dds_entit
   dds_publisher_unlock (pub);
   return writer;
 
-#ifdef DDSI_INCLUDE_SECURITY
+#ifdef DDS_HAS_SECURITY
 err_not_allowed:
   thread_state_asleep (lookup_thread_state ());
 #endif

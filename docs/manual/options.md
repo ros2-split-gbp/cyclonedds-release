@@ -6,7 +6,7 @@ CycloneDDS configuration
 
 ## //CycloneDDS/Domain
 Attributes: [Id](#cycloneddsdomainid)
-Children: [Compatibility](#cycloneddsdomaincompatibility), [Discovery](#cycloneddsdomaindiscovery), [General](#cycloneddsdomaingeneral), [Internal](#cycloneddsdomaininternal), [Partitioning](#cycloneddsdomainpartitioning), [SSL](#cycloneddsdomainssl), [Security](#cycloneddsdomainsecurity), [Sizing](#cycloneddsdomainsizing), [TCP](#cycloneddsdomaintcp), [ThreadPool](#cycloneddsdomainthreadpool), [Threads](#cycloneddsdomainthreads), [Tracing](#cycloneddsdomaintracing)
+Children: [Compatibility](#cycloneddsdomaincompatibility), [Discovery](#cycloneddsdomaindiscovery), [General](#cycloneddsdomaingeneral), [Internal](#cycloneddsdomaininternal), [Partitioning](#cycloneddsdomainpartitioning), [SSL](#cycloneddsdomainssl), [Security](#cycloneddsdomainsecurity), [Sizing](#cycloneddsdomainsizing), [TCP](#cycloneddsdomaintcp), [Threads](#cycloneddsdomainthreads), [Tracing](#cycloneddsdomaintracing)
 
 The General element specifying Domain related settings.
 
@@ -67,7 +67,7 @@ The default value is: "lax".
 
 
 ### //CycloneDDS/Domain/Discovery
-Children: [DSGracePeriod](#cycloneddsdomaindiscoverydsgraceperiod), [DefaultMulticastAddress](#cycloneddsdomaindiscoverydefaultmulticastaddress), [ExternalDomainId](#cycloneddsdomaindiscoveryexternaldomainid), [MaxAutoParticipantIndex](#cycloneddsdomaindiscoverymaxautoparticipantindex), [ParticipantIndex](#cycloneddsdomaindiscoveryparticipantindex), [Peers](#cycloneddsdomaindiscoverypeers), [Ports](#cycloneddsdomaindiscoveryports), [SPDPInterval](#cycloneddsdomaindiscoveryspdpinterval), [SPDPMulticastAddress](#cycloneddsdomaindiscoveryspdpmulticastaddress), [Tag](#cycloneddsdomaindiscoverytag)
+Children: [DSGracePeriod](#cycloneddsdomaindiscoverydsgraceperiod), [DefaultMulticastAddress](#cycloneddsdomaindiscoverydefaultmulticastaddress), [EnableTopicDiscoveryEndpoints](#cycloneddsdomaindiscoveryenabletopicdiscoveryendpoints), [ExternalDomainId](#cycloneddsdomaindiscoveryexternaldomainid), [MaxAutoParticipantIndex](#cycloneddsdomaindiscoverymaxautoparticipantindex), [ParticipantIndex](#cycloneddsdomaindiscoveryparticipantindex), [Peers](#cycloneddsdomaindiscoverypeers), [Ports](#cycloneddsdomaindiscoveryports), [SPDPInterval](#cycloneddsdomaindiscoveryspdpinterval), [SPDPMulticastAddress](#cycloneddsdomaindiscoveryspdpmulticastaddress), [Tag](#cycloneddsdomaindiscoverytag)
 
 The Discovery element allows specifying various parameters related to the discovery of peers.
 
@@ -88,6 +88,14 @@ Text
 This element specifies the default multicast address for all traffic other than participant discovery packets. It defaults to Discovery/SPDPMulticastAddress.
 
 The default value is: "auto".
+
+
+#### //CycloneDDS/Domain/Discovery/EnableTopicDiscoveryEndpoints
+Boolean
+
+This element controls whether the built-in endpoints for topic discovery are created and used to exchange topic discovery information.
+
+The default value is: "false".
 
 
 #### //CycloneDDS/Domain/Discovery/ExternalDomainId
@@ -519,14 +527,14 @@ The default value is: "4".
 #### //CycloneDDS/Domain/Internal/DeliveryQueueMaxSamples
 Integer
 
-This element controls the Maximum size of a delivery queue, expressed in samples. Once a delivery queue is full, incoming samples destined for that queue are dropped until space becomes available again.
+This element controls the maximum size of a delivery queue, expressed in samples. Once a delivery queue is full, incoming samples destined for that queue are dropped until space becomes available again.
 
 The default value is: "256".
 
 
 #### //CycloneDDS/Domain/Internal/EnableExpensiveChecks
 One of:
-* Comma-separated list of: whc, rhc, all
+* Comma-separated list of: whc, rhc, xevent, all
 * Or empty
 
 This element enables expensive checks in builds with assertions enabled and is ignored otherwise. Recognised categories are:
@@ -534,6 +542,8 @@ This element enables expensive checks in builds with assertions enabled and is i
  * whc: writer history cache checking
 
  * rhc: reader history cache checking
+
+ * xevent: xevent checking
 
 In addition, there is the keyword all that enables all checks.
 
@@ -1008,7 +1018,7 @@ The NetworkPartitions element specifies the Cyclone DDS network partitions.
 
 
 ##### //CycloneDDS/Domain/Partitioning/NetworkPartitions/NetworkPartition
-Attributes: [Address](#cycloneddsdomainpartitioningnetworkpartitionsnetworkpartitionaddress), [Connected](#cycloneddsdomainpartitioningnetworkpartitionsnetworkpartitionconnected), [Name](#cycloneddsdomainpartitioningnetworkpartitionsnetworkpartitionname)
+Attributes: [Address](#cycloneddsdomainpartitioningnetworkpartitionsnetworkpartitionaddress), [Name](#cycloneddsdomainpartitioningnetworkpartitionsnetworkpartitionname)
 
 Text
 
@@ -1023,14 +1033,6 @@ Text
 This attribute specifies the multicast addresses associated with the network partition as a comma-separated list. Readers matching this network partition (cf. Partitioning/PartitionMappings) will listen for multicasts on all of these addresses and advertise them in the discovery protocol. The writers will select the most suitable address from the addresses advertised by the readers.
 
 The default value is: "".
-
-
-##### //CycloneDDS/Domain/Partitioning/NetworkPartitions/NetworkPartition[@Connected]
-Boolean
-
-This attribute is a placeholder.
-
-The default value is: "true".
 
 
 ##### //CycloneDDS/Domain/Partitioning/NetworkPartitions/NetworkPartition[@Name]
@@ -1545,36 +1547,6 @@ This element specifies the timeout for blocking TCP write operations. If this ti
 The unit must be specified explicitly. Recognised units: ns, us, ms, s, min, hr, day.
 
 The default value is: "2 s".
-
-
-### //CycloneDDS/Domain/ThreadPool
-Children: [Enable](#cycloneddsdomainthreadpoolenable), [ThreadMax](#cycloneddsdomainthreadpoolthreadmax), [Threads](#cycloneddsdomainthreadpoolthreads)
-
-The ThreadPool element allows specifying various parameters related to using a thread pool to send DDSI messages to multiple unicast addresses (TCP or UDP).
-
-
-#### //CycloneDDS/Domain/ThreadPool/Enable
-Boolean
-
-Enable optional use of a thread pool.
-
-The default value is: "false".
-
-
-#### //CycloneDDS/Domain/ThreadPool/ThreadMax
-Integer
-
-Maximum number of threads in the thread pool.
-
-The default value is: "8".
-
-
-#### //CycloneDDS/Domain/ThreadPool/Threads
-Integer
-
-Initial number of threads in the thread pool.
-
-The default value is: "4".
 
 
 ### //CycloneDDS/Domain/Threads

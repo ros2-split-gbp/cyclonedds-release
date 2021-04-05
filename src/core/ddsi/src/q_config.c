@@ -92,7 +92,7 @@ enum implicit_toplevel {
 
 struct cfgst {
   ddsrt_avl_tree_t found;
-  struct config *cfg;
+  struct ddsi_config *cfg;
   const struct ddsrt_log_cfg *logcfg; /* for LOG_LC_CONFIG */
   /* error flag set so that we can continue parsing for some errors and still fail properly */
   int error;
@@ -177,14 +177,14 @@ DUPF(retransmit_merging);
 DUPF(sched_class);
 DUPF(maybe_memsize);
 DUPF(maybe_int32);
-#ifdef DDSI_INCLUDE_BANDWIDTH_LIMITING
+#ifdef DDS_HAS_BANDWIDTH_LIMITING
 DUPF(bandwidth);
 #endif
 DUPF(domainId);
 DUPF(transport_selector);
 DUPF(many_sockets_mode);
 DU(deaf_mute);
-#ifdef DDSI_INCLUDE_SSL
+#ifdef DDS_HAS_SSL
 DUPF(min_tls_version);
 #endif
 #undef DUPF
@@ -197,17 +197,17 @@ DF(ff_networkAddresses);
 #undef DF
 
 #define DI(fname) static int fname (struct cfgst *cfgst, void *parent, struct cfgelem const * const cfgelem)
-#ifdef DDSI_INCLUDE_NETWORK_CHANNELS
+#ifdef DDS_HAS_NETWORK_CHANNELS
 DI(if_channel);
-#endif /* DDSI_INCLUDE_NETWORK_CHANNELS */
-#ifdef DDSI_INCLUDE_NETWORK_PARTITIONS
+#endif /* DDS_HAS_NETWORK_CHANNELS */
+#ifdef DDS_HAS_NETWORK_PARTITIONS
 DI(if_network_partition);
 DI(if_ignored_partition);
 DI(if_partition_mapping);
 #endif
 DI(if_peer);
 DI(if_thread_properties);
-#ifdef DDSI_INCLUDE_SECURITY
+#ifdef DDS_HAS_SECURITY
 DI(if_omg_security);
 #endif
 #undef DI
@@ -224,7 +224,7 @@ DI(if_omg_security);
   }
 
 #define DEPRECATED(name) "|" name
-#define MEMBER(name) 0, ((int) offsetof (struct config, name))
+#define MEMBER(name) 0, ((int) offsetof (struct ddsi_config, name))
 #define MEMBEROF(parent, name) 1, ((int) offsetof (struct parent, name))
 #define FUNCTIONS(init, update, free, print) init, update, free, print
 #define DESCRIPTION(...) /* drop */
@@ -318,7 +318,7 @@ static const struct unit unittab_memsize[] = {
   { NULL, 0 }
 };
 
-#ifdef DDSI_INCLUDE_BANDWIDTH_LIMITING
+#ifdef DDS_HAS_BANDWIDTH_LIMITING
 static const struct unit unittab_bandwidth_bps[] = {
   { "b/s", 1 },{ "bps", 1 },
   { "Kib/s", 1024 },{ "Kibps", 1024 },
@@ -632,8 +632,8 @@ static void *cfg_deref_address (UNUSED_ARG (struct cfgst *cfgst), void *parent, 
 
 static void *if_common (UNUSED_ARG (struct cfgst *cfgst), void *parent, struct cfgelem const * const cfgelem, unsigned size)
 {
-  struct config_listelem **current = (struct config_listelem **) ((char *) parent + cfgelem->elem_offset);
-  struct config_listelem *new = ddsrt_malloc (size);
+  struct ddsi_config_listelem **current = (struct ddsi_config_listelem **) ((char *) parent + cfgelem->elem_offset);
+  struct ddsi_config_listelem *new = ddsrt_malloc (size);
   new->next = *current;
   *current = new;
   return new;
@@ -641,17 +641,17 @@ static void *if_common (UNUSED_ARG (struct cfgst *cfgst), void *parent, struct c
 
 static int if_thread_properties (struct cfgst *cfgst, void *parent, struct cfgelem const * const cfgelem)
 {
-  struct config_thread_properties_listelem *new = if_common (cfgst, parent, cfgelem, sizeof(*new));
+  struct ddsi_config_thread_properties_listelem *new = if_common (cfgst, parent, cfgelem, sizeof(*new));
   if (new == NULL)
     return -1;
   new->name = NULL;
   return 0;
 }
 
-#ifdef DDSI_INCLUDE_NETWORK_CHANNELS
+#ifdef DDS_HAS_NETWORK_CHANNELS
 static int if_channel(struct cfgst *cfgst, void *parent, struct cfgelem const * const cfgelem)
 {
-  struct config_channel_listelem *new = if_common (cfgst, parent, cfgelem, sizeof(*new));
+  struct ddsi_config_channel_listelem *new = if_common (cfgst, parent, cfgelem, sizeof(*new));
   if (new == NULL)
     return -1;
   new->name = NULL;
@@ -662,26 +662,24 @@ static int if_channel(struct cfgst *cfgst, void *parent, struct cfgelem const * 
   new->transmit_conn = NULL;
   return 0;
 }
-#endif /* DDSI_INCLUDE_NETWORK_CHANNELS */
+#endif /* DDS_HAS_NETWORK_CHANNELS */
 
-#ifdef DDSI_INCLUDE_NETWORK_PARTITIONS
+#ifdef DDS_HAS_NETWORK_PARTITIONS
 static int if_network_partition (struct cfgst *cfgst, void *parent, struct cfgelem const * const cfgelem)
 {
-  struct config_networkpartition_listelem *new = if_common (cfgst, parent, cfgelem, sizeof(*new));
+  struct ddsi_config_networkpartition_listelem *new = if_common (cfgst, parent, cfgelem, sizeof(*new));
   if (new == NULL)
     return -1;
   new->address_string = NULL;
   new->as = NULL;
   new->name = NULL;
-  new->partitionId = 0;
-  new->connected = 0;
   return 0;
 }
 
 static int if_ignored_partition (struct cfgst *cfgst, void *parent, struct cfgelem const * const cfgelem)
 {
-  struct config_ignoredpartition_listelem *new = if_common (cfgst, parent, cfgelem, sizeof(*new));
-  if (if_common (cfgst, parent, cfgelem, sizeof (struct config_ignoredpartition_listelem)) == NULL)
+  struct ddsi_config_ignoredpartition_listelem *new = if_common (cfgst, parent, cfgelem, sizeof(*new));
+  if (if_common (cfgst, parent, cfgelem, sizeof (struct ddsi_config_ignoredpartition_listelem)) == NULL)
     return -1;
   new->DCPSPartitionTopic = NULL;
   return 0;
@@ -689,7 +687,7 @@ static int if_ignored_partition (struct cfgst *cfgst, void *parent, struct cfgel
 
 static int if_partition_mapping (struct cfgst *cfgst, void *parent, struct cfgelem const * const cfgelem)
 {
-  struct config_partitionmapping_listelem *new = if_common (cfgst, parent, cfgelem, sizeof(*new));
+  struct ddsi_config_partitionmapping_listelem *new = if_common (cfgst, parent, cfgelem, sizeof(*new));
   if (new == NULL)
     return -1;
   new->DCPSPartitionTopic = NULL;
@@ -697,21 +695,21 @@ static int if_partition_mapping (struct cfgst *cfgst, void *parent, struct cfgel
   new->partition = NULL;
   return 0;
 }
-#endif /* DDSI_INCLUDE_NETWORK_PARTITIONS */
+#endif /* DDS_HAS_NETWORK_PARTITIONS */
 
 static int if_peer (struct cfgst *cfgst, void *parent, struct cfgelem const * const cfgelem)
 {
-  struct config_peer_listelem *new = if_common (cfgst, parent, cfgelem, sizeof (struct config_peer_listelem));
+  struct ddsi_config_peer_listelem *new = if_common (cfgst, parent, cfgelem, sizeof (*new));
   if (new == NULL)
     return -1;
   new->peer = NULL;
   return 0;
 }
 
-#ifdef DDSI_INCLUDE_SECURITY
+#ifdef DDS_HAS_SECURITY
 static int if_omg_security (struct cfgst *cfgst, void *parent, struct cfgelem const * const cfgelem)
 {
-  struct config_omg_security_listelem *new = if_common (cfgst, parent, cfgelem, sizeof (struct config_omg_security_listelem));
+  struct ddsi_config_omg_security_listelem *new = if_common (cfgst, parent, cfgelem, sizeof (*new));
   if (new == NULL)
     return -1;
   memset(&new->cfg, 0, sizeof(new->cfg));
@@ -910,35 +908,35 @@ static const int en_boolean_ms[] = { 0, 1, 0 };
 GENERIC_ENUM_CTYPE (boolean, int)
 
 static const char *en_boolean_default_vs[] = { "default", "false", "true", NULL };
-static const enum boolean_default en_boolean_default_ms[] = { BOOLDEF_DEFAULT, BOOLDEF_FALSE, BOOLDEF_TRUE, 0 };
-GENERIC_ENUM (boolean_default)
+static const enum ddsi_boolean_default en_boolean_default_ms[] = { DDSI_BOOLDEF_DEFAULT, DDSI_BOOLDEF_FALSE, DDSI_BOOLDEF_TRUE, 0 };
+GENERIC_ENUM_CTYPE (boolean_default, enum ddsi_boolean_default)
 
 static const char *en_besmode_vs[] = { "full", "writers", "minimal", NULL };
-static const enum besmode en_besmode_ms[] = { BESMODE_FULL, BESMODE_WRITERS, BESMODE_MINIMAL, 0 };
-GENERIC_ENUM (besmode)
+static const enum ddsi_besmode en_besmode_ms[] = { DDSI_BESMODE_FULL, DDSI_BESMODE_WRITERS, DDSI_BESMODE_MINIMAL, 0 };
+GENERIC_ENUM_CTYPE (besmode, enum ddsi_besmode)
 
 static const char *en_retransmit_merging_vs[] = { "never", "adaptive", "always", NULL };
-static const enum retransmit_merging en_retransmit_merging_ms[] = { REXMIT_MERGE_NEVER, REXMIT_MERGE_ADAPTIVE, REXMIT_MERGE_ALWAYS, 0 };
-GENERIC_ENUM (retransmit_merging)
+static const enum ddsi_retransmit_merging en_retransmit_merging_ms[] = { DDSI_REXMIT_MERGE_NEVER, DDSI_REXMIT_MERGE_ADAPTIVE, DDSI_REXMIT_MERGE_ALWAYS, 0 };
+GENERIC_ENUM_CTYPE (retransmit_merging, enum ddsi_retransmit_merging)
 
 static const char *en_sched_class_vs[] = { "realtime", "timeshare", "default", NULL };
 static const ddsrt_sched_t en_sched_class_ms[] = { DDSRT_SCHED_REALTIME, DDSRT_SCHED_TIMESHARE, DDSRT_SCHED_DEFAULT, 0 };
 GENERIC_ENUM_CTYPE (sched_class, ddsrt_sched_t)
 
 static const char *en_transport_selector_vs[] = { "default", "udp", "udp6", "tcp", "tcp6", "raweth", NULL };
-static const enum transport_selector en_transport_selector_ms[] = { TRANS_DEFAULT, TRANS_UDP, TRANS_UDP6, TRANS_TCP, TRANS_TCP6, TRANS_RAWETH, 0 };
-GENERIC_ENUM (transport_selector)
+static const enum ddsi_transport_selector en_transport_selector_ms[] = { DDSI_TRANS_DEFAULT, DDSI_TRANS_UDP, DDSI_TRANS_UDP6, DDSI_TRANS_TCP, DDSI_TRANS_TCP6, DDSI_TRANS_RAWETH, 0 };
+GENERIC_ENUM_CTYPE (transport_selector, enum ddsi_transport_selector)
 
 /* by putting the  "true" and "false" aliases at the end, they won't come out of the
    generic printing function */
 static const char *en_many_sockets_mode_vs[] = { "single", "none", "many", "false", "true", NULL };
-static const enum many_sockets_mode en_many_sockets_mode_ms[] = {
-  MSM_SINGLE_UNICAST, MSM_NO_UNICAST, MSM_MANY_UNICAST, MSM_SINGLE_UNICAST, MSM_MANY_UNICAST, 0 };
-GENERIC_ENUM (many_sockets_mode)
+static const enum ddsi_many_sockets_mode en_many_sockets_mode_ms[] = {
+  DDSI_MSM_SINGLE_UNICAST, DDSI_MSM_NO_UNICAST, DDSI_MSM_MANY_UNICAST, DDSI_MSM_SINGLE_UNICAST, DDSI_MSM_MANY_UNICAST, 0 };
+GENERIC_ENUM_CTYPE (many_sockets_mode, enum ddsi_many_sockets_mode)
 
 static const char *en_standards_conformance_vs[] = { "pedantic", "strict", "lax", NULL };
-static const enum nn_standards_conformance en_standards_conformance_ms[] = { NN_SC_PEDANTIC, NN_SC_STRICT, NN_SC_LAX, 0 };
-GENERIC_ENUM_CTYPE (standards_conformance, enum nn_standards_conformance)
+static const enum ddsi_standards_conformance en_standards_conformance_ms[] = { DDSI_SC_PEDANTIC, DDSI_SC_STRICT, DDSI_SC_LAX, 0 };
+GENERIC_ENUM_CTYPE (standards_conformance, enum ddsi_standards_conformance)
 
 /* "trace" is special: it enables (nearly) everything */
 static const char *tracemask_names[] = {
@@ -985,10 +983,10 @@ static void pf_tracemask (struct cfgst *cfgst, UNUSED_ARG (void *parent), UNUSED
 }
 
 static const char *xcheck_names[] = {
-  "whc", "rhc", "all", NULL
+  "whc", "rhc", "xevent", "all", NULL
 };
 static const uint32_t xcheck_codes[] = {
-  DDS_XCHECK_WHC, DDS_XCHECK_RHC, ~(uint32_t) 0
+  DDSI_XCHECK_WHC, DDSI_XCHECK_RHC, DDSI_XCHECK_XEV, ~(uint32_t) 0
 };
 
 static enum update_result uf_xcheck (struct cfgst *cfgst, void *parent, struct cfgelem const * const cfgelem, UNUSED_ARG (int first), const char *value)
@@ -1008,17 +1006,17 @@ static void pf_xcheck (struct cfgst *cfgst, void *parent, struct cfgelem const *
   do_print_uint32_bitset (cfgst, *p, sizeof (xcheck_codes) / sizeof (*xcheck_codes), xcheck_names, xcheck_codes, sources, suffix);
 }
 
-#ifdef DDSI_INCLUDE_SSL
+#ifdef DDS_HAS_SSL
 static enum update_result uf_min_tls_version (struct cfgst *cfgst, UNUSED_ARG (void *parent), UNUSED_ARG (struct cfgelem const * const cfgelem), UNUSED_ARG (int first), const char *value)
 {
   static const char *vs[] = {
     "1.2", "1.3", NULL
   };
-  static const struct ssl_min_version ms[] = {
+  static const struct ddsi_config_ssl_min_version ms[] = {
     {1,2}, {1,3}, {0,0}
   };
   const int idx = list_index (vs, value);
-  struct ssl_min_version * const elem = cfg_address (cfgst, parent, cfgelem);
+  struct ddsi_config_ssl_min_version * const elem = cfg_address (cfgst, parent, cfgelem);
   assert (sizeof (vs) / sizeof (*vs) == sizeof (ms) / sizeof (*ms));
   if (idx < 0)
     return cfg_error(cfgst, "'%s': undefined value", value);
@@ -1028,7 +1026,7 @@ static enum update_result uf_min_tls_version (struct cfgst *cfgst, UNUSED_ARG (v
 
 static void pf_min_tls_version (struct cfgst *cfgst, void *parent, struct cfgelem const * const cfgelem, uint32_t sources)
 {
-  struct ssl_min_version * const p = cfg_address (cfgst, parent, cfgelem);
+  struct ddsi_config_ssl_min_version * const p = cfg_address (cfgst, parent, cfgelem);
   cfg_logelem (cfgst, sources, "%d.%d", p->major, p->minor);
 }
 #endif
@@ -1046,7 +1044,7 @@ static void pf_string (struct cfgst *cfgst, void *parent, struct cfgelem const *
   cfg_logelem (cfgst, sources, "%s", *p ? *p : "(null)");
 }
 
-#ifdef DDSI_INCLUDE_BANDWIDTH_LIMITING
+#ifdef DDS_HAS_BANDWIDTH_LIMITING
 static enum update_result uf_bandwidth (struct cfgst *cfgst, void *parent, struct cfgelem const * const cfgelem, UNUSED_ARG (int first), const char *value)
 {
   int64_t bandwidth_bps = 0;
@@ -1117,7 +1115,7 @@ static void pf_memsize16 (struct cfgst *cfgst, void *parent, struct cfgelem cons
 
 static enum update_result uf_tracingOutputFileName (struct cfgst *cfgst, UNUSED_ARG (void *parent), UNUSED_ARG (struct cfgelem const * const cfgelem), UNUSED_ARG (int first), const char *value)
 {
-  struct config * const cfg = cfgst->cfg;
+  struct ddsi_config * const cfg = cfgst->cfg;
   cfg->tracefile = ddsrt_strdup (value);
   return URES_SUCCESS;
 }
@@ -1223,12 +1221,12 @@ static void ff_networkAddresses (struct cfgst *cfgst, void *parent, struct cfgel
   ddsrt_free (*elem);
 }
 
-#ifdef DDSI_INCLUDE_SSM
+#ifdef DDS_HAS_SSM
 static const char *allow_multicast_names[] = { "false", "spdp", "asm", "ssm", "true", NULL };
-static const uint32_t allow_multicast_codes[] = { AMC_FALSE, AMC_SPDP, AMC_ASM, AMC_SSM, AMC_TRUE };
+static const uint32_t allow_multicast_codes[] = { DDSI_AMC_FALSE, DDSI_AMC_SPDP, DDSI_AMC_ASM, DDSI_AMC_SSM, DDSI_AMC_TRUE };
 #else
 static const char *allow_multicast_names[] = { "false", "spdp", "asm", "true", NULL };
-static const uint32_t allow_multicast_codes[] = { AMC_FALSE, AMC_SPDP, AMC_ASM, AMC_TRUE };
+static const uint32_t allow_multicast_codes[] = { DDSI_AMC_FALSE, DDSI_AMC_SPDP, DDSI_AMC_ASM, DDSI_AMC_TRUE };
 #endif
 
 static enum update_result uf_allow_multicast (struct cfgst *cfgst, void *parent, struct cfgelem const * const cfgelem, UNUSED_ARG(int first), const char *value)
@@ -1236,7 +1234,7 @@ static enum update_result uf_allow_multicast (struct cfgst *cfgst, void *parent,
   uint32_t * const elem = cfg_address (cfgst, parent, cfgelem);
   if (ddsrt_strcasecmp (value, "default") == 0)
   {
-    *elem = AMC_DEFAULT;
+    *elem = DDSI_AMC_DEFAULT;
     return URES_SUCCESS;
   }
   else
@@ -1249,7 +1247,7 @@ static enum update_result uf_allow_multicast (struct cfgst *cfgst, void *parent,
 static void pf_allow_multicast(struct cfgst *cfgst, void *parent, struct cfgelem const * const cfgelem, uint32_t sources)
 {
   uint32_t *p = cfg_address (cfgst, parent, cfgelem);
-  if (*p == AMC_DEFAULT)
+  if (*p == DDSI_AMC_DEFAULT)
     cfg_logelem (cfgst, sources, "default");
   else if (*p == 0)
     cfg_logelem (cfgst, sources, "false");
@@ -1262,7 +1260,7 @@ static void pf_allow_multicast(struct cfgst *cfgst, void *parent, struct cfgelem
 static enum update_result uf_maybe_int32 (struct cfgst *cfgst, void *parent, struct cfgelem const * const cfgelem, UNUSED_ARG (int first), const char *value)
 {
   DDSRT_WARNING_MSVC_OFF(4996);
-  struct config_maybe_int32 * const elem = cfg_address (cfgst, parent, cfgelem);
+  struct ddsi_config_maybe_int32 * const elem = cfg_address (cfgst, parent, cfgelem);
   int pos;
   if (ddsrt_strcasecmp (value, "default") == 0) {
     elem->isdefault = 1;
@@ -1279,16 +1277,16 @@ static enum update_result uf_maybe_int32 (struct cfgst *cfgst, void *parent, str
 
 static void pf_maybe_int32 (struct cfgst *cfgst, void *parent, struct cfgelem const * const cfgelem, uint32_t sources)
 {
-  struct config_maybe_int32 const * const p = cfg_address (cfgst, parent, cfgelem);
+  struct ddsi_config_maybe_int32 const * const p = cfg_address (cfgst, parent, cfgelem);
   if (p->isdefault)
     cfg_logelem (cfgst, sources, "default");
   else
-    cfg_logelem (cfgst, sources, "%d", p->value);
+    cfg_logelem (cfgst, sources, "%"PRId32, p->value);
 }
 
 static enum update_result uf_maybe_memsize (struct cfgst *cfgst, void *parent, struct cfgelem const * const cfgelem, UNUSED_ARG (int first), const char *value)
 {
-  struct config_maybe_uint32 * const elem = cfg_address (cfgst, parent, cfgelem);
+  struct ddsi_config_maybe_uint32 * const elem = cfg_address (cfgst, parent, cfgelem);
   int64_t size = 0;
   if (ddsrt_strcasecmp (value, "default") == 0) {
     elem->isdefault = 1;
@@ -1305,7 +1303,7 @@ static enum update_result uf_maybe_memsize (struct cfgst *cfgst, void *parent, s
 
 static void pf_maybe_memsize (struct cfgst *cfgst, void *parent, struct cfgelem const * const cfgelem, uint32_t sources)
 {
-  struct config_maybe_uint32 const * const p = cfg_address (cfgst, parent, cfgelem);
+  struct ddsi_config_maybe_uint32 const * const p = cfg_address (cfgst, parent, cfgelem);
   if (p->isdefault)
     cfg_logelem (cfgst, sources, "default");
   else
@@ -1373,7 +1371,7 @@ static enum update_result uf_uint (struct cfgst *cfgst, void *parent, struct cfg
 static void pf_uint (struct cfgst *cfgst, void *parent, struct cfgelem const * const cfgelem, uint32_t sources)
 {
   uint32_t const * const p = cfg_address (cfgst, parent, cfgelem);
-  cfg_logelem (cfgst, sources, "%u", *p);
+  cfg_logelem (cfgst, sources, "%"PRIu32, *p);
 }
 
 static enum update_result uf_duration_gen (struct cfgst *cfgst, void *parent, struct cfgelem const * const cfgelem, const char *value, int64_t def_mult, int64_t min_ns, int64_t max_ns)
@@ -1466,10 +1464,10 @@ static enum update_result uf_participantIndex (struct cfgst *cfgst, void *parent
 {
   int * const elem = cfg_address (cfgst, parent, cfgelem);
   if (ddsrt_strcasecmp (value, "auto") == 0) {
-    *elem = PARTICIPANT_INDEX_AUTO;
+    *elem = DDSI_PARTICIPANT_INDEX_AUTO;
     return URES_SUCCESS;
   } else if (ddsrt_strcasecmp (value, "none") == 0) {
-    *elem = PARTICIPANT_INDEX_NONE;
+    *elem = DDSI_PARTICIPANT_INDEX_NONE;
     return URES_SUCCESS;
   } else {
     return uf_int_min_max (cfgst, parent, cfgelem, first, value, 0, 120);
@@ -1481,10 +1479,10 @@ static void pf_participantIndex (struct cfgst *cfgst, void *parent, struct cfgel
   int const * const p = cfg_address (cfgst, parent, cfgelem);
   switch (*p)
   {
-    case PARTICIPANT_INDEX_NONE:
+    case DDSI_PARTICIPANT_INDEX_NONE:
       cfg_logelem (cfgst, sources, "none");
       break;
-    case PARTICIPANT_INDEX_AUTO:
+    case DDSI_PARTICIPANT_INDEX_AUTO:
       cfg_logelem (cfgst, sources, "auto");
       break;
     default:
@@ -1612,7 +1610,7 @@ static void print_configitems (struct cfgst *cfgst, void *parent, int isattr, st
     }
     else
     {
-      struct config_listelem *p = cfg_deref_address (cfgst, parent, ce);
+      struct ddsi_config_listelem *p = cfg_deref_address (cfgst, parent, ce);
       while (p)
       {
         cfgst_push (cfgst, 0, NULL, NULL);
@@ -1647,9 +1645,9 @@ static void free_all_elements (struct cfgst *cfgst, void *parent, struct cfgelem
       if (ce->attributes)
         free_all_elements (cfgst, parent, ce->attributes);
     } else {
-      struct config_listelem *p = cfg_deref_address (cfgst, parent, ce);
+      struct ddsi_config_listelem *p = cfg_deref_address (cfgst, parent, ce);
       while (p) {
-        struct config_listelem *p1 = p->next;
+        struct ddsi_config_listelem *p1 = p->next;
         if (ce->attributes)
           free_all_elements (cfgst, p, ce->attributes);
         if (ce->children)
@@ -1688,9 +1686,9 @@ static void free_configured_element (struct cfgst *cfgst, void *parent, struct c
     /* FIXME: this used to require free_all_elements because there would be no record stored for
        configuration elements within lists, but with that changed, I think this can now just use
        free_configured_elements */
-    struct config_listelem *p = cfg_deref_address (cfgst, parent, ce);
+    struct ddsi_config_listelem *p = cfg_deref_address (cfgst, parent, ce);
     while (p) {
-      struct config_listelem * const p1 = p->next;
+      struct ddsi_config_listelem * const p1 = p->next;
       if (ce->attributes)
         free_all_elements (cfgst, p, ce->attributes);
       if (ce->children)
@@ -1709,6 +1707,9 @@ static void free_configured_elements (struct cfgst *cfgst, void *parent, struct 
 
 static int matching_name_index (const char *name_w_aliases, const char *name, size_t *partial)
 {
+  // skip move marker if present
+  if (name_w_aliases[0] == '>')
+    name_w_aliases++;
   const char *ns = name_w_aliases;
   const char *aliases = strchr (ns, '|');
   const char *p = aliases;
@@ -1793,6 +1794,74 @@ static const struct cfgelem *lookup_element (const char *target, bool *isattr)
   return cfgelem;
 }
 
+static const struct cfgelem *find_cfgelem_by_name (struct cfgst * const cfgst, const char *class, struct cfgelem const * const elems, const char *name)
+{
+  const struct cfgelem *cfg_subelem;
+  int ambiguous = 0;
+  size_t partial = 0;
+  const struct cfgelem *partial_match = NULL;
+
+  for (cfg_subelem = elems; cfg_subelem && cfg_subelem->name && strcmp (cfg_subelem->name, "*") != 0; cfg_subelem++)
+  {
+    const char *csename = cfg_subelem->name;
+    size_t partial1;
+    int idx;
+    idx = matching_name_index (csename, name, &partial1);
+    if (idx > 0)
+    {
+      if (csename[0] == '|')
+        cfg_warning (cfgst, "'%s': deprecated %s", name, class);
+      else
+      {
+        int n = (int) (strchr (csename, '|') - csename);
+        if (csename[n + 1] != '|') {
+          cfg_warning (cfgst, "'%s': deprecated alias for '%*.*s'", name, n, n, csename);
+        }
+      }
+    }
+    if (idx >= 0)
+    {
+      /* an exact match is always good */
+      break;
+    }
+    if (partial1 > partial)
+    {
+      /* a longer prefix match is a candidate ... */
+      partial = partial1;
+      partial_match = cfg_subelem;
+    }
+    else if (partial1 > 0 && partial1 == partial)
+    {
+      /* ... but an ambiguous prefix match won't do */
+      ambiguous = 1;
+      partial_match = NULL;
+    }
+  }
+  if (cfg_subelem && cfg_subelem->name == NULL)
+    cfg_subelem = NULL;
+  if (cfg_subelem == NULL)
+  {
+    if (partial_match != NULL && cfgst->partial_match_allowed)
+      cfg_subelem = partial_match;
+    else if (ambiguous)
+      (void) cfg_error (cfgst, "%s: ambiguous %s prefix", name, class);
+    else
+      (void) cfg_error (cfgst, "%s: unknown %s", name, class);
+  }
+
+  if (cfg_subelem && (cfg_subelem->name[0] == '>'))
+  {
+    assert (strcmp (cfg_subelem->name, "*") != 0);
+    struct cfgelem const * const cfg_subelem_orig = cfg_subelem;
+    bool isattr;
+    cfg_subelem = lookup_element (cfg_subelem->defvalue, &isattr);
+    cfgst_push (cfgst, 0, cfg_subelem_orig, NULL);
+    cfg_warning (cfgst, "setting%s moved to //%s", cfg_subelem->children ? "s" : "", cfg_subelem_orig->defvalue);
+    cfgst_pop (cfgst);
+  }
+  return cfg_subelem;
+}
+
 static int proc_elem_open (void *varg, UNUSED_ARG (uintptr_t parentinfo), UNUSED_ARG (uintptr_t *eleminfo), const char *name, int line)
 {
   struct cfgst * const cfgst = varg;
@@ -1819,65 +1888,19 @@ static int proc_elem_open (void *varg, UNUSED_ARG (uintptr_t parentinfo), UNUSED
   }
 
   const struct cfgelem *cfgelem = cfgst_tos (cfgst);
-  const struct cfgelem *cfg_subelem;
-  int moved = 0;
-  size_t partial = 0;
-  const struct cfgelem *partial_match = NULL;
-
   if (cfgelem == NULL)
   {
     /* Ignoring, but do track the structure so we can know when to stop ignoring */
     cfgst_push (cfgst, 0, NULL, NULL);
     return 1;
   }
-  for (cfg_subelem = cfgelem->children; cfg_subelem && cfg_subelem->name && strcmp (cfg_subelem->name, "*") != 0; cfg_subelem++)
+
+  const struct cfgelem * const cfg_subelem = find_cfgelem_by_name (cfgst, "element", cfgelem->children, name);
+  if (cfg_subelem == NULL)
   {
-    const char *csename = cfg_subelem->name;
-    size_t partial1;
-    int idx;
-    moved = (csename[0] == '>');
-    if (moved)
-      csename++;
-    idx = matching_name_index (csename, name, &partial1);
-    if (idx > 0)
-    {
-      if (csename[0] == '|')
-        cfg_warning (cfgst, "'%s': deprecated setting", name);
-      else
-      {
-        int n = (int) (strchr (csename, '|') - csename);
-        if (csename[n + 1] != '|') {
-          cfg_warning (cfgst, "'%s': deprecated alias for '%*.*s'", name, n, n, csename);
-        }
-      }
-    }
-    if (idx >= 0)
-    {
-      /* an exact match is always good */
-      break;
-    }
-    if (partial1 > partial)
-    {
-      /* a longer prefix match is a candidate ... */
-      partial = partial1;
-      partial_match = cfg_subelem;
-    }
-    else if (partial1 > 0 && partial1 == partial)
-    {
-      /* ... but an ambiguous prefix match won't do */
-      partial_match = NULL;
-    }
-  }
-  if (cfg_subelem == NULL || cfg_subelem->name == NULL)
-  {
-    if (partial_match != NULL && cfgst->partial_match_allowed)
-      cfg_subelem = partial_match;
-    else
-    {
-      (void) cfg_error (cfgst, "%s: unknown element", name);
-      cfgst_push (cfgst, 0, NULL, NULL);
-      return 0;
-    }
+    /* Ignore the element, continue parsing */
+    cfgst_push (cfgst, 0, NULL, NULL);
+    return 0;
   }
   if (strcmp (cfg_subelem->name, "*") == 0)
   {
@@ -1888,17 +1911,6 @@ static int proc_elem_open (void *varg, UNUSED_ARG (uintptr_t parentinfo), UNUSED
   else
   {
     void *parent, *dynparent;
-
-    if (moved)
-    {
-      struct cfgelem const * const cfg_subelem_orig = cfg_subelem;
-      bool isattr;
-      cfg_subelem = lookup_element (cfg_subelem->defvalue, &isattr);
-      cfgst_push (cfgst, 0, cfg_subelem_orig, NULL);
-      cfg_warning (cfgst, "setting%s moved to //%s", cfg_subelem->children ? "s" : "", cfg_subelem_orig->defvalue);
-      cfgst_pop (cfgst);
-    }
-
     parent = cfgst_parent (cfgst);
     assert (cfgelem->init || cfgelem->multiplicity == 1); /* multi-items must have an init-func */
     if (cfg_subelem->init)
@@ -1977,19 +1989,20 @@ static int proc_attr (void *varg, UNUSED_ARG (uintptr_t eleminfo), const char *n
   /* All attributes are processed immediately after opening the element */
   struct cfgst * const cfgst = varg;
   const struct cfgelem *cfgelem = cfgst_tos (cfgst);
-  const struct cfgelem *cfg_attr;
   cfgst->line = line;
   if (cfgelem == NULL)
     return 1;
-  for (cfg_attr = cfgelem->attributes; cfg_attr && cfg_attr->name; cfg_attr++)
-    if (ddsrt_strcasecmp(cfg_attr->name, name) == 0)
-      break;
-  if (cfg_attr != NULL && cfg_attr->name != NULL)
-    return proc_update_cfgelem (cfgst, cfg_attr, value, true);
-  else
+  struct cfgelem const * const cfg_attr = find_cfgelem_by_name (cfgst, "attribute", cfgelem->attributes, name);
+  if (cfg_attr == NULL)
+    return 0;
+  else if (cfg_attr->name == NULL)
   {
     (void) cfg_error (cfgst, "%s: unknown attribute", name);
     return 0;
+  }
+  else
+  {
+    return proc_update_cfgelem (cfgst, cfg_attr, value, true);
   }
 }
 
@@ -2040,20 +2053,20 @@ static int cfgst_node_cmp (const void *va, const void *vb)
   return memcmp (va, vb, sizeof (struct cfgst_nodekey));
 }
 
-#ifdef DDSI_INCLUDE_NETWORK_CHANNELS
+#ifdef DDS_HAS_NETWORK_CHANNELS
 static int set_default_channel (struct config *cfg)
 {
   if (cfg->channels == NULL)
   {
     /* create one default channel if none configured */
-    struct config_channel_listelem *c;
+    struct ddsi_config_channel_listelem *c;
     if ((c = ddsrt_malloc (sizeof (*c))) == NULL)
       return ERR_OUT_OF_MEMORY;
     c->next = NULL;
     c->name = ddsrt_strdup ("user");
     c->priority = 0;
     c->resolution = DDS_MSECS (1);
-#ifdef DDSI_INCLUDE_BANDWIDTH_LIMITING
+#ifdef DDS_HAS_BANDWIDTH_LIMITING
     c->data_bandwidth_limit = 0;
     c->auxiliary_bandwidth_limit = 0;
 #endif
@@ -2070,8 +2083,8 @@ static int set_default_channel (struct config *cfg)
 
 static int sort_channels_cmp (const void *va, const void *vb)
 {
-  const struct config_channel_listelem * const *a = va;
-  const struct config_channel_listelem * const *b = vb;
+  const struct ddsi_config_channel_listelem * const *a = va;
+  const struct ddsi_config_channel_listelem * const *b = vb;
   return ((*a)->priority == (*b)->priority) ? 0 : ((*a)->priority < (*b)->priority) ? -1 : 1;
 }
 
@@ -2081,7 +2094,7 @@ static int sort_channels_check_nodups (struct config *cfg, uint32_t domid)
      are sorted on descending priority.  While we do retain the list
      structure, sorting is much easier in an array, and hence we
      convert back and forth. */
-  struct config_channel_listelem **ary, *c;
+  struct ddsi_config_channel_listelem **ary, *c;
   uint32_t i, n;
   int result;
 
@@ -2118,7 +2131,7 @@ static int sort_channels_check_nodups (struct config *cfg, uint32_t domid)
   ddsrt_free (ary);
   return result;
 }
-#endif /* DDSI_INCLUDE_NETWORK_CHANNELS */
+#endif /* DDS_HAS_NETWORK_CHANNELS */
 
 static FILE *config_open_file (char *tok, char **cursor, uint32_t domid)
 {
@@ -2145,7 +2158,7 @@ static FILE *config_open_file (char *tok, char **cursor, uint32_t domid)
   return fp;
 }
 
-struct cfgst *config_init (const char *config, struct config *cfg, uint32_t domid)
+struct cfgst *config_init (const char *config, struct ddsi_config *cfg, uint32_t domid)
 {
   int ok = 1;
   struct cfgst *cfgst;
@@ -2253,36 +2266,36 @@ struct cfgst *config_init (const char *config, struct config *cfg, uint32_t domi
     int ok1 = 1;
     switch (cfgst->cfg->transport_selector)
     {
-      case TRANS_DEFAULT:
-        if (cfgst->cfg->compat_tcp_enable == BOOLDEF_TRUE)
-          cfgst->cfg->transport_selector = (cfgst->cfg->compat_use_ipv6 == BOOLDEF_TRUE) ? TRANS_TCP6 : TRANS_TCP;
+      case DDSI_TRANS_DEFAULT:
+        if (cfgst->cfg->compat_tcp_enable == DDSI_BOOLDEF_TRUE)
+          cfgst->cfg->transport_selector = (cfgst->cfg->compat_use_ipv6 == DDSI_BOOLDEF_TRUE) ? DDSI_TRANS_TCP6 : DDSI_TRANS_TCP;
         else
-          cfgst->cfg->transport_selector = (cfgst->cfg->compat_use_ipv6 == BOOLDEF_TRUE) ? TRANS_UDP6 : TRANS_UDP;
+          cfgst->cfg->transport_selector = (cfgst->cfg->compat_use_ipv6 == DDSI_BOOLDEF_TRUE) ? DDSI_TRANS_UDP6 : DDSI_TRANS_UDP;
         break;
-      case TRANS_TCP:
-        ok1 = !(cfgst->cfg->compat_tcp_enable == BOOLDEF_FALSE || cfgst->cfg->compat_use_ipv6 == BOOLDEF_TRUE);
+      case DDSI_TRANS_TCP:
+        ok1 = !(cfgst->cfg->compat_tcp_enable == DDSI_BOOLDEF_FALSE || cfgst->cfg->compat_use_ipv6 == DDSI_BOOLDEF_TRUE);
         break;
-      case TRANS_TCP6:
-        ok1 = !(cfgst->cfg->compat_tcp_enable == BOOLDEF_FALSE || cfgst->cfg->compat_use_ipv6 == BOOLDEF_FALSE);
+      case DDSI_TRANS_TCP6:
+        ok1 = !(cfgst->cfg->compat_tcp_enable == DDSI_BOOLDEF_FALSE || cfgst->cfg->compat_use_ipv6 == DDSI_BOOLDEF_FALSE);
         break;
-      case TRANS_UDP:
-        ok1 = !(cfgst->cfg->compat_tcp_enable == BOOLDEF_TRUE || cfgst->cfg->compat_use_ipv6 == BOOLDEF_TRUE);
+      case DDSI_TRANS_UDP:
+        ok1 = !(cfgst->cfg->compat_tcp_enable == DDSI_BOOLDEF_TRUE || cfgst->cfg->compat_use_ipv6 == DDSI_BOOLDEF_TRUE);
         break;
-      case TRANS_UDP6:
-        ok1 = !(cfgst->cfg->compat_tcp_enable == BOOLDEF_TRUE || cfgst->cfg->compat_use_ipv6 == BOOLDEF_FALSE);
+      case DDSI_TRANS_UDP6:
+        ok1 = !(cfgst->cfg->compat_tcp_enable == DDSI_BOOLDEF_TRUE || cfgst->cfg->compat_use_ipv6 == DDSI_BOOLDEF_FALSE);
         break;
-      case TRANS_RAWETH:
-        ok1 = !(cfgst->cfg->compat_tcp_enable == BOOLDEF_TRUE || cfgst->cfg->compat_use_ipv6 == BOOLDEF_TRUE);
+      case DDSI_TRANS_RAWETH:
+        ok1 = !(cfgst->cfg->compat_tcp_enable == DDSI_BOOLDEF_TRUE || cfgst->cfg->compat_use_ipv6 == DDSI_BOOLDEF_TRUE);
         break;
     }
     if (!ok1)
       DDS_ILOG (DDS_LC_ERROR, domid, "config: invalid combination of Transport, IPv6, TCP\n");
     ok = ok && ok1;
-    cfgst->cfg->compat_use_ipv6 = (cfgst->cfg->transport_selector == TRANS_UDP6 || cfgst->cfg->transport_selector == TRANS_TCP6) ? BOOLDEF_TRUE : BOOLDEF_FALSE;
-    cfgst->cfg->compat_tcp_enable = (cfgst->cfg->transport_selector == TRANS_TCP || cfgst->cfg->transport_selector == TRANS_TCP6) ? BOOLDEF_TRUE : BOOLDEF_FALSE;
+    cfgst->cfg->compat_use_ipv6 = (cfgst->cfg->transport_selector == DDSI_TRANS_UDP6 || cfgst->cfg->transport_selector == DDSI_TRANS_TCP6) ? DDSI_BOOLDEF_TRUE : DDSI_BOOLDEF_FALSE;
+    cfgst->cfg->compat_tcp_enable = (cfgst->cfg->transport_selector == DDSI_TRANS_TCP || cfgst->cfg->transport_selector == DDSI_TRANS_TCP6) ? DDSI_BOOLDEF_TRUE : DDSI_BOOLDEF_FALSE;
   }
 
-#ifdef DDSI_INCLUDE_NETWORK_CHANNELS
+#ifdef DDS_HAS_NETWORK_CHANNELS
   /* Default channel gets set outside set_defaults -- a bit too
      complicated for the poor framework */
   if (ok)
@@ -2294,28 +2307,15 @@ struct cfgst *config_init (const char *config, struct config *cfg, uint32_t domi
   }
 #endif
 
-#ifdef DDSI_INCLUDE_NETWORK_PARTITIONS
-  /* Assign network partition ids */
-  if (ok)
-  {
-    struct config_networkpartition_listelem *p = cfgst->cfg->networkPartitions;
-    cfgst->cfg->nof_networkPartitions = 0;
-    while (p)
-    {
-      cfgst->cfg->nof_networkPartitions++;
-      p->partitionId = cfgst->cfg->nof_networkPartitions; /* starting at 1 */
-      p = p->next;
-    }
-  }
-
+#ifdef DDS_HAS_NETWORK_PARTITIONS
   /* Create links from the partitionmappings to the network partitions
      and signal errors if partitions do not exist */
   if (ok)
   {
-    struct config_partitionmapping_listelem * m = cfgst->cfg->partitionMappings;
+    struct ddsi_config_partitionmapping_listelem * m = cfgst->cfg->partitionMappings;
     while (m)
     {
-      struct config_networkpartition_listelem * p = cfgst->cfg->networkPartitions;
+      struct ddsi_config_networkpartition_listelem * p = cfgst->cfg->networkPartitions;
       while (p && ddsrt_strcasecmp(m->networkPartition, p->name) != 0)
         p = p->next;
       if (p)
@@ -2328,7 +2328,7 @@ struct cfgst *config_init (const char *config, struct config *cfg, uint32_t domi
       m = m->next;
     }
   }
-#endif /* DDSI_INCLUDE_NETWORK_PARTITIONS */
+#endif /* DDS_HAS_NETWORK_PARTITIONS */
 
   if (ok)
   {
@@ -2350,6 +2350,17 @@ void config_print_cfgst (struct cfgst *cfgst, const struct ddsrt_log_cfg *logcfg
   assert (cfgst->logcfg == NULL);
   cfgst->logcfg = logcfg;
   print_configitems (cfgst, cfgst->cfg, 0, root_cfgelems, 0);
+}
+
+void config_print_rawconfig (const struct ddsi_config *cfg, const struct ddsrt_log_cfg *logcfg)
+{
+  struct cfgst cfgst = {
+    .cfg = (struct ddsi_config *) cfg,
+    .found = { .root = NULL },
+    .logcfg = logcfg,
+    .path_depth = 0
+  };
+  print_configitems (&cfgst, (void *) cfg, 0, root_cfgelems, 0);
 }
 
 void config_free_source_info (struct cfgst *cfgst)
@@ -2374,63 +2385,3 @@ void config_fini (struct cfgst *cfgst)
   ddsrt_avl_free (&cfgst_found_treedef, &cfgst->found, ddsrt_free);
   ddsrt_free (cfgst);
 }
-
-#ifdef DDSI_INCLUDE_NETWORK_PARTITIONS
-static char *get_partition_search_pattern (const char *partition, const char *topic)
-{
-  size_t sz = strlen (partition) + strlen (topic) + 2;
-  char *pt = ddsrt_malloc (sz);
-  (void) snprintf (pt, sz, "%s.%s", partition, topic);
-  return pt;
-}
-
-struct config_partitionmapping_listelem *find_partitionmapping (const struct config *cfg, const char *partition, const char *topic)
-{
-  char *pt = get_partition_search_pattern (partition, topic);
-  struct config_partitionmapping_listelem *pm;
-  for (pm = cfg->partitionMappings; pm; pm = pm->next)
-    if (WildcardOverlap (pt, pm->DCPSPartitionTopic))
-      break;
-  ddsrt_free (pt);
-  return pm;
-}
-
-struct config_networkpartition_listelem *find_networkpartition_by_id (const struct config *cfg, uint32_t id)
-{
-  struct config_networkpartition_listelem *np;
-  for (np = cfg->networkPartitions; np; np = np->next)
-    if (np->partitionId == id)
-      return np;
-  return 0;
-}
-
-int is_ignored_partition (const struct config *cfg, const char *partition, const char *topic)
-{
-  char *pt = get_partition_search_pattern (partition, topic);
-  struct config_ignoredpartition_listelem *ip;
-  for (ip = cfg->ignoredPartitions; ip; ip = ip->next)
-    if (WildcardOverlap(pt, ip->DCPSPartitionTopic))
-      break;
-  ddsrt_free (pt);
-  return ip != NULL;
-}
-#endif /* DDSI_INCLUDE_NETWORK_PARTITIONS */
-
-#ifdef DDSI_INCLUDE_NETWORK_CHANNELS
-struct config_channel_listelem *find_channel (const struct config *cfg, nn_transport_priority_qospolicy_t transport_priority)
-{
-  struct config_channel_listelem *c;
-  /* Channel selection is to use the channel with the lowest priority
-     not less than transport_priority, or else the one with the
-     highest priority. */
-  assert(cfg->channels != NULL);
-  assert(cfg->max_channel != NULL);
-  for (c = cfg->channels; c; c = c->next)
-  {
-    assert(c->next == NULL || c->next->priority > c->priority);
-    if (transport_priority.value <= c->priority)
-      return c;
-  }
-  return cfg->max_channel;
-}
-#endif /* DDSI_INCLUDE_NETWORK_CHANNELS */
