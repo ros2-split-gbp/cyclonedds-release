@@ -28,7 +28,8 @@ typedef int64_t seqno_t;
 
 #define PGUIDPREFIX(gp) (gp).u[0], (gp).u[1], (gp).u[2]
 #define PGUID(g) PGUIDPREFIX ((g).prefix), (g).entityid.u
-#define PGUIDFMT "%" PRIx32 ":%" PRIx32 ":%" PRIx32 ":%" PRIx32
+#define PGUIDPREFIXFMT "%" PRIx32 ":%" PRIx32 ":%" PRIx32
+#define PGUIDFMT PGUIDPREFIXFMT ":%" PRIx32
 
 /* predefined entity ids; here viewed as an unsigned int, on the
    network as four bytes corresponding to the integer in network byte
@@ -45,6 +46,11 @@ typedef int64_t seqno_t;
 #define NN_ENTITYID_SPDP_BUILTIN_PARTICIPANT_READER 0x100c7
 #define NN_ENTITYID_P2P_BUILTIN_PARTICIPANT_MESSAGE_WRITER 0x200c2
 #define NN_ENTITYID_P2P_BUILTIN_PARTICIPANT_MESSAGE_READER 0x200c7
+
+#define NN_ENTITYID_TL_SVC_BUILTIN_REQUEST_WRITER 0x300c3
+#define NN_ENTITYID_TL_SVC_BUILTIN_REQUEST_READER 0x300c4
+#define NN_ENTITYID_TL_SVC_BUILTIN_REPLY_WRITER 0x301c3
+#define NN_ENTITYID_TL_SVC_BUILTIN_REPLY_READER 0x301c4
 
 #define NN_ENTITYID_SEDP_BUILTIN_PUBLICATIONS_SECURE_WRITER 0xff0003c2
 #define NN_ENTITYID_SEDP_BUILTIN_PUBLICATIONS_SECURE_READER 0xff0003c7
@@ -68,6 +74,13 @@ typedef int64_t seqno_t;
 #define NN_ENTITYID_KIND_WRITER_NO_KEY 0x03
 #define NN_ENTITYID_KIND_READER_NO_KEY 0x04
 #define NN_ENTITYID_KIND_READER_WITH_KEY 0x07
+/* Entity kind topic is not defined in the RTPS spec, so the following two
+   should to be used as vendor specific entities using NN_ENTITYID_SOURCE_VENDOR.
+   Two entity kinds for built-in and user topics are required, because the
+   vendor and built-in flags cannot be combined. */
+#define NN_ENTITYID_KIND_CYCLONE_TOPIC_BUILTIN 0x0c
+#define NN_ENTITYID_KIND_CYCLONE_TOPIC_USER 0x0d
+
 #define NN_ENTITYID_ALLOCSTEP 0x100
 
 struct cfgst;

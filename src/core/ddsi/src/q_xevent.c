@@ -300,6 +300,8 @@ static int compute_non_timed_xmit_list_size (struct xeventq *evq)
 #ifndef NDEBUG
 static int nontimed_xevent_in_queue (struct xeventq *evq, struct xevent_nt *ev)
 {
+  if (!(evq->gv->config.enabled_xchecks & DDSI_XCHECK_XEV))
+    return 0;
   struct xevent_nt *x;
   ddsrt_mutex_lock (&evq->lock);
   for (x = evq->non_timed_xmit_list_oldest; x; x = x->listnode.next)
@@ -625,7 +627,7 @@ static void handle_xevk_entityid (struct nn_xpack *xp, struct xevent_nt *ev)
   nn_xpack_addmsg (xp, ev->u.entityid.msg, 0);
 }
 
-#ifdef DDSI_INCLUDE_SECURITY
+#ifdef DDS_HAS_SECURITY
 static int send_heartbeat_to_all_readers_check_and_sched (struct xevent *ev, struct writer *wr, const struct whc_state *whcst, ddsrt_mtime_t tnow, ddsrt_mtime_t *t_next)
 {
   int send;
@@ -710,8 +712,6 @@ static void send_heartbeat_to_all_readers (struct nn_xpack *xp, struct xevent *e
 
   ddsrt_mutex_unlock (&wr->e.lock);
 }
-
-
 #endif
 
 static void handle_xevk_heartbeat (struct nn_xpack *xp, struct xevent *ev, ddsrt_mtime_t tnow)
@@ -729,7 +729,7 @@ static void handle_xevk_heartbeat (struct nn_xpack *xp, struct xevent *ev, ddsrt
     return;
   }
 
-#ifdef DDSI_INCLUDE_SECURITY
+#ifdef DDS_HAS_SECURITY
   if (wr->e.guid.entityid.u == NN_ENTITYID_P2P_BUILTIN_PARTICIPANT_VOLATILE_SECURE_WRITER)
   {
     send_heartbeat_to_all_readers(xp, ev, wr, tnow);
@@ -912,7 +912,7 @@ static bool resend_spdp_sample_by_guid_key (struct writer *wr, const ddsi_guid_t
   ddsi_plist_init_empty (&ps);
   ps.present |= PP_PARTICIPANT_GUID;
   ps.participant_guid = *guid;
-  struct ddsi_serdata *sd = ddsi_serdata_from_sample (gv->spdp_topic, SDK_KEY, &ps);
+  struct ddsi_serdata *sd = ddsi_serdata_from_sample (gv->spdp_type, SDK_KEY, &ps);
   ddsi_plist_fini (&ps);
   struct whc_borrowed_sample sample;
 
