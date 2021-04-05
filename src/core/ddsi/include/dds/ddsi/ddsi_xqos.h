@@ -12,6 +12,8 @@
 #ifndef DDSI_XQOS_H
 #define DDSI_XQOS_H
 
+#include "dds/features.h"
+
 #include "dds/ddsc/dds_public_qosdefs.h"
 /*XXX*/
 #include "dds/ddsi/q_protocol.h"
@@ -217,6 +219,15 @@ typedef struct dds_ignorelocal_qospolicy {
   dds_ignorelocal_kind_t value;
 } dds_ignorelocal_qospolicy_t;
 
+typedef struct dds_type_consistency_enforcement_qospolicy {
+  dds_type_consistency_kind_t kind;
+  bool ignore_sequence_bounds;
+  bool ignore_string_bounds;
+  bool ignore_member_names;
+  bool prevent_type_widening;
+  bool force_type_validation;
+} dds_type_consistency_enforcement_qospolicy_t;
+
 /***/
 
 /* Qos Present bit indices */
@@ -241,13 +252,15 @@ typedef struct dds_ignorelocal_qospolicy {
 #define QP_OWNERSHIP                         ((uint64_t)1 << 18)
 #define QP_OWNERSHIP_STRENGTH                ((uint64_t)1 << 19)
 #define QP_TIME_BASED_FILTER                 ((uint64_t)1 << 20)
-#define QP_ADLINK_WRITER_DATA_LIFECYCLE   ((uint64_t)1 << 21)
-#define QP_ADLINK_READER_DATA_LIFECYCLE   ((uint64_t)1 << 22)
-#define QP_ADLINK_READER_LIFESPAN         ((uint64_t)1 << 24)
-#define QP_ADLINK_SUBSCRIPTION_KEYS       ((uint64_t)1 << 25)
-#define QP_ADLINK_ENTITY_FACTORY          ((uint64_t)1 << 27)
+#define QP_ADLINK_WRITER_DATA_LIFECYCLE      ((uint64_t)1 << 21)
+#define QP_ADLINK_READER_DATA_LIFECYCLE      ((uint64_t)1 << 22)
+#define QP_ADLINK_READER_LIFESPAN            ((uint64_t)1 << 24)
+#define QP_ADLINK_SUBSCRIPTION_KEYS          ((uint64_t)1 << 25)
+#define QP_ADLINK_ENTITY_FACTORY             ((uint64_t)1 << 27)
 #define QP_CYCLONE_IGNORELOCAL               ((uint64_t)1 << 30)
 #define QP_PROPERTY_LIST                     ((uint64_t)1 << 31)
+#define QP_TYPE_CONSISTENCY_ENFORCEMENT      ((uint64_t)1 << 32)
+#define QP_CYCLONE_TYPE_INFORMATION          ((uint64_t)1 << 33)
 
 /* Partition QoS is not RxO according to the specification (DDS 1.2,
    section 7.1.3), but communication will not take place unless it
@@ -271,6 +284,9 @@ struct dds_qos {
   /*      Extras: */
   /* xx */char *topic_name;
   /* xx */char *type_name;
+#ifdef DDS_HAS_TYPE_DISCOVERY
+  /* xx */ddsi_octetseq_t type_information;
+#endif
   /*      PublisherQos, SubscriberQos: */
   /*xxx */dds_presentation_qospolicy_t presentation;
   /*xxx */dds_partition_qospolicy_t partition;
@@ -300,6 +316,7 @@ struct dds_qos {
   /*x xR*/dds_reader_lifespan_qospolicy_t reader_lifespan;
   /* x  */dds_ignorelocal_qospolicy_t ignorelocal;
   /*xxx */dds_property_qospolicy_t property;
+  /*xxxR*/dds_type_consistency_enforcement_qospolicy_t type_consistency;
 };
 
 struct nn_xmsg;
@@ -540,9 +557,9 @@ DDS_EXPORT bool ddsi_xqos_has_prop_prefix (const dds_qos_t *xqos, const char *na
  */
 DDS_EXPORT bool ddsi_xqos_find_prop (const dds_qos_t *xqos, const char *name, const char **value);
 
-#ifdef DDSI_INCLUDE_SECURITY
-struct omg_security_configuration_type;
-DDS_EXPORT void ddsi_xqos_mergein_security_config (dds_qos_t *xqos, const struct omg_security_configuration_type *cfg);
+#ifdef DDS_HAS_SECURITY
+struct ddsi_config_omg_security;
+DDS_EXPORT void ddsi_xqos_mergein_security_config (dds_qos_t *xqos, const struct ddsi_config_omg_security *cfg);
 #endif
 
 #if defined (__cplusplus)

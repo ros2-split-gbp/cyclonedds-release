@@ -13,6 +13,8 @@
 #define Q_ENTITY_H
 
 #include "dds/export.h"
+#include "dds/features.h"
+
 #include "dds/ddsrt/atomics.h"
 #include "dds/ddsrt/avl.h"
 #include "dds/ddsrt/fibheap.h"
@@ -26,8 +28,10 @@
 #include "dds/ddsi/q_inverse_uint32_set.h"
 #include "dds/ddsi/ddsi_serdata_default.h"
 #include "dds/ddsi/ddsi_handshake.h"
-
+#include "dds/ddsi/ddsi_typeid.h"
+#include "dds/ddsi/ddsi_typelookup.h"
 #include "dds/ddsi/ddsi_tran.h"
+#include "dds/ddsi/ddsi_list_genptr.h"
 
 #if defined (__cplusplus)
 extern "C" {
@@ -40,7 +44,7 @@ struct nn_dqueue;
 struct nn_rsample_info;
 struct nn_rdata;
 struct addrset;
-struct ddsi_sertopic;
+struct ddsi_sertype;
 struct whc;
 struct dds_qos;
 struct ddsi_plist;
@@ -57,6 +61,7 @@ typedef void (*ddsi2direct_directread_cb_t) (const struct nn_rsample_info *sampl
 enum entity_kind {
   EK_PARTICIPANT,
   EK_PROXY_PARTICIPANT,
+  EK_TOPIC,
   EK_WRITER,
   EK_PROXY_WRITER,
   EK_READER,
@@ -87,7 +92,7 @@ typedef void (*status_cb_t) (void *entity, const status_cb_data_t *data);
 struct prd_wr_match {
   ddsrt_avl_node_t avlnode;
   ddsi_guid_t wr_guid;
-#ifdef DDSI_INCLUDE_SECURITY
+#ifdef DDS_HAS_SECURITY
   int64_t crypto_handle;
 #endif
 };
@@ -97,11 +102,11 @@ struct rd_pwr_match {
   ddsi_guid_t pwr_guid;
   unsigned pwr_alive: 1; /* tracks pwr's alive state */
   uint32_t pwr_alive_vclock; /* used to ensure progress */
-#ifdef DDSI_INCLUDE_SSM
-  nn_locator_t ssm_mc_loc;
-  nn_locator_t ssm_src_loc;
+#ifdef DDS_HAS_SSM
+  ddsi_locator_t ssm_mc_loc;
+  ddsi_locator_t ssm_src_loc;
 #endif
-#ifdef DDSI_INCLUDE_SECURITY
+#ifdef DDS_HAS_SECURITY
   int64_t crypto_handle;
 #endif
 };
@@ -139,7 +144,7 @@ struct wr_prd_match {
   ddsrt_wctime_t hb_to_ack_latency_tlastlog;
   uint32_t non_responsive_count;
   uint32_t rexmit_requests;
-#ifdef DDSI_INCLUDE_SECURITY
+#ifdef DDS_HAS_SECURITY
   int64_t crypto_handle;
 #endif
 };
@@ -183,7 +188,7 @@ struct pwr_rd_match {
       struct nn_reorder *reorder; /* can be done (mostly) per proxy writer, but that is harder; only when state=OUT_OF_SYNC */
     } not_in_sync;
   } u;
-#ifdef DDSI_INCLUDE_SECURITY
+#ifdef DDS_HAS_SECURITY
   int64_t crypto_handle;
 #endif
 };
@@ -237,7 +242,7 @@ struct participant
   struct ddsi_plist *plist; /* settings/QoS for this participant */
   struct xevent *spdp_xevent; /* timed event for periodically publishing SPDP */
   struct xevent *pmd_update_xevent; /* timed event for periodically publishing ParticipantMessageData */
-  nn_locator_t m_locator;
+  ddsi_locator_t m_locator;
   ddsi_tran_conn_t m_conn;
   struct avail_entityid_set avail_entityids; /* available entity ids [e.lock] */
   ddsrt_mutex_t refc_lock;
@@ -247,15 +252,34 @@ struct participant
   ddsrt_fibheap_t ldur_auto_wr; /* Heap that contains lease duration for writers with automatic liveliness in this participant */
   ddsrt_atomic_voidp_t minl_man; /* clone of min(leaseheap_man) */
   ddsrt_fibheap_t leaseheap_man; /* keeps leases for this participant's writers (with liveliness manual-by-participant) */
-#ifdef DDSI_INCLUDE_SECURITY
+#ifdef DDS_HAS_SECURITY
   struct participant_sec_attributes *sec_attr;
   nn_security_info_t security_info;
 #endif
 };
 
+#ifdef DDS_HAS_TOPIC_DISCOVERY
+struct ddsi_topic_definition {
+  unsigned char key[16]; /* key for this topic definition (MD5 hash of the type_id and qos */
+  type_identifier_t type_id; /* type identifier for this topic */
+  struct dds_qos *xqos; /* contains also the topic name and type name */
+  uint32_t refc;
+  struct ddsi_domaingv *gv;
+};
+
+struct topic {
+  struct entity_common e;
+  struct ddsi_topic_definition *definition; /* ref to (shared) topic definition, protected by e.qos_lock */
+  struct participant *pp; /* backref to the participant */
+};
+#endif /* DDS_HAS_TOPIC_DISCOVERY */
+
 struct endpoint_common {
   struct participant *pp;
   ddsi_guid_t group_guid;
+#ifdef DDS_HAS_TYPE_DISCOVERY
+  type_identifier_t type_id;
+#endif
 };
 
 struct generic_endpoint { /* FIXME: currently only local endpoints; proxies use entity_common + proxy_endpoint common */
@@ -304,12 +328,12 @@ struct writer
   unsigned test_suppress_retransmit : 1; /* iff 1, the writer does not respond to retransmit requests */
   unsigned test_suppress_heartbeat : 1; /* iff 1, the writer suppresses all periodic heartbeats */
   unsigned test_drop_outgoing_data : 1; /* iff 1, the writer drops outgoing data, forcing the readers to request a retransmit */
-#ifdef DDSI_INCLUDE_SSM
+#ifdef DDS_HAS_SSM
   unsigned supports_ssm: 1;
   struct addrset *ssm_as;
 #endif
   uint32_t alive_vclock; /* virtual clock counting transitions between alive/not-alive */
-  const struct ddsi_sertopic * topic; /* topic */
+  const struct ddsi_sertype * type; /* type of the data written by this writer */
   struct addrset *as; /* set of addresses to publish to */
   struct addrset *as_group; /* alternate case, used for SPDP, when using Cloud with multiple bootstrap locators */
   struct xevent *heartbeat_xevent; /* timed event for "periodically" publishing heartbeats when unack'd data present, NULL <=> unreliable */
@@ -325,8 +349,8 @@ struct writer
   uint32_t num_reliable_readers; /* number of matching reliable PROXY readers */
   ddsrt_avl_tree_t readers; /* all matching PROXY readers, see struct wr_prd_match */
   ddsrt_avl_tree_t local_readers; /* all matching LOCAL readers, see struct wr_rd_match */
-#ifdef DDSI_INCLUDE_NETWORK_PARTITIONS
-  uint32_t partition_id;
+#ifdef DDS_HAS_NETWORK_PARTITIONS
+  const struct ddsi_config_networkpartition_listelem *network_partition;
 #endif
   uint32_t num_acks_received; /* cum received ACKNACKs with no request for retransmission */
   uint32_t num_nacks_received; /* cum received ACKNACKs that did request retransmission */
@@ -340,7 +364,7 @@ struct writer
   struct xeventq *evq; /* timed event queue to be used by this writer */
   struct local_reader_ary rdary; /* LOCAL readers for fast-pathing; if not fast-pathed, fall back to scanning local_readers */
   struct lease *lease; /* for liveliness administration (writer can only become inactive when using manual liveliness) */
-#ifdef DDSI_INCLUDE_SECURITY
+#ifdef DDS_HAS_SECURITY
   struct writer_sec_attributes *sec_attr;
 #endif
 };
@@ -367,23 +391,28 @@ struct reader
   struct dds_qos *xqos;
   unsigned reliable: 1; /* 1 iff reader is reliable */
   unsigned handle_as_transient_local: 1; /* 1 iff reader wants historical data from proxy writers */
-#ifdef DDSI_INCLUDE_SSM
+#ifdef DDS_HAS_SSM
   unsigned favours_ssm: 1; /* iff 1, this reader favours SSM */
 #endif
   nn_count_t init_acknack_count; /* initial value for "count" (i.e. ACK seq num) for newly matched proxy writers */
-#ifdef DDSI_INCLUDE_NETWORK_PARTITIONS
+#ifdef DDS_HAS_NETWORK_PARTITIONS
   struct addrset *as;
 #endif
-  const struct ddsi_sertopic * topic; /* topic */
+  const struct ddsi_sertype * type; /* type of the data read by this reader */
   uint32_t num_writers; /* total number of matching PROXY writers */
   ddsrt_avl_tree_t writers; /* all matching PROXY writers, see struct rd_pwr_match */
   ddsrt_avl_tree_t local_writers; /* all matching LOCAL writers, see struct rd_wr_match */
   ddsi2direct_directread_cb_t ddsi2direct_cb;
   void *ddsi2direct_cbarg;
-#ifdef DDSI_INCLUDE_SECURITY
+#ifdef DDS_HAS_SECURITY
   struct reader_sec_attributes *sec_attr;
 #endif
 };
+
+#ifdef DDS_HAS_TOPIC_DISCOVERY
+DDSI_LIST_GENERIC_PTR_TYPES(proxy_topic_list);
+DDSI_LIST_GENERIC_PTR_DECL(extern, proxy_topic_list, struct proxy_topic *, ddsrt_attribute_unused);
+#endif
 
 struct proxy_participant
 {
@@ -401,6 +430,9 @@ struct proxy_participant
   struct addrset *as_default; /* default address set to use for user data traffic */
   struct addrset *as_meta; /* default address set to use for discovery traffic */
   struct proxy_endpoint_common *endpoints; /* all proxy endpoints can be reached from here */
+#ifdef DDS_HAS_TOPIC_DISCOVERY
+  proxy_topic_list_t topics;
+#endif
   ddsrt_avl_tree_t groups; /* table of all groups (publisher, subscriber), see struct proxy_group */
   seqno_t seq; /* sequence number of most recent SPDP message */
   uint32_t receive_buffer_size; /* assumed size of receive buffer, used to limit bursts involving this proxypp */
@@ -411,11 +443,22 @@ struct proxy_participant
   unsigned deleting: 1;
   unsigned proxypp_have_spdp: 1;
   unsigned owns_lease: 1;
-#ifdef DDSI_INCLUDE_SECURITY
+#ifdef DDS_HAS_SECURITY
   nn_security_info_t security_info;
   struct proxy_participant_sec_attributes *sec_attr;
 #endif
 };
+
+#ifdef DDS_HAS_TOPIC_DISCOVERY
+struct proxy_topic
+{
+  ddsi_entityid_t entityid;
+  struct ddsi_topic_definition *definition; /* ref to (shared) topic definition */
+  ddsrt_wctime_t tupdate; /* timestamp of last update */
+  seqno_t seq; /* sequence number of most recent SEDP message */
+  unsigned deleted: 1;
+};
+#endif
 
 /* Representing proxy subscriber & publishers as "groups": until DDSI2
    gets a reason to care about these other than for the generation of
@@ -442,7 +485,11 @@ struct proxy_endpoint_common
   ddsi_guid_t group_guid; /* 0:0:0:0 if not available */
   nn_vendorid_t vendor; /* cached from proxypp->vendor */
   seqno_t seq; /* sequence number of most recent SEDP message */
-#ifdef DDSI_INCLUDE_SECURITY
+#ifdef DDS_HAS_TYPE_DISCOVERY
+  type_identifier_t type_id; /* type identifier for for type used by this proxy endpoint */
+  const struct ddsi_sertype * type; /* sertype for data this endpoint reads/writes */
+#endif
+#ifdef DDS_HAS_SECURITY
   nn_security_info_t security_info;
 #endif
 };
@@ -467,7 +514,7 @@ struct proxy_writer {
   unsigned local_matching_inprogress: 1; /* iff 1, we are still busy matching local readers; this is so we don't deliver incoming data to some but not all readers initially */
   unsigned alive: 1; /* iff 1, the proxy writer is alive (lease for this proxy writer is not expired); field may be modified only when holding both pwr->e.lock and pwr->c.proxypp->e.lock */
   unsigned filtered: 1; /* iff 1, builtin proxy writer uses content filter, which affects heartbeats and gaps. */
-#ifdef DDSI_INCLUDE_SSM
+#ifdef DDS_HAS_SSM
   unsigned supports_ssm: 1; /* iff 1, this proxy writer supports SSM */
 #endif
   uint32_t alive_vclock; /* virtual clock counting transitions between alive/not-alive */
@@ -489,7 +536,7 @@ struct proxy_reader {
   struct proxy_endpoint_common c;
   unsigned deleting: 1; /* set when being deleted */
   unsigned is_fict_trans_reader: 1; /* only true when it is certain that is a fictitious transient data reader (affects built-in topic generation) */
-#ifdef DDSI_INCLUDE_SSM
+#ifdef DDS_HAS_SSM
   unsigned favours_ssm: 1; /* iff 1, this proxy reader favours SSM when available */
 #endif
   ddsrt_avl_tree_t writers; /* matching LOCAL writers */
@@ -516,7 +563,9 @@ bool is_null_guid (const ddsi_guid_t *guid);
 ddsi_entityid_t to_entityid (unsigned u);
 int is_builtin_entityid (ddsi_entityid_t id, nn_vendorid_t vendorid);
 int is_builtin_endpoint (ddsi_entityid_t id, nn_vendorid_t vendorid);
+int is_builtin_topic (ddsi_entityid_t id, nn_vendorid_t vendorid);
 bool is_local_orphan_endpoint (const struct entity_common *e);
+int is_topic_entityid (ddsi_entityid_t id);
 int is_writer_entityid (ddsi_entityid_t id);
 int is_reader_entityid (ddsi_entityid_t id);
 int is_keyed_endpoint_entityid (ddsi_entityid_t id);
@@ -667,8 +716,8 @@ DDS_EXPORT struct writer *get_builtin_writer (const struct participant *pp, unsi
    GUID "ppguid". May return NULL if participant unknown or
    writer/reader already known. */
 
-dds_return_t new_writer (struct writer **wr_out, struct ddsi_guid *wrguid, const struct ddsi_guid *group_guid, struct participant *pp, const struct ddsi_sertopic *topic, const struct dds_qos *xqos, struct whc * whc, status_cb_t status_cb, void *status_cb_arg);
-dds_return_t new_reader (struct reader **rd_out, struct ddsi_guid *rdguid, const struct ddsi_guid *group_guid, struct participant *pp, const struct ddsi_sertopic *topic, const struct dds_qos *xqos, struct ddsi_rhc * rhc, status_cb_t status_cb, void *status_cb_arg);
+dds_return_t new_writer (struct writer **wr_out, struct ddsi_guid *wrguid, const struct ddsi_guid *group_guid, struct participant *pp, const char *topic_name, const struct ddsi_sertype *type, const struct dds_qos *xqos, struct whc * whc, status_cb_t status_cb, void *status_cb_arg);
+dds_return_t new_reader (struct reader **rd_out, struct ddsi_guid *rdguid, const struct ddsi_guid *group_guid, struct participant *pp, const char *topic_name, const struct ddsi_sertype *type, const struct dds_qos *xqos, struct ddsi_rhc * rhc, status_cb_t status_cb, void *status_cb_arg);
 
 void update_reader_qos (struct reader *rd, const struct dds_qos *xqos);
 void update_writer_qos (struct writer *wr, const struct dds_qos *xqos);
@@ -692,7 +741,7 @@ dds_return_t delete_reader (struct ddsi_domaingv *gv, const struct ddsi_guid *gu
 struct local_orphan_writer {
   struct writer wr;
 };
-struct local_orphan_writer *new_local_orphan_writer (struct ddsi_domaingv *gv, ddsi_entityid_t entityid, struct ddsi_sertopic *topic, const struct dds_qos *xqos, struct whc *whc);
+struct local_orphan_writer *new_local_orphan_writer (struct ddsi_domaingv *gv, ddsi_entityid_t entityid, const char *topic_name, struct ddsi_sertype *type, const struct dds_qos *xqos, struct whc *whc);
 void delete_local_orphan_writer (struct local_orphan_writer *wr);
 
 void writer_set_alive_may_unlock (struct writer *wr, bool notify);
@@ -727,14 +776,27 @@ int update_proxy_participant_plist_locked (struct proxy_participant *proxypp, se
 int update_proxy_participant_plist (struct proxy_participant *proxypp, seqno_t seq, const struct ddsi_plist *datap, ddsrt_wctime_t timestamp);
 void proxy_participant_reassign_lease (struct proxy_participant *proxypp, struct lease *newlease);
 
-void purge_proxy_participants (struct ddsi_domaingv *gv, const nn_locator_t *loc, bool delete_from_as_disc);
+void purge_proxy_participants (struct ddsi_domaingv *gv, const ddsi_locator_t *loc, bool delete_from_as_disc);
 
+#ifdef DDS_HAS_TOPIC_DISCOVERY
+dds_return_t ddsi_new_topic (struct topic **tp_out, struct ddsi_guid *tpguid, struct participant *pp, const char *topic_name, const struct ddsi_sertype *type, const struct dds_qos *xqos, bool is_builtin, bool *new_topic_def);
+void update_topic_qos (struct topic *tp, const dds_qos_t *xqos);
+dds_return_t delete_topic (struct ddsi_domaingv *gv, const struct ddsi_guid *guid);
+
+int topic_definition_equal (const struct ddsi_topic_definition *tpd_a, const struct ddsi_topic_definition *tpd_b);
+uint32_t topic_definition_hash (const struct ddsi_topic_definition *tpd);
+dds_return_t lookup_topic_definition_by_name (struct ddsi_domaingv *gv, const char * topic_name, struct ddsi_topic_definition **tpd);
+void new_proxy_topic (struct proxy_participant *proxypp, seqno_t seq, const ddsi_guid_t *guid, const type_identifier_t *type_id, struct dds_qos *qos, ddsrt_wctime_t timestamp);
+struct proxy_topic *lookup_proxy_topic (struct proxy_participant *proxypp, const ddsi_guid_t *guid);
+void update_proxy_topic (struct proxy_participant *proxypp, struct proxy_topic *proxytp, seqno_t seq, struct dds_qos *xqos, ddsrt_wctime_t timestamp);
+int delete_proxy_topic_locked (struct proxy_participant *proxypp, struct proxy_topic *proxytp, ddsrt_wctime_t timestamp);
+#endif
 
 /* To create a new proxy writer or reader; the proxy participant is
    determined from the GUID and must exist. */
-  int new_proxy_writer (struct ddsi_domaingv *gv, const struct ddsi_guid *ppguid, const struct ddsi_guid *guid, struct addrset *as, const struct ddsi_plist *plist, struct nn_dqueue *dqueue, struct xeventq *evq, ddsrt_wctime_t timestamp, seqno_t seq);
+int new_proxy_writer (struct ddsi_domaingv *gv, const struct ddsi_guid *ppguid, const struct ddsi_guid *guid, struct addrset *as, const struct ddsi_plist *plist, struct nn_dqueue *dqueue, struct xeventq *evq, ddsrt_wctime_t timestamp, seqno_t seq);
 int new_proxy_reader (struct ddsi_domaingv *gv, const struct ddsi_guid *ppguid, const struct ddsi_guid *guid, struct addrset *as, const struct ddsi_plist *plist, ddsrt_wctime_t timestamp, seqno_t seq
-#ifdef DDSI_INCLUDE_SSM
+#ifdef DDS_HAS_SSM
                       , int favours_ssm
 #endif
                       );
@@ -766,6 +828,8 @@ void local_reader_ary_setfastpath_ok (struct local_reader_ary *x, bool fastpath_
 
 void connect_writer_with_proxy_reader_secure(struct writer *wr, struct proxy_reader *prd, ddsrt_mtime_t tnow, int64_t crypto_handle);
 void connect_reader_with_proxy_writer_secure(struct reader *rd, struct proxy_writer *pwr, ddsrt_mtime_t tnow, int64_t crypto_handle);
+
+void update_proxy_endpoint_matching (const struct ddsi_domaingv *gv, struct generic_proxy_endpoint *proxy_ep);
 
 struct ddsi_writer_info;
 DDS_EXPORT void ddsi_make_writer_info(struct ddsi_writer_info *wrinfo, const struct entity_common *e, const struct dds_qos *xqos, uint32_t statusinfo);

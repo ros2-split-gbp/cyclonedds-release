@@ -39,7 +39,7 @@ struct dds_readcond;
 struct dds_guardcond;
 struct dds_statuscond;
 
-struct ddsi_sertopic;
+struct ddsi_sertype;
 struct ddsi_rhc;
 
 typedef uint16_t status_mask_t;
@@ -226,15 +226,21 @@ typedef struct dds_domain {
 
   ddsrt_avl_node_t m_node; /* for dds_global.m_domains */
   dds_domainid_t m_id;
-  struct cfgst *cfgst;
+  struct cfgst *cfgst; // NULL if config initializer provided
 
-  struct ddsi_sertopic *builtin_participant_topic;
-  struct ddsi_sertopic *builtin_reader_topic;
-  struct ddsi_sertopic *builtin_writer_topic;
+  struct ddsi_sertype *builtin_participant_type;
+#ifdef DDS_HAS_TOPIC_DISCOVERY
+  struct ddsi_sertype *builtin_topic_type;
+#endif
+  struct ddsi_sertype *builtin_reader_type;
+  struct ddsi_sertype *builtin_writer_type;
 
   struct local_orphan_writer *builtintopic_writer_participant;
   struct local_orphan_writer *builtintopic_writer_publications;
   struct local_orphan_writer *builtintopic_writer_subscriptions;
+#ifdef DDS_HAS_TOPIC_DISCOVERY
+  struct local_orphan_writer *builtintopic_writer_topics;
+#endif
 
   struct ddsi_builtin_topic_interface btif;
   struct ddsi_domaingv gv;
@@ -247,6 +253,17 @@ typedef struct dds_subscriber {
 typedef struct dds_publisher {
   struct dds_entity m_entity;
 } dds_publisher;
+
+
+#ifdef DDS_HAS_TOPIC_DISCOVERY
+/* type_id -> <topic guid, ddsi topic> mapping for ktopics */
+struct ktopic_type_guid {
+  type_identifier_t *type_id;
+  uint32_t refc;
+  ddsi_guid_t guid;
+  struct topic *tp;
+};
+#endif
 
 typedef struct dds_ktopic {
   /* name -> <type_name, QoS> mapping for topics, part of the participant
@@ -262,6 +279,9 @@ typedef struct dds_ktopic {
   dds_qos_t *qos;
   char *name; /* [constant] */
   char *type_name; /* [constant] */
+#ifdef DDS_HAS_TOPIC_DISCOVERY
+  struct ddsrt_hh *topic_guid_map; /* mapping of this ktopic to ddsi topics */
+#endif
 } dds_ktopic;
 
 typedef struct dds_participant {
@@ -279,6 +299,7 @@ typedef struct dds_reader {
   bool m_loan_out;
   void *m_loan;
   uint32_t m_loan_size;
+  unsigned m_wrapped_sertopic : 1; /* set iff reader's topic is a wrapped ddsi_sertopic for backwards compatibility */
 
   /* Status metrics */
 
@@ -308,15 +329,11 @@ typedef struct dds_writer {
 
 typedef struct dds_topic {
   struct dds_entity m_entity;
-  struct ddsi_sertopic *m_stopic;
+  char *m_name;
+  struct ddsi_sertype *m_stype;
   struct dds_ktopic *m_ktopic; /* refc'd, constant */
-
-  dds_topic_filter_arg_fn filter_fn;
-  void *filter_ctx;
-
-  /* Status metrics */
-
-  dds_inconsistent_topic_status_t m_inconsistent_topic_status;
+  struct dds_topic_filter m_filter;
+  dds_inconsistent_topic_status_t m_inconsistent_topic_status; /* Status metrics */
 } dds_topic;
 
 typedef uint32_t dds_querycond_mask_t;

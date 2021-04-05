@@ -2,7 +2,9 @@
 #define DDSRT_WINDOWS_SOCKET_H
 
 #include <winsock2.h>
+#include <mswsock.h> // Required for MSG_TRUNC when compiling with mingw-w64.
 #include <ws2tcpip.h>
+#include "dds/ddsrt/iovec.h"
 
 #if defined(__cplusplus)
 extern "C" {
@@ -28,13 +30,13 @@ typedef SOCKET ddsrt_socket_t;
 
 #define IFF_POINTOPOINT IFF_POINTTOPOINT
 
-typedef unsigned ddsrt_iov_len_t;
-typedef struct ddsrt_iovec {
-  ddsrt_iov_len_t iov_len;
-  void *iov_base;
-} ddsrt_iovec_t;
-
-typedef DWORD ddsrt_msg_iovlen_t;
+// Required when compiling with mingw-w64.
+#ifndef MCAST_JOIN_SOURCE_GROUP
+#define MCAST_JOIN_SOURCE_GROUP 45
+#endif
+#ifndef MCAST_LEAVE_SOURCE_GROUP
+#define MCAST_LEAVE_SOURCE_GROUP 46
+#endif
 
 typedef struct ddsrt_msghdr {
   void *msg_name;

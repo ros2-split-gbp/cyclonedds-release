@@ -33,7 +33,7 @@
 #include "dds/ddsc/dds_rhc.h"
 #include "dds__rhc_default.h"
 #include "dds/ddsi/ddsi_iid.h"
-#ifdef DDSI_INCLUDE_LIFESPAN
+#ifdef DDS_HAS_LIFESPAN
 #include "dds/ddsi/ddsi_lifespan.h"
 #endif
 
@@ -47,7 +47,7 @@
 
 static ddsrt_prng_t prng;
 
-static struct ddsi_sertopic *mdtopic;
+static struct ddsi_sertype *mdtype;
 static struct thread_state1 *mainthread;
 static dds_time_t tref_dds;
 static uint32_t seq;
@@ -73,7 +73,7 @@ static char *print_tstamp (char *buf, size_t sz, dds_time_t t)
   if (d / 1000000000 != 0)
     pos += (size_t) snprintf (buf + pos, sz - pos, "%+ds", (int) (d / 1000000000));
   if (d % 1000000000 != 0)
-	(void) snprintf (buf + pos, sz - pos, "%+dns", (int) (d % 1000000000));
+        (void) snprintf (buf + pos, sz - pos, "%+dns", (int) (d % 1000000000));
   return buf;
 }
 
@@ -92,7 +92,7 @@ static int64_t dds_time_uniq (void)
 static struct ddsi_serdata *mksample (int32_t keyval, unsigned statusinfo)
 {
   RhcTypes_T d = { keyval, "A", (int32_t) ++seq, 0, "B" };
-  struct ddsi_serdata *sd = ddsi_serdata_from_sample (mdtopic, SDK_DATA, &d);
+  struct ddsi_serdata *sd = ddsi_serdata_from_sample (mdtype, SDK_DATA, &d);
   sd->statusinfo = statusinfo;
   sd->timestamp.v = dds_time_uniq ();
   return sd;
@@ -101,13 +101,13 @@ static struct ddsi_serdata *mksample (int32_t keyval, unsigned statusinfo)
 static struct ddsi_serdata *mkkeysample (int32_t keyval, unsigned statusinfo)
 {
   RhcTypes_T d = { keyval, "A", 0, 0, "B" };
-  struct ddsi_serdata *sd = ddsi_serdata_from_sample (mdtopic, SDK_KEY, &d);
+  struct ddsi_serdata *sd = ddsi_serdata_from_sample (mdtype, SDK_KEY, &d);
   sd->statusinfo = statusinfo;
   sd->timestamp.v = dds_time_uniq ();
   return sd;
 }
 
-#if defined(DDSI_INCLUDE_LIFESPAN) || defined (DDSI_INCLUDE_DEADLINE_MISSED)
+#if defined(DDS_HAS_LIFESPAN) || defined (DDS_HAS_DEADLINE_MISSED)
 static ddsrt_mtime_t rand_texp ()
 {
   ddsrt_mtime_t ret = ddsrt_time_monotonic();
@@ -116,7 +116,7 @@ static ddsrt_mtime_t rand_texp ()
 }
 #endif
 
-#ifdef DDSI_INCLUDE_DEADLINE_MISSED
+#ifdef DDS_HAS_DEADLINE_MISSED
 static dds_duration_t rand_deadline ()
 {
   return (dds_duration_t) (ddsrt_prng_random (&prng) % DDS_MSECS(500));
@@ -125,7 +125,7 @@ static dds_duration_t rand_deadline ()
 
 static uint64_t store (struct ddsi_tkmap *tkmap, struct dds_rhc *rhc, struct proxy_writer *wr, struct ddsi_serdata *sd, bool print, bool lifespan_expiry)
 {
-#ifndef DDSI_INCLUDE_LIFESPAN
+#ifndef DDS_HAS_LIFESPAN
   DDSRT_UNUSED_ARG (lifespan_expiry);
 #endif
   /* beware: unrefs sd */
@@ -148,13 +148,13 @@ static uint64_t store (struct ddsi_tkmap *tkmap, struct dds_rhc *rhc, struct pro
       printf ("STORE %c%c %16"PRIx64" %16"PRIx64" %2"PRId32" %6s %s\n", si_u, si_d, iid, wr->e.iid, d.k, "_", buf);
     else
       printf ("STORE %c%c %16"PRIx64" %16"PRIx64" %2"PRId32" %6"PRIu32" %s\n", si_u, si_d, iid, wr->e.iid, d.k, d.x, buf);
-    ddsi_sertopic_free_sample (sd->topic, &d, DDS_FREE_CONTENTS);
+    ddsi_sertype_free_sample (sd->type, &d, DDS_FREE_CONTENTS);
   }
   pwr_info.auto_dispose = wr->c.xqos->writer_data_lifecycle.autodispose_unregistered_instances;
   pwr_info.guid = wr->e.guid;
   pwr_info.iid = wr->e.iid;
   pwr_info.ownership_strength = wr->c.xqos->ownership_strength.value;
-#ifdef DDSI_INCLUDE_LIFESPAN
+#ifdef DDS_HAS_LIFESPAN
   if (lifespan_expiry && (sd->statusinfo & (NN_STATUSINFO_UNREGISTER | NN_STATUSINFO_DISPOSE)) == 0)
     pwr_info.lifespan_exp = rand_texp();
   else
@@ -202,7 +202,7 @@ static struct dds_rhc *mkrhc (struct ddsi_domaingv *gv, dds_reader *rd, dds_hist
   rqos.destination_order.kind = dok;
   ddsi_xqos_mergein_missing (&rqos, &gv->default_xqos_rd, ~(uint64_t)0);
   thread_state_awake_domain_ok (lookup_thread_state ());
-  rhc = dds_rhc_default_new_xchecks (rd, gv, mdtopic, true);
+  rhc = dds_rhc_default_new_xchecks (rd, gv, mdtype, true);
   dds_rhc_set_qos(rhc, &rqos);
   thread_state_asleep (lookup_thread_state ());
   return rhc;
@@ -311,7 +311,7 @@ static void print_seq (int n, const dds_sample_info_t *iseq, const RhcTypes_T *m
   }
 }
 
-static void rdtkcond (struct dds_rhc *rhc, dds_readcond *cond, const struct check *chk, bool print, int max, const char *opname, int (*op) (struct dds_rhc *rhc, bool lock, void **values, dds_sample_info_t *info_seq, uint32_t max_samples, uint32_t mask, dds_instance_handle_t handle, dds_readcond *cond), uint32_t states_seen[STATIC_ARRAY_DIM 2*2*3][2])
+static void rdtkcond (struct dds_rhc *rhc, dds_readcond *cond, const struct check *chk, bool print, int max, const char *opname, int32_t (*op) (struct dds_rhc *rhc, bool lock, void **values, dds_sample_info_t *info_seq, uint32_t max_samples, uint32_t mask, dds_instance_handle_t handle, dds_readcond *cond), uint32_t states_seen[STATIC_ARRAY_DIM 2*2*3][2])
 {
   int cnt;
 
@@ -576,7 +576,7 @@ static void test_conditions (dds_entity_t pp, dds_entity_t tp, const int count, 
   dds_qos_t *qos = dds_create_qos ();
   dds_qset_history (qos, DDS_HISTORY_KEEP_LAST, MAX_HIST_DEPTH);
   dds_qset_destination_order (qos, DDS_DESTINATIONORDER_BY_SOURCE_TIMESTAMP);
-#ifdef DDSI_INCLUDE_DEADLINE_MISSED
+#ifdef DDS_HAS_DEADLINE_MISSED
   dds_qset_deadline (qos, rand_deadline());
 #endif
   /* two identical readers because we need 63 conditions while we can currently only attach 32 a single reader */
@@ -699,12 +699,12 @@ static void test_conditions (dds_entity_t pp, dds_entity_t tp, const int count, 
     [9]  = 30,  /* take cond */
     [10] = 100, /* take cond, max 1 */
     [11] = 1,   /* unreg writer */
-#ifdef DDSI_INCLUDE_LIFESPAN
+#ifdef DDS_HAS_LIFESPAN
     [12] = 100, /* drop expired sample */
 #else
     [12] = 0,   /* drop expired sample */
 #endif
-#ifdef DDSI_INCLUDE_DEADLINE_MISSED
+#ifdef DDS_HAS_DEADLINE_MISSED
     [13] = 100  /* deadline missed */
 #else
     [13] = 0    /* drop expired sample */
@@ -830,7 +830,7 @@ static void test_conditions (dds_entity_t pp, dds_entity_t tp, const int count, 
         wr_info.guid = wr[which]->e.guid;
         wr_info.iid = wr[which]->e.iid;
         wr_info.ownership_strength = wr[which]->c.xqos->ownership_strength.value;
-#ifdef DDSI_INCLUDE_LIFESPAN
+#ifdef DDS_HAS_LIFESPAN
         wr_info.lifespan_exp = DDSRT_MTIME_NEVER;
 #endif
         for (size_t k = 0; k < nrd; k++)
@@ -839,7 +839,7 @@ static void test_conditions (dds_entity_t pp, dds_entity_t tp, const int count, 
         break;
       }
       case 12: {
-#ifdef DDSI_INCLUDE_LIFESPAN
+#ifdef DDS_HAS_LIFESPAN
         thread_state_awake_domain_ok (lookup_thread_state ());
         /* We can assume that rhc[k] is a dds_rhc_default at this point */
         for (size_t k = 0; k < nrd; k++)
@@ -849,7 +849,7 @@ static void test_conditions (dds_entity_t pp, dds_entity_t tp, const int count, 
         break;
       }
       case 13: {
-#ifdef DDSI_INCLUDE_DEADLINE_MISSED
+#ifdef DDS_HAS_DEADLINE_MISSED
         thread_state_awake_domain_ok (lookup_thread_state ());
         /* We can assume that rhc[k] is a dds_rhc_default at this point */
         for (size_t k = 0; k < nrd; k++)
@@ -935,7 +935,7 @@ int main (int argc, char **argv)
   {
     struct dds_topic *x;
     if (dds_topic_pin (tp, &x) < 0) abort();
-    mdtopic = ddsi_sertopic_ref (x->m_stopic);
+    mdtype = ddsi_sertype_ref (x->m_stype);
     dds_topic_unpin (x);
   }
 
@@ -995,7 +995,7 @@ int main (int argc, char **argv)
     wr0_info.guid = wr0->e.guid;
     wr0_info.iid = wr0->e.iid;
     wr0_info.ownership_strength = wr0->c.xqos->ownership_strength.value;
-#ifdef DDSI_INCLUDE_LIFESPAN
+#ifdef DDS_HAS_LIFESPAN
     wr0_info.lifespan_exp = DDSRT_MTIME_NEVER;
 #endif
     dds_rhc_unregister_wr (rhc, &wr0_info);
@@ -1108,7 +1108,7 @@ int main (int argc, char **argv)
   for (size_t i = 0; i < sizeof (rres_iseq) / sizeof (rres_iseq[0]); i++)
     RhcTypes_T_free (&rres_mseq[i], DDS_FREE_CONTENTS);
 
-  ddsi_sertopic_unref (mdtopic);
+  ddsi_sertype_unref (mdtype);
   dds_delete(pp);
   return 0;
 }
