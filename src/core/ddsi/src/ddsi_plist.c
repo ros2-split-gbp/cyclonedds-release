@@ -1760,12 +1760,18 @@ static const struct piddesc piddesc_eclipse[] = {
 #ifdef DDS_HAS_TYPE_DISCOVERY
   QP  (CYCLONE_TYPE_INFORMATION,         type_information, XO),
 #endif
+#ifdef DDS_HAS_SHM
+    { PID_PAD, PDF_QOS, QP_SHARED_MEMORY, "CYCLONE_SHARED_MEMORY",
+    offsetof(struct ddsi_plist, qos.shared_memory), membersize(struct ddsi_plist, qos.shared_memory),
+    {.desc = { Xb, XSTOP } }, 0 },
+#endif
 #ifdef DDS_HAS_TOPIC_DISCOVERY
   PP  (CYCLONE_TOPIC_GUID,               topic_guid, XG),
 #endif
   PP  (ADLINK_PARTICIPANT_VERSION_INFO,  adlink_participant_version_info, Xux5, XS),
   PP  (ADLINK_TYPE_DESCRIPTION,          type_description, XS),
   PP  (CYCLONE_RECEIVE_BUFFER_SIZE,      cyclone_receive_buffer_size, Xu),
+  PP  (CYCLONE_REQUESTS_KEYHASH,         cyclone_requests_keyhash, Xb),
   { PID_SENTINEL, 0, 0, NULL, 0, 0, { .desc = { XSTOP } }, 0 }
 };
 
@@ -1836,13 +1842,7 @@ struct piddesc_index {
 #endif
 
 static const struct piddesc *piddesc_omg_index[DEFAULT_OMG_PIDS_ARRAY_SIZE + SECURITY_OMG_PIDS_ARRAY_SIZE];
-#ifdef DDS_HAS_TOPIC_DISCOVERY
-static const struct piddesc *piddesc_eclipse_index[28];
-#elif DDS_HAS_TYPE_DISCOVERY
-static const struct piddesc *piddesc_eclipse_index[27];
-#else
-static const struct piddesc *piddesc_eclipse_index[26];
-#endif
+static const struct piddesc *piddesc_eclipse_index[29];
 static const struct piddesc *piddesc_adlink_index[19];
 
 #define INDEX_ANY(vendorid_, tab_) [vendorid_] = { \
@@ -2524,6 +2524,11 @@ static enum do_locator_result do_locator (nn_locators_t *ls, uint64_t present, u
           return DOLOC_INVALID;
       }
       break;
+#ifdef DDS_HAS_SHM
+    // SHM_TODO: Maybe we can check address here.
+    case NN_LOCATOR_KIND_SHEM:
+      break;
+#endif
     case NN_LOCATOR_KIND_INVALID:
       if (!locator_address_zero (&loc))
         return DOLOC_INVALID;
@@ -3067,7 +3072,7 @@ dds_return_t ddsi_plist_findparam_checking (const void *buf, size_t bufsz, uint1
   return DDS_RETCODE_BAD_PARAMETER;
 }
 
-unsigned char *ddsi_plist_quickscan (struct nn_rsample_info *dest, const ddsi_plist_src_t *src)
+unsigned char *ddsi_plist_quickscan (struct nn_rsample_info *dest, const ddsi_keyhash_t **keyhashp, const ddsi_plist_src_t *src)
 {
   /* Sets a few fields in dest, returns address of first byte
      following parameter list, or NULL on error.  Most errors will go
@@ -3075,6 +3080,7 @@ unsigned char *ddsi_plist_quickscan (struct nn_rsample_info *dest, const ddsi_pl
   const unsigned char *pl;
   dest->statusinfo = 0;
   dest->complex_qos = 0;
+  *keyhashp = NULL;
   switch (src->encoding)
   {
     case PL_CDR_LE:
@@ -3142,6 +3148,16 @@ unsigned char *ddsi_plist_quickscan (struct nn_rsample_info *dest, const ddsi_pl
         }
         break;
       case PID_KEYHASH:
+        if (length < sizeof (ddsi_keyhash_t))
+        {
+          DDS_CTRACE (src->logconfig, "plist(vendor %u.%u): quickscan(PID_KEYHASH): buffer too small\n",
+                      src->vendorid.id[0], src->vendorid.id[1]);
+          return NULL;
+        }
+        else
+        {
+          *keyhashp = (const ddsi_keyhash_t *) pl;
+        }
         break;
       default:
         DDS_CLOG (DDS_LC_PLIST, src->logconfig, "(pid=%"PRIx16" complex_qos=1)", pid);
