@@ -68,6 +68,13 @@
 
 #include "dds/ddsi/ddsi_security_omg.h"
 
+#ifdef DDS_HAS_SHM
+#include "dds/ddsrt/io.h"
+#include "dds/ddsi/shm_sync.h"
+#include "iceoryx_binding_c/runtime.h"
+#include "dds/ddsi/shm_init.h"
+#endif
+
 static void add_peer_addresses (const struct ddsi_domaingv *gv, struct addrset *as, const struct ddsi_config_peer_listelem *list)
 {
   while (list)
@@ -1161,6 +1168,38 @@ int rtps_init (struct ddsi_domaingv *gv)
     GVLOG (DDS_LC_CONFIG, "No network interface selected\n");
     goto err_find_own_ip;
   }
+
+#ifdef DDS_HAS_SHM
+  //ICEORYX_TODO: refactor this into separate function/module!
+  if (gv->config.enable_shm)
+  {
+    shm_set_loglevel(gv->config.shm_log_lvl);
+    char str[128];
+    char *sptr = str;
+    unsigned char mac_addr[6];
+    uint32_t pid = (uint32_t) ddsrt_getpid ();
+
+    ddsrt_asprintf (&sptr, "iceoryx_rt_%d_%ld", pid, gv->tstart.v);
+    GVLOG (DDS_LC_SHM, "Current process name for iceoryx is %s\n", sptr);
+    iox_runtime_init (sptr);
+
+    gv->loc_iceoryx_addr.tran = NULL;
+    gv->loc_iceoryx_addr.kind = NN_LOCATOR_KIND_SHEM;
+    gv->loc_iceoryx_addr.port = pid;
+    if (ddsrt_eth_get_mac_addr (gv->interfaces[gv->selected_interface].name, mac_addr))
+    {
+      GVLOG (DDS_LC_SHM, "Unable to get MAC address for iceoryx\n");
+      goto err_find_own_ip;
+    }
+    ddsrt_asprintf (&sptr, "%02x%02x%02x%02x%02x%02x", *mac_addr, *(mac_addr+1), *(mac_addr+2), *(mac_addr+3), *(mac_addr+4), *(mac_addr+5));
+    GVLOG (DDS_LC_SHM, "My iceoryx address: %s, Port: %d\n", sptr, pid);
+    memset ((char *) gv->loc_iceoryx_addr.address, 0, sizeof (gv->loc_iceoryx_addr.address));
+    ddsrt_strlcpy ((char *) gv->loc_iceoryx_addr.address, sptr, strlen (sptr));
+
+    shm_mutex_init();
+  }
+#endif
+
   if (gv->config.allowMulticast)
   {
     if (!gv->interfaces[gv->selected_interface].mc_capable)
@@ -1593,11 +1632,9 @@ int rtps_init (struct ddsi_domaingv *gv)
 
   ddsrt_atomic_st32 (&gv->rtps_keepgoing, 1);
 
-  if (gv->config.xpack_send_async)
-  {
-    nn_xpack_sendq_init (gv);
-    nn_xpack_sendq_start (gv);
-  }
+  // sendq thread is started if a DW is created with non-zero latency
+  gv->sendq_running = false;
+  ddsrt_mutex_init (&gv->sendq_running_lock);
 
   gv->builtins_dqueue = nn_dqueue_new ("builtins", gv, gv->config.delivery_queue_maxsamples, builtins_dqueue_handler, NULL);
 #ifdef DDS_HAS_NETWORK_CHANNELS
@@ -1950,11 +1987,14 @@ void rtps_fini (struct ddsi_domaingv *gv)
 
   xeventq_free (gv->xevents);
 
-  if (gv->config.xpack_send_async)
+  // if sendq thread is started
+  ddsrt_mutex_lock (&gv->sendq_running_lock);
+  if (gv->sendq_running)
   {
     nn_xpack_sendq_stop (gv);
     nn_xpack_sendq_fini (gv);
   }
+  ddsrt_mutex_unlock (&gv->sendq_running_lock);
 
 #ifdef DDS_HAS_NETWORK_CHANNELS
   chptr = gv->config.channels;

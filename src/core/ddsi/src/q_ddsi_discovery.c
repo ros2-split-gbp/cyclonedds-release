@@ -69,6 +69,17 @@ static int get_locator (const struct ddsi_domaingv *gv, ddsi_locator_t *loc, con
   {
     for (l = locs->first; l != NULL; l = l->next)
     {
+#ifdef DDS_HAS_SHM
+      if (gv->config.enable_shm)
+      {
+        if (l->loc.kind == NN_LOCATOR_KIND_SHEM && memcmp (gv->loc_iceoryx_addr.address, l->loc.address, sizeof (gv->loc_iceoryx_addr.address)) == 0)
+        {
+          *loc = l->loc;
+          GVLOG (DDS_LC_SHM, "There is an iceoryx process in the same machine.\n");
+          return 1;
+        }
+      }
+#endif
       if (l->loc.kind == NN_LOCATOR_KIND_UDPv4MCGEN)
       {
         *loc = l->loc;
@@ -257,10 +268,10 @@ void get_participant_builtin_topic_data (const struct participant *pp, ddsi_plis
       dst->aliased |= PP_DEFAULT_MULTICAST_LOCATOR | PP_METATRAFFIC_MULTICAST_LOCATOR;
       dst->default_multicast_locators.n = 1;
       dst->default_multicast_locators.first =
-      dst->default_multicast_locators.last = &locs->def_multi_loc_one;
+        dst->default_multicast_locators.last = &locs->def_multi_loc_one;
       dst->metatraffic_multicast_locators.n = 1;
       dst->metatraffic_multicast_locators.first =
-      dst->metatraffic_multicast_locators.last = &locs->meta_multi_loc_one;
+        dst->metatraffic_multicast_locators.last = &locs->meta_multi_loc_one;
       locs->def_multi_loc_one.next = NULL;
       locs->def_multi_loc_one.loc = pp->e.gv->loc_default_mc;
       locs->meta_multi_loc_one.next = NULL;
@@ -885,6 +896,33 @@ static void add_locator_to_ps (const ddsi_locator_t *loc, void *varg)
   locs->last = elem;
 }
 
+#ifdef DDS_HAS_SHM
+static void add_iox_locator_to_ps(const ddsi_locator_t* loc, struct add_locator_to_ps_arg *arg)
+{
+  struct nn_locators_one* elem = ddsrt_malloc(sizeof(struct nn_locators_one));
+  struct nn_locators* locs = &arg->ps->unicast_locators;
+  unsigned present_flag = PP_UNICAST_LOCATOR;
+
+  elem->loc = *loc;
+  elem->next = NULL;
+
+  if (!(arg->ps->present & present_flag))
+  {
+    locs->n = 0;
+    locs->first = locs->last = NULL;
+    arg->ps->present |= present_flag;
+  }
+
+  //add iceoryx to the FRONT of the list of addresses, to indicate its higher priority
+  if (locs->first)
+    elem->next = locs->first;
+  else
+    locs->last = elem;
+  locs->first = elem;
+  locs->n++;
+}
+#endif
+
 /******************************************************************************
  ***
  *** SEDP
@@ -965,6 +1003,17 @@ static int sedp_write_endpoint_impl
       ps.group_guid = epcommon->group_guid;
     }
 
+    if (!is_writer_entityid (guid->entityid))
+    {
+      const struct reader *rd = entidx_lookup_reader_guid (gv->entity_index, guid);
+      assert (rd);
+      if (rd->request_keyhash)
+      {
+        ps.present |= PP_CYCLONE_REQUESTS_KEYHASH;
+        ps.cyclone_requests_keyhash = 1u;
+      }
+    }
+
 #ifdef DDS_HAS_SSM
     /* A bit of a hack -- the easy alternative would be to make it yet
     another parameter.  We only set "reader favours SSM" if we
@@ -986,13 +1035,30 @@ static int sedp_write_endpoint_impl
     if (gv->config.explicitly_publish_qos_set_to_default)
       qosdiff |= ~QP_UNRECOGNIZED_INCOMPATIBLE_MASK;
 
+    struct add_locator_to_ps_arg arg;
+    arg.gv = gv;
+    arg.ps = &ps;
     if (as)
-    {
-      struct add_locator_to_ps_arg arg;
-      arg.gv = gv;
-      arg.ps = &ps;
       addrset_forall (as, add_locator_to_ps, &arg);
+
+#ifdef DDS_HAS_SHM
+    if ((xqos->present & QP_SHARED_MEMORY) == QP_SHARED_MEMORY &&
+      xqos->shared_memory.enabled)
+    {
+      if (0 == arg.ps->unicast_locators.n)
+      {
+        if (epcommon->pp->e.gv->config.many_sockets_mode == DDSI_MSM_MANY_UNICAST)
+          add_locator_to_ps(&epcommon->pp->m_locator, &arg);
+        else
+          add_locator_to_ps(&epcommon->pp->e.gv->loc_default_uc, &arg);
+      }
+
+      if (0 == arg.ps->multicast_locators.n)
+        add_locator_to_ps(&epcommon->pp->e.gv->loc_default_mc, &arg);
+
+      add_iox_locator_to_ps(&gv->loc_iceoryx_addr, &arg);
     }
+#endif
 
 #ifdef DDS_HAS_TYPE_DISCOVERY
     ps.qos.present |= QP_CYCLONE_TYPE_INFORMATION;

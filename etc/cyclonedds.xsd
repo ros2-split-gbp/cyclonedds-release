@@ -505,7 +505,6 @@ CycloneDDS configuration</xs:documentation>
         <xs:element minOccurs="0" ref="config:SPDPResponseMaxDelay"/>
         <xs:element minOccurs="0" ref="config:ScheduleTimeRounding"/>
         <xs:element minOccurs="0" ref="config:SecondaryReorderMaxSamples"/>
-        <xs:element minOccurs="0" ref="config:SendAsync"/>
         <xs:element minOccurs="0" ref="config:SquashParticipants"/>
         <xs:element minOccurs="0" ref="config:SynchronousDeliveryLatencyBound"/>
         <xs:element minOccurs="0" ref="config:SynchronousDeliveryPriorityThreshold"/>
@@ -928,13 +927,6 @@ CycloneDDS configuration</xs:documentation>
       <xs:documentation>
 &lt;p&gt;This element sets the maximum size in samples of a secondary re-order administration. The secondary re-order administration is per reader in need of historical data.&lt;/p&gt;
 &lt;p&gt;The default value is: "128".&lt;/p&gt;</xs:documentation>
-    </xs:annotation>
-  </xs:element>
-  <xs:element name="SendAsync" type="xs:boolean">
-    <xs:annotation>
-      <xs:documentation>
-&lt;p&gt;This element controls whether the actual sending of packets occurs on the same thread that prepares them, or is done asynchronously by another thread.&lt;/p&gt;
-&lt;p&gt;The default value is: "false".&lt;/p&gt;</xs:documentation>
     </xs:annotation>
   </xs:element>
   <xs:element name="SquashParticipants" type="xs:boolean">
@@ -1730,7 +1722,7 @@ MIIEpAIBAAKCAQEA3HIh...AOBaaqSV37XBUJg==&lt;br&gt;
     </xs:annotation>
     <xs:simpleType>
       <xs:restriction base="xs:token">
-        <xs:pattern value="((fatal|error|warning|info|config|discovery|data|radmin|timing|traffic|topic|tcp|plist|whc|throttle|rhc|content|trace)(,(fatal|error|warning|info|config|discovery|data|radmin|timing|traffic|topic|tcp|plist|whc|throttle|rhc|content|trace))*)|"/>
+        <xs:pattern value="((fatal|error|warning|info|config|discovery|data|radmin|timing|traffic|topic|tcp|plist|whc|throttle|rhc|content|shm|trace)(,(fatal|error|warning|info|config|discovery|data|radmin|timing|traffic|topic|tcp|plist|whc|throttle|rhc|content|shm|trace))*)|"/>
       </xs:restriction>
     </xs:simpleType>
   </xs:element>
