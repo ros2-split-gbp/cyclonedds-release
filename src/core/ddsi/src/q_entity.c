@@ -53,6 +53,7 @@
 #include "dds/ddsi/ddsi_security_omg.h"
 #include "dds/ddsi/ddsi_typelookup.h"
 #include "dds/ddsi/ddsi_list_tmpl.h"
+#include "dds/ddsi/ddsi_builtin_topic_if.h"
 
 #ifdef DDS_HAS_SECURITY
 #include "dds/ddsi/ddsi_security_msg.h"
@@ -1056,6 +1057,13 @@ dds_return_t new_participant_guid (ddsi_guid_t *ppguid, struct ddsi_domaingv *gv
   if ((ret = q_omg_security_check_create_participant (pp, gv->config.domainId)) != DDS_RETCODE_OK)
     goto not_allowed;
   *ppguid = pp->e.guid;
+  // FIXME: Adjusting the GUID and then fixing up the GUID -> iid mapping here is an ugly hack
+  if (pp->e.tk)
+  {
+    ddsi_tkmap_instance_unref (gv->m_tkmap, pp->e.tk);
+    pp->e.tk = builtintopic_get_tkmap_entry (gv->builtin_topic_interface, &pp->e.guid);
+    pp->e.iid = pp->e.tk->m_iid;
+ }
 #else
   if (ddsi_xqos_has_prop_prefix (&pp->plist->qos, "dds.sec."))
   {
@@ -2031,6 +2039,7 @@ static void writer_drop_connection (const struct ddsi_guid *wr_guid, const struc
       remove_acked_messages (wr, &whcst, &deferred_free_list);
       wr->num_readers--;
       wr->num_reliable_readers -= m->is_reliable;
+      wr->num_readers_requesting_keyhash -= prd->requests_keyhash ? 1 : 0;
     }
 
     ddsrt_mutex_unlock (&wr->e.lock);
@@ -2377,7 +2386,11 @@ static void writer_add_connection (struct writer *wr, struct proxy_reader *prd, 
   m->t_nackfrag_accepted.v = 0;
 
   ddsrt_mutex_lock (&wr->e.lock);
+#ifdef DDS_HAS_SHM
+  if (pretend_everything_acked || prd->c.proxypp->is_iceoryx)
+#else
   if (pretend_everything_acked)
+#endif
     m->seq = MAX_SEQ_NUMBER;
   else
     m->seq = wr->seq;
@@ -2398,6 +2411,7 @@ static void writer_add_connection (struct writer *wr, struct proxy_reader *prd, 
     rebuild_writer_addrset (wr);
     wr->num_readers++;
     wr->num_reliable_readers += m->is_reliable;
+    wr->num_readers_requesting_keyhash += prd->requests_keyhash ? 1 : 0;
     ddsrt_mutex_unlock (&wr->e.lock);
 
     if (wr->status_cb)
@@ -3878,6 +3892,7 @@ static void new_writer_guid_common_init (struct writer *wr, const char *topic_na
   wr->t_whc_high_upd.v = 0;
   wr->num_readers = 0;
   wr->num_reliable_readers = 0;
+  wr->num_readers_requesting_keyhash = 0;
   wr->num_acks_received = 0;
   wr->num_nacks_received = 0;
   wr->throttle_count = 0;
@@ -3933,7 +3948,7 @@ static void new_writer_guid_common_init (struct writer *wr, const char *topic_na
             (wr->e.guid.entityid.u == NN_ENTITYID_P2P_BUILTIN_PARTICIPANT_STATELESS_MESSAGE_WRITER));
   }
   wr->handle_as_transient_local = (wr->xqos->durability.kind == DDS_DURABILITY_TRANSIENT_LOCAL);
-  wr->include_keyhash =
+  wr->num_readers_requesting_keyhash +=
     wr->e.gv->config.generate_keyhash &&
     ((wr->e.guid.entityid.u & NN_ENTITYID_KIND_MASK) == NN_ENTITYID_KIND_WRITER_WITH_KEY);
   wr->type = ddsi_sertype_ref (type);
@@ -4606,6 +4621,7 @@ static dds_return_t new_reader_guid
   rd->handle_as_transient_local = (rd->xqos->durability.kind == DDS_DURABILITY_TRANSIENT_LOCAL) ||
                                   (rd->e.guid.entityid.u == NN_ENTITYID_P2P_BUILTIN_PARTICIPANT_VOLATILE_SECURE_READER);
   rd->type = ddsi_sertype_ref (type);
+  rd->request_keyhash = rd->type->request_keyhash;
   rd->ddsi2direct_cb = 0;
   rd->ddsi2direct_cbarg = 0;
   rd->init_acknack_count = 1;
@@ -5365,6 +5381,18 @@ static void free_proxy_participant(struct proxy_participant *proxypp)
   ddsrt_free (proxypp);
 }
 
+#ifdef DDS_HAS_SHM
+static void chk_iceoryx (const ddsi_locator_t *n, void *varg)
+{
+  struct proxy_participant *proxypp = (struct proxy_participant *) varg;
+  struct ddsi_domaingv *gv = proxypp->e.gv;
+  if (n->kind == NN_LOCATOR_KIND_SHEM && memcmp (gv->loc_iceoryx_addr.address, n->address, sizeof (gv->loc_iceoryx_addr.address)) == 0)
+  {
+    proxypp->is_iceoryx = 1;
+  }
+}
+#endif
+
 bool new_proxy_participant (struct ddsi_domaingv *gv, const struct ddsi_guid *ppguid, uint32_t bes, const struct ddsi_guid *privileged_pp_guid, struct addrset *as_default, struct addrset *as_meta, const ddsi_plist_t *plist, dds_duration_t tlease_dur, nn_vendorid_t vendor, unsigned custom_flags, ddsrt_wctime_t timestamp, seqno_t seq)
 {
   /* No locking => iff all participants use unique guids, and sedp
@@ -5419,6 +5447,13 @@ bool new_proxy_participant (struct ddsi_domaingv *gv, const struct ddsi_guid *pp
     /* if we don't know anything, or if it is implausibly tiny, use 128kB */
     proxypp->receive_buffer_size = 131072;
   }
+
+#ifdef DDS_HAS_SHM
+  proxypp->is_iceoryx = 0;
+  if (gv->config.enable_shm) {
+    addrset_forall (as_default, chk_iceoryx, proxypp);
+  }
+#endif
 
   {
     struct proxy_participant *privpp;
@@ -6628,6 +6663,7 @@ int new_proxy_reader (struct ddsi_domaingv *gv, const struct ddsi_guid *ppguid, 
 #endif
   prd->is_fict_trans_reader = 0;
   prd->receive_buffer_size = proxypp->receive_buffer_size;
+  prd->requests_keyhash = (plist->present & PP_CYCLONE_REQUESTS_KEYHASH) && plist->cyclone_requests_keyhash;
 
   ddsrt_avl_init (&prd_writers_treedef, &prd->writers);
 

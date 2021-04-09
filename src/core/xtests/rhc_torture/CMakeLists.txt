@@ -10,6 +10,7 @@
 # SPDX-License-Identifier: EPL-2.0 OR BSD-3-Clause
 #
 idlc_generate(TARGET RhcTypes FILES RhcTypes.idl)
+include(${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/Modules/CUnit.cmake)
 
 add_executable(rhc_torture rhc_torture.c)
 
@@ -18,9 +19,16 @@ target_include_directories(
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../ddsc/src>"
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../ddsi/include>")
 
+if(iceoryx_binding_c_FOUND)
+  target_include_directories(
+    rhc_torture PRIVATE
+    "$<BUILD_INTERFACE:$<TARGET_PROPERTY:iceoryx_binding_c::iceoryx_binding_c,INTERFACE_INCLUDE_DIRECTORIES>>")
+endif()
+
 target_link_libraries(rhc_torture RhcTypes ddsc)
 
 add_test(
   NAME rhc_torture
   COMMAND rhc_torture 314159265 0 5000 0)
 set_property(TEST rhc_torture PROPERTY TIMEOUT 20)
+set_test_library_paths(rhc_torture)
