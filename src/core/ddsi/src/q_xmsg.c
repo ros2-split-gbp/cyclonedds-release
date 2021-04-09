@@ -1085,10 +1085,6 @@ struct nn_xpack * nn_xpack_new (ddsi_tran_conn_t conn, uint32_t bw_limit, bool a
 {
   struct nn_xpack *xp;
 
-  /* Disallow setting async_mode if not configured to enable async mode: this way we
-     can avoid starting the async send thread altogether */
-  assert (!async_mode || conn->m_base.gv->config.xpack_send_async);
-
   xp = ddsrt_malloc (sizeof (*xp));
   memset (xp, 0, sizeof (*xp));
   xp->async_mode = async_mode;
@@ -1181,8 +1177,13 @@ static ssize_t nn_xpack_send1 (const ddsi_locator_t *loc, void * varg)
       return 0;
     }
   }
-
+#ifdef DDS_HAS_SHM
+  // SHM_TODO: We avoid sending packet while data is SHMEM.
+  //           I'm not sure whether this is correct or not.
+  if (!gv->mute && loc->kind != NN_LOCATOR_KIND_SHEM)
+#else
   if (!gv->mute)
+#endif
   {
     nbytes = nn_xpack_send_rtps(xp, loc);
 
@@ -1292,13 +1293,17 @@ static void nn_xpack_send_real (struct nn_xpack *xp)
 static uint32_t nn_xpack_sendq_thread (void *vgv)
 {
   struct ddsi_domaingv *gv = vgv;
+  struct thread_state1 * const ts1 = lookup_thread_state ();
+  thread_state_awake_fixed_domain (ts1);
   ddsrt_mutex_lock (&gv->sendq_lock);
   while (!(gv->sendq_stop && gv->sendq_head == NULL))
   {
     struct nn_xpack *xp;
     if ((xp = gv->sendq_head) == NULL)
     {
-      (void) ddsrt_cond_waitfor (&gv->sendq_cond, &gv->sendq_lock, 1000000);
+      thread_state_asleep (ts1);
+      (void) ddsrt_cond_wait (&gv->sendq_cond, &gv->sendq_lock);
+      thread_state_awake_fixed_domain (ts1);
     }
     else
     {
@@ -1312,6 +1317,7 @@ static uint32_t nn_xpack_sendq_thread (void *vgv)
     }
   }
   ddsrt_mutex_unlock (&gv->sendq_lock);
+  thread_state_asleep (ts1);
   return 0;
 }
 
@@ -1327,8 +1333,9 @@ void nn_xpack_sendq_init (struct ddsi_domaingv *gv)
 
 void nn_xpack_sendq_start (struct ddsi_domaingv *gv)
 {
-  if (create_thread (&gv->sendq_ts, gv, "sendq", nn_xpack_sendq_thread, NULL) != DDS_RETCODE_OK)
+  if (create_thread (&gv->sendq_ts, gv, "sendq", nn_xpack_sendq_thread, gv) != DDS_RETCODE_OK)
     GVERROR ("nn_xpack_sendq_start: can't create nn_xpack_sendq_thread\n");
+  gv->sendq_running = true;
 }
 
 void nn_xpack_sendq_stop (struct ddsi_domaingv *gv)
@@ -1341,8 +1348,8 @@ void nn_xpack_sendq_stop (struct ddsi_domaingv *gv)
 
 void nn_xpack_sendq_fini (struct ddsi_domaingv *gv)
 {
-  assert (gv->sendq_head == NULL);
   join_thread (gv->sendq_ts);
+  assert (gv->sendq_head == NULL);
   ddsrt_cond_destroy (&gv->sendq_cond);
   ddsrt_mutex_destroy (&gv->sendq_lock);
 }
@@ -1356,16 +1363,20 @@ void nn_xpack_send (struct nn_xpack *xp, bool immediately)
   else
   {
     struct ddsi_domaingv * const gv = xp->gv;
+    // copy xp
     struct nn_xpack *xp1 = ddsrt_malloc (sizeof (*xp));
-    memcpy (xp1, xp, sizeof (*xp1));
+    memcpy(xp1, xp, sizeof(*xp1));
+    if (xp->iov != NULL) {
+      xp1->iov = ddsrt_malloc(xp->niov * sizeof(*xp->iov));
+      memcpy(xp1->iov, xp->iov, (xp->niov * sizeof(*xp->iov)));
+    }
     nn_xpack_reinit (xp);
     xp1->sendq_next = NULL;
     ddsrt_mutex_lock (&gv->sendq_lock);
-    if (immediately || gv->sendq_length == SENDQ_HW)
+    if (immediately || gv->sendq_length > SENDQ_LW)
       ddsrt_cond_broadcast (&gv->sendq_cond);
     if (gv->sendq_length >= SENDQ_MAX)
     {
-      while (gv->sendq_length > SENDQ_LW)
         ddsrt_cond_wait (&gv->sendq_cond, &gv->sendq_lock);
     }
     if (gv->sendq_head)

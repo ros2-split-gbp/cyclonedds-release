@@ -242,8 +242,8 @@ struct participant
   struct ddsi_plist *plist; /* settings/QoS for this participant */
   struct xevent *spdp_xevent; /* timed event for periodically publishing SPDP */
   struct xevent *pmd_update_xevent; /* timed event for periodically publishing ParticipantMessageData */
-  ddsi_locator_t m_locator;
-  ddsi_tran_conn_t m_conn;
+  ddsi_locator_t m_locator; /* this is always a unicast address, it is set if it is in the many unicast mode */
+  ddsi_tran_conn_t m_conn; /* this is connection to m_locator, if it is set, this is used */
   struct avail_entityid_set avail_entityids; /* available entity ids [e.lock] */
   ddsrt_mutex_t refc_lock;
   int32_t user_refc; /* number of non-built-in endpoints in this participant [refc_lock] */
@@ -320,7 +320,6 @@ struct writer
   enum writer_state state;
   unsigned reliable: 1; /* iff 1, writer is reliable <=> heartbeat_xevent != NULL */
   unsigned handle_as_transient_local: 1; /* controls whether data is retained in WHC */
-  unsigned include_keyhash: 1; /* iff 1, this writer includes a keyhash; keyless topics => include_keyhash = 0 */
   unsigned force_md5_keyhash: 1; /* iff 1, when keyhash has to be hashed, no matter the size */
   unsigned retransmitting: 1; /* iff 1, this writer is currently retransmitting */
   unsigned alive: 1; /* iff 1, the writer is alive (lease for this writer is not expired); field may be modified only when holding both wr->e.lock and wr->c.pp->e.lock */
@@ -347,6 +346,7 @@ struct writer
   uint32_t rexmit_burst_size_limit; /* derived from reader's receive_buffer_size */
   uint32_t num_readers; /* total number of matching PROXY readers */
   uint32_t num_reliable_readers; /* number of matching reliable PROXY readers */
+  uint32_t num_readers_requesting_keyhash; /* also +1 for protected keys and config override for generating keyhash */
   ddsrt_avl_tree_t readers; /* all matching PROXY readers, see struct wr_prd_match */
   ddsrt_avl_tree_t local_readers; /* all matching LOCAL readers, see struct wr_rd_match */
 #ifdef DDS_HAS_NETWORK_PARTITIONS
@@ -391,6 +391,7 @@ struct reader
   struct dds_qos *xqos;
   unsigned reliable: 1; /* 1 iff reader is reliable */
   unsigned handle_as_transient_local: 1; /* 1 iff reader wants historical data from proxy writers */
+  unsigned request_keyhash: 1; /* really controlled by the sertype */
 #ifdef DDS_HAS_SSM
   unsigned favours_ssm: 1; /* iff 1, this reader favours SSM */
 #endif
@@ -446,6 +447,9 @@ struct proxy_participant
 #ifdef DDS_HAS_SECURITY
   nn_security_info_t security_info;
   struct proxy_participant_sec_attributes *sec_attr;
+#endif
+#ifdef DDS_HAS_SHM
+  unsigned is_iceoryx: 1;
 #endif
 };
 
@@ -536,6 +540,7 @@ struct proxy_reader {
   struct proxy_endpoint_common c;
   unsigned deleting: 1; /* set when being deleted */
   unsigned is_fict_trans_reader: 1; /* only true when it is certain that is a fictitious transient data reader (affects built-in topic generation) */
+  unsigned requests_keyhash: 1; /* 1 iff this reader would like to receive keyhashes */
 #ifdef DDS_HAS_SSM
   unsigned favours_ssm: 1; /* iff 1, this proxy reader favours SSM when available */
 #endif
