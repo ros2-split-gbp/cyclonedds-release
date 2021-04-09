@@ -1356,14 +1356,6 @@ static struct cfgelem internal_cfgelems[] = {
     MEMBER(use_multicast_if_mreqn),
     FUNCTIONS(0, uf_int, 0, pf_int),
     DESCRIPTION("<p>Do not use.</p>")),
-  BOOL("SendAsync", NULL, 1, "false",
-    MEMBER(xpack_send_async),
-    FUNCTIONS(0, uf_boolean, 0, pf_boolean),
-    DESCRIPTION(
-      "<p>This element controls whether the actual sending of packets occurs "
-      "on the same thread that prepares them, or is done asynchronously by "
-      "another thread.</p>"
-    )),
   STRING("RediscoveryBlacklistDuration", rediscovery_blacklist_duration_attrs, 1, "0s",
     MEMBER(prune_deleted_ppant.delay),
     FUNCTIONS(0, uf_duration_inf, 0, pf_duration),
@@ -1614,6 +1606,44 @@ static struct cfgelem ssl_cfgelems[] = {
 };
 #endif
 
+#ifdef DDS_HAS_SHM
+static struct cfgelem shmem_cfgelems[] = {
+  BOOL("Enable", NULL, 1, "false",
+    MEMBER(enable_shm),
+    FUNCTIONS(0, uf_boolean, 0, pf_boolean),
+    DESCRIPTION("<p>This element allows to enable shared memory in Cyclone DDS.</p>")),
+  ENUM("LogLevel", NULL, 1, "info",
+    MEMBER(shm_log_lvl),
+    FUNCTIONS(0, uf_shm_loglevel, 0, pf_shm_loglevel),
+    DESCRIPTION(
+      "<p>This element decides the verbosity level of shared memory message:</p>\n"
+      "<ul><li><i>off</i>: no log</li>\n"
+      "<li><i>fatal</i>: show fatal log</li>\n"
+      "<li><i>error</i>: show error log</li>\n"
+      "<li><i>warn</i>: show warn log</li>\n"
+      "<li><i>info</i>: show info log</li>\n"
+      "<li><i>debug</i>: show debug log</li>\n"
+      "<li><i>verbose</i>: show verbose log</li>\n"
+      "<p>If you don't want to see any log from shared memory, use <i>off</i> to disable log message.</p>"),
+    VALUES(
+      "off","fatal","error","warn","info","debug","verbose"
+    )),
+  INT("SubQueueCapacity", NULL, 1, "256",
+    MEMBER(sub_queue_capacity),
+    FUNCTIONS(0, uf_natint, 0, pf_int),
+    DESCRIPTION("<p>Size of the history chunk queue, this is the amount of messages stored between taking from the iceoryx subscriber, exceeding this number will cause the oldest to be pushed off the queue. Should be a value between 1 and 256.</p>")),
+  INT("SubHistoryRequest", NULL, 1, "16",
+    MEMBER(sub_history_request),
+    FUNCTIONS(0, uf_natint, 0, pf_int),
+    DESCRIPTION("<p>The number of messages published before subscription which will be requested by a subscriber upon subscription. Should be a value between 0 and 16.</p>")),
+  INT("PubHistoryCapacity", NULL, 1, "16",
+    MEMBER(pub_history_capacity),
+    FUNCTIONS(0, uf_natint, 0, pf_int),
+    DESCRIPTION("<p>The number of messages which will be stored on the publisher for late joining subscribers. Should be a value between 0 and 16 and be equal to or larger than SubHistoryRequest.</p>")),
+  END_MARKER
+};
+#endif
+
 static struct cfgelem discovery_peer_cfgattrs[] = {
   STRING("Address", NULL, 1, NULL,
     MEMBEROF(ddsi_config_peer_listelem, peer),
@@ -1799,7 +1829,7 @@ static struct cfgelem tracing_cfgelems[] = {
     VALUES(
       "fatal","error","warning","info","config","discovery","data","radmin",
       "timing","traffic","topic","tcp","plist","whc","throttle","rhc",
-      "content","trace"
+      "content","shm","trace"
     )),
   ENUM("Verbosity", NULL, 1, "none",
     NOMEMBER,
@@ -1976,6 +2006,15 @@ static struct cfgelem domain_cfgelems[] = {
       "using SSL/TLS for DDSI over TCP.</p>"
     )),
 #endif
+#ifdef DDS_HAS_SHM
+  GROUP("SharedMemory", shmem_cfgelems, NULL, 1,
+    NOMEMBER,
+    NOFUNCTIONS,
+    DESCRIPTION(
+      "<p>The Shared Memory element allows specifying various parameters "
+      "related to using shared memory.</p>"
+    )),
+#endif
   END_MARKER
 };
 
@@ -2006,6 +2045,9 @@ static struct cfgelem root_cfgelems[] = {
 #endif
 #if DDS_HAS_SSL
   MOVED("SSL", "CycloneDDS/Domain/SSL"),
+#endif
+#ifdef DDS_HAS_SHM
+  MOVED("SharedMemory", "CycloneDDS/Domain/SharedMemory"),
 #endif
   MOVED("DDSI2E|DDSI2", "CycloneDDS/Domain"),
   END_MARKER

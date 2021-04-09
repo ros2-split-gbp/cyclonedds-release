@@ -16,7 +16,7 @@ add_custom_command(
   COMMAND ddsconf -f defconfig -o ${defconfig_src}
   DEPENDS ddsconf)
 
-  set(srcs_ddsi
+set(srcs_ddsi
   ddsi_eth.c
   ddsi_ssl.c
   ddsi_tcp.c
@@ -171,12 +171,17 @@ if(ENABLE_SECURITY)
   list(APPEND srcs_ddsi ddsi_security_msg.c ddsi_security_exchange.c)
   list(APPEND hdrs_private_ddsi ddsi_security_msg.h ddsi_security_exchange.h)
 endif()
+if(iceoryx_binding_c_FOUND)
+  list(APPEND srcs_ddsi shm_init.c shm_sync.c)
+  list(APPEND hdrs_private_ddsi shm_sync.h)
+endif()
 
 prepend(hdrs_private_ddsi "${CMAKE_CURRENT_LIST_DIR}/include/dds/ddsi/" ${hdrs_private_ddsi})
 prepend(srcs_ddsi "${CMAKE_CURRENT_LIST_DIR}/src/" ${srcs_ddsi})
 
 target_sources(ddsc PRIVATE ${srcs_ddsi} ${defconfig_src} ${hdrs_private_ddsi})
 target_include_directories(ddsc PRIVATE "${CMAKE_CURRENT_LIST_DIR}/include")
+
 install(
   DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/include/"
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"

@@ -78,6 +78,7 @@ if(ENABLE_SSL AND OPENSSL_FOUND)
     "common/cert_utils.c"
     "authentication.c"
     "access_control.c"
+    "builtintopic.c"
     "config.c"
     "crypto.c"
     "handshake.c"
@@ -112,6 +113,11 @@ if(ENABLE_SSL AND OPENSSL_FOUND)
     cunit_security_core PRIVATE
       "$<BUILD_INTERFACE:$<TARGET_PROPERTY:security_openssl,INTERFACE_INCLUDE_DIRECTORIES>>"
   )
+endif()
+if(iceoryx_binding_c_FOUND)
+  target_include_directories(
+    cunit_security_core PRIVATE
+    "$<BUILD_INTERFACE:$<TARGET_PROPERTY:iceoryx_binding_c::iceoryx_binding_c,INTERFACE_INCLUDE_DIRECTORIES>>")
 endif()
 
 set(common_etc_dir "${CMAKE_CURRENT_SOURCE_DIR}/common/etc")

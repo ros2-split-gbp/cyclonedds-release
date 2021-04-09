@@ -606,12 +606,6 @@ CycloneDDS configuration""" ] ]
           xsd:integer
         }?
         & [ a:documentation [ xml:lang="en" """
-<p>This element controls whether the actual sending of packets occurs on the same thread that prepares them, or is done asynchronously by another thread.</p>
-<p>The default value is: "false".</p>""" ] ]
-        element SendAsync {
-          xsd:boolean
-        }?
-        & [ a:documentation [ xml:lang="en" """
 <p>This element controls whether Cyclone DDS advertises all the domain participants it serves in DDSI (when set to <i>false</i>), or rather only one domain participant (the one corresponding to the Cyclone DDS process; when set to <i>true</i>). In the latter case Cyclone DDS becomes the virtual owner of all readers and writers of all domain participants, dramatically reducing discovery traffic (a similar effect can be obtained by setting Internal/BuiltinEndpointSet to "minimal" but with less loss of information).</p>
 <p>The default value is: "false".</p>""" ] ]
         element SquashParticipants {
@@ -1155,7 +1149,7 @@ MIIEpAIBAAKCAQEA3HIh...AOBaaqSV37XBUJg==<br>
 <p>The categorisation of tracing output is incomplete and hence most of the verbosity levels and categories are not of much use in the current release. This is an ongoing process and here we describe the target situation rather than the current situation. Currently, the most useful is <i>trace</i>.</p>
 <p>The default value is: "".</p>""" ] ]
         element Category {
-          xsd:token { pattern = "((fatal|error|warning|info|config|discovery|data|radmin|timing|traffic|topic|tcp|plist|whc|throttle|rhc|content|trace)(,(fatal|error|warning|info|config|discovery|data|radmin|timing|traffic|topic|tcp|plist|whc|throttle|rhc|content|trace))*)|" }
+          xsd:token { pattern = "((fatal|error|warning|info|config|discovery|data|radmin|timing|traffic|topic|tcp|plist|whc|throttle|rhc|content|shm|trace)(,(fatal|error|warning|info|config|discovery|data|radmin|timing|traffic|topic|tcp|plist|whc|throttle|rhc|content|shm|trace))*)|" }
         }?
         & [ a:documentation [ xml:lang="en" """
 <p>This option specifies where the logging is printed to. Note that <i>stdout</i> and <i>stderr</i> are treated as special values, representing "standard out" and "standard error" respectively. No file is created unless logging categories are enabled using the Tracing/Verbosity or Tracing/EnabledCategory settings.</p>
