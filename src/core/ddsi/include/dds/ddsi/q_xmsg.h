@@ -58,12 +58,19 @@ enum nn_xmsg_kind {
 struct iceoryx_header {
    struct ddsi_guid guid;
    dds_time_t tstamp;
+   uint32_t statusinfo;
    uint32_t data_size;
    unsigned char data_kind;
    ddsi_keyhash_t keyhash;
 };
 
 typedef struct iceoryx_header iceoryx_header_t;
+
+/* Assume worst-case 8 byte alignment for sample following the iceoryx header. */
+#define DETERMINE_ICEORYX_CHUNK_SIZE(sample_size) (uint32_t) (sizeof(iceoryx_header_t) + (8 - (sizeof(iceoryx_header_t) % 8)) % 8 + sample_size)
+#define SHIFT_PAST_ICEORYX_HEADER(chunk) (void *)(((char *)chunk) + sizeof(iceoryx_header_t) + (8 - (sizeof(iceoryx_header_t) % 8)) % 8)
+#define SHIFT_BACK_TO_ICEORYX_HEADER(chunk) (void *)(((char *)chunk) - sizeof(iceoryx_header_t) - (8 + (sizeof(iceoryx_header_t) % 8)) % 8)
+
 #endif
 
 /* XMSGPOOL */
