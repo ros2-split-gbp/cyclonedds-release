@@ -37,11 +37,6 @@ struct AlignIceOryxChunk_t {
   uint64_t worst_case_member;
 };
 
-/* Assume worst-case 8 byte alignment for sample following the iceoryx header. */
-#define DETERMINE_ICEORYX_CHUNK_SIZE(sample_size) (uint32_t) (sizeof(iceoryx_header_t) + 8 - (sizeof(iceoryx_header_t) % 8) + sample_size)
-#define SHIFT_PAST_ICEORYX_HEADER(chunk) (void *)(((char *)chunk) + sizeof(iceoryx_header_t) + 8 - (sizeof(iceoryx_header_t) % 8))
-#define SHIFT_BACK_TO_ICEORYX_HEADER(chunk) (void *)(((char *)chunk) - sizeof(iceoryx_header_t) - 8 + (sizeof(iceoryx_header_t) % 8))
-
 static void register_pub_loan(dds_writer *wr, void *pub_loan)
 {
   for (uint32_t i = 0; i < MAX_PUB_LOANS; ++i)
@@ -344,6 +339,7 @@ dds_return_t dds_write_impl (dds_writer *wr, const void * data, dds_time_t tstam
       ice_hdr = SHIFT_BACK_TO_ICEORYX_HEADER(data);
       ice_hdr->guid = ddsi_wr->e.guid;
       ice_hdr->tstamp = tstamp;
+      ice_hdr->statusinfo = d->statusinfo;
       ice_hdr->data_kind = writekey ? SDK_KEY : SDK_DATA;
       ddsi_serdata_get_keyhash(d, &ice_hdr->keyhash, false);
       iox_pub_publish_chunk (wr->m_iox_pub, ice_hdr);
@@ -461,6 +457,7 @@ static dds_return_t dds_writecdr_impl_common (struct writer *ddsi_wr, struct nn_
       suppress_local_delivery = true;
       ice_hdr->guid = ddsi_wr->e.guid;
       ice_hdr->tstamp = dinp->timestamp.v;
+      ice_hdr->statusinfo = dinp->statusinfo;
       ice_hdr->data_kind = (unsigned char)dinp->kind;
       ddsi_serdata_get_keyhash (dinp, &ice_hdr->keyhash, false);
       // iox_pub_publish_chunk takes ownership, storing a null pointer here doesn't
