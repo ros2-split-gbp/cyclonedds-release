@@ -29,6 +29,7 @@
 #include "idl/processor.h"
 #include "idl/file.h"
 #include "idl/version.h"
+#include "idl/stream.h"
 
 #include "mcpp_lib.h"
 #include "mcpp_out.h"
@@ -142,12 +143,11 @@ static int idlc_putc(int chr, OUTDEST od)
 
 static int idlc_puts(const char *str, OUTDEST od)
 {
-  int ret;
+  int ret = -1;
   size_t len = strlen(str);
 
   assert(str != NULL);
   assert(len <= INT_MAX);
-  ret = (int)len;
 
   switch (od) {
   case OUT:
@@ -170,7 +170,7 @@ static int idlc_puts(const char *str, OUTDEST od)
     break;
   }
 
-  return ret < 0 ? -1 : ret;
+  return ret < 0 ? -1 : (int)len;
 }
 
 static int idlc_printf(OUTDEST od, const char *fmt, ...)
@@ -183,11 +183,13 @@ static int idlc_printf(OUTDEST od, const char *fmt, ...)
   assert(fmt != NULL);
 
   va_start(ap, fmt);
-  if ((len = idl_vasprintf(&str, fmt, ap)) < 0) { /* FIXME: optimize */
+  len = idl_vasprintf(&str, fmt, ap);
+  va_end(ap);
+
+  if (len < 0) {
     retcode = IDL_RETCODE_NO_MEMORY;
     return -1;
   }
-  va_end(ap);
 
   switch (od) {
   case OUT:
@@ -253,8 +255,6 @@ err_file:
 static idl_retcode_t idlc_parse(void)
 {
   idl_retcode_t ret = IDL_RETCODE_OK;
-  idl_file_t *path = NULL;
-  idl_file_t *file = NULL;
   uint32_t flags = IDL_FLAG_EXTENDED_DATA_TYPES |
                    IDL_FLAG_ANONYMOUS_TYPES |
                    IDL_FLAG_ANNOTATIONS;
@@ -268,26 +268,33 @@ static idl_retcode_t idlc_parse(void)
       return ret;
     }
     assert(config.file);
-    if (strcmp(config.file, "-") != 0 && (ret = figure_file(&path)) != 0) {
+    if (strcmp(config.file, "-") != 0 && (ret = figure_file(&pstate->paths)) != 0) {
       idl_delete_pstate(pstate);
       return ret;
     }
-    file = malloc(sizeof(*file));
-    file->next = NULL;
-    file->name = idl_strdup(config.file);
-    pstate->files = file;
-    pstate->paths = path;
-    source = malloc(sizeof(*source));
+    if (!(pstate->files = malloc(sizeof(*pstate->files)))) {
+      idl_delete_pstate(pstate);
+      return IDL_RETCODE_NO_MEMORY;
+    }
+    pstate->files->next = NULL;
+    if (!(pstate->files->name = idl_strdup(config.file))) {
+      idl_delete_pstate(pstate);
+      return IDL_RETCODE_NO_MEMORY;
+    }
+    if (!(source = malloc(sizeof(*source)))) {
+      idl_delete_pstate(pstate);
+      return IDL_RETCODE_NO_MEMORY;
+    }
     source->parent = NULL;
     source->previous = source->next = NULL;
     source->includes = NULL;
     source->system = false;
-    source->path = path;
-    source->file = file;
+    source->path = pstate->paths;
+    source->file = pstate->files;
     pstate->sources = source;
     /* populate first source file */
     pstate->scanner.position.source = source;
-    pstate->scanner.position.file = (const idl_file_t *)file;
+    pstate->scanner.position.file = (const idl_file_t *)pstate->files;
     pstate->scanner.position.line = 1;
     pstate->scanner.position.column = 1;
     pstate->flags |= IDL_WRITE;
@@ -314,15 +321,10 @@ static idl_retcode_t idlc_parse(void)
     size_t nrd;
     int nwr;
 
-    if (strcmp(config.file, "-") == 0) {
+    if (strcmp(config.file, "-") == 0)
       fin = stdin;
-    } else {
-#if _WIN32
-      fopen_s(&fin, config.file, "rb");
-#else
-      fin = fopen(config.file, "rb");
-#endif
-    }
+    else
+      fin = idl_fopen(config.file, "rb");
 
     if (!fin) {
       if (errno == ENOMEM)
@@ -549,7 +551,8 @@ int main(int argc, char *argv[])
   if (!(opts = calloc(nopts + 1, sizeof(opts[0]))))
     goto err_alloc_opts;
   memcpy(opts, compopts, ncompopts * sizeof(opts[0]));
-  memcpy(opts+ncompopts, genopts, ngenopts * sizeof(opts[0]));
+  if (ngenopts)
+    memcpy(opts+ncompopts, genopts, ngenopts * sizeof(opts[0]));
   opts[nopts] = NULL;
 
   switch (parse_options(argc, argv, opts)) {
