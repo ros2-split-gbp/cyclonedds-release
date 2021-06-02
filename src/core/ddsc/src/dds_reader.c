@@ -445,10 +445,13 @@ const struct dds_entity_deriver dds_entity_deriver_reader = {
 
 #ifdef DDS_HAS_SHM
 #define DDS_READER_QOS_CHECK_FIELDS (QP_LIVELINESS|QP_DEADLINE|QP_RELIABILITY|QP_DURABILITY|QP_HISTORY)
-static bool dds_reader_support_shm(const struct ddsi_config* cfg, const dds_qos_t *qos)
+static bool dds_reader_support_shm(const struct ddsi_config* cfg, const dds_qos_t *qos, const struct dds_topic *tp)
 {
   if (NULL == cfg ||
       false == cfg->enable_shm)
+    return false;
+
+  if (!tp->m_stype->fixed_size)
     return false;
 
   uint32_t sub_history_req = cfg->sub_history_request;
@@ -457,7 +460,6 @@ static bool dds_reader_support_shm(const struct ddsi_config* cfg, const dds_qos_
     DDS_READER_QOS_CHECK_FIELDS == (qos->present & DDS_READER_QOS_CHECK_FIELDS) &&
     DDS_LIVELINESS_AUTOMATIC == qos->liveliness.kind &&
     DDS_INFINITY == qos->deadline.deadline &&
-    DDS_RELIABILITY_RELIABLE == qos->reliability.kind &&
     DDS_DURABILITY_VOLATILE == qos->durability.kind &&
     DDS_HISTORY_KEEP_LAST == qos->history.kind &&
     (int)sub_history_req >= (int)qos->history.depth);
@@ -602,8 +604,9 @@ static dds_entity_t dds_create_reader_int (dds_entity_t participant_or_subscribe
   dds_entity_init_complete (&rd->m_entity);
 
 #ifdef DDS_HAS_SHM
-  rqos->shared_memory.enabled = dds_reader_support_shm(&gv->config, rqos);
-  rqos->present |= QP_SHARED_MEMORY;
+  assert(rqos->present & QP_LOCATOR_MASK);
+  if (!dds_reader_support_shm(&gv->config, rqos, tp))
+    rqos->ignore_locator_type |= NN_LOCATOR_KIND_SHEM;
 #endif
 
   rc = new_reader (&rd->m_rd, &rd->m_entity.m_guid, NULL, pp, tp->m_name, tp->m_stype, rqos, &rd->m_rhc->common.rhc, dds_reader_status_cb, rd);
@@ -611,7 +614,7 @@ static dds_entity_t dds_create_reader_int (dds_entity_t participant_or_subscribe
   thread_state_asleep (lookup_thread_state ());
 
 #ifdef DDS_HAS_SHM
-  if (rqos->shared_memory.enabled)
+  if (0x0 == (rqos->ignore_locator_type & NN_LOCATOR_KIND_SHEM))
   {
     size_t name_size, type_name_size;
     rc = dds_get_name_size(topic, &name_size);
@@ -632,9 +635,10 @@ static dds_entity_t dds_create_reader_int (dds_entity_t participant_or_subscribe
     // ICEORYX TODO: handle failure (how should the system behave if resources are insufficient?)
     iox_sub_storage_extension_init(&rd->m_iox_sub_stor);
 
+    assert (rqos->durability.kind == DDS_DURABILITY_VOLATILE);
     opts.queueCapacity = rd->m_entity.m_domain->gv.config.sub_queue_capacity;
-    opts.historyRequest = rd->m_entity.m_domain->gv.config.sub_history_request;
-    rd->m_iox_sub = iox_sub_init(&rd->m_iox_sub_stor.storage, "DDS_CYCLONE", type_name, topic_name, &opts);
+    opts.historyRequest = 0;
+    rd->m_iox_sub = iox_sub_init(&rd->m_iox_sub_stor.storage, gv->config.iceoryx_service, type_name, topic_name, &opts);
     shm_monitor_attach_reader(&rd->m_entity.m_domain->m_shm_monitor, rd);
 
     // those are set once and never changed

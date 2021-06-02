@@ -191,6 +191,12 @@ static struct cfgelem general_cfgelems[] = {
       "fragments of which the size is at least the minimum of 1025 and "
       "FragmentSize.</p>"),
     UNIT("memsize")),
+  BOOL("RedundantNetworking", NULL, 1, "false",
+    MEMBER(redundant_networking),
+    FUNCTIONS(0, uf_boolean, 0, pf_boolean),
+    DESCRIPTION(
+      "<p>When enabled, use selected network interfaces in parallel for "
+      "redundancy.</p>")),
   END_MARKER
 };
 
@@ -1612,6 +1618,21 @@ static struct cfgelem shmem_cfgelems[] = {
     MEMBER(enable_shm),
     FUNCTIONS(0, uf_boolean, 0, pf_boolean),
     DESCRIPTION("<p>This element allows to enable shared memory in Cyclone DDS.</p>")),
+  STRING("Locator", NULL, 1, "",
+    MEMBER(shm_locator),
+    FUNCTIONS(0, uf_string, ff_free, pf_string),
+    DESCRIPTION(
+      "<p>Explicitly set the Iceoryx locator used by Cyclone to check whether "
+      "a pair of processes is attached to the same Iceoryx shared memory.  The "
+      "default is to use one of the MAC addresses of the machine, which should "
+      "work well in most cases.</p>"
+    )),
+  STRING("Prefix", NULL, 1, "DDS_CYCLONE",
+    MEMBER(iceoryx_service),
+    FUNCTIONS(0, uf_string, ff_free, pf_string),
+    DESCRIPTION(
+      "<p>Override the Iceoryx service name used by Cyclone.</p>"
+    )),
   ENUM("LogLevel", NULL, 1, "info",
     MEMBER(shm_log_lvl),
     FUNCTIONS(0, uf_shm_loglevel, 0, pf_shm_loglevel),

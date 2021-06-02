@@ -16,6 +16,7 @@
 #include <string.h>
 #include <inttypes.h>
 
+#include "idl/print.h"
 #include "idl/processor.h"
 #include "idl/stream.h"
 #include "idl/string.h"
@@ -28,9 +29,6 @@
 #define SUBTYPE (8)
 
 #define MAX_SIZE (16)
-
-extern char *typename(const void *node);
-extern char *absolute_name(const void *node, const char *separator);
 
 static const uint16_t nop = UINT16_MAX;
 
@@ -345,7 +343,7 @@ stash_offset(
   assert(pos == 0);
 
   levels = idl_is_declarator(fld->node) != 0;
-  if (!(inst.data.offset.type = typename(idl_ancestor(fld->node, levels))))
+  if (IDL_PRINT(&inst.data.offset.type, print_type, idl_ancestor(fld->node, levels)) < 0)
     goto err_type;
 
   if (stash_instruction(descriptor, index, &inst))
@@ -378,7 +376,7 @@ stash_size(
       if (!(inst.data.size.type = idl_strdup("char *")))
         goto err_type;
     } else {
-      if (!(inst.data.size.type = typename(type_spec)))
+      if (IDL_PRINT(&inst.data.size.type, print_type, type_spec) < 0)
         goto err_type;
     }
   } else {
@@ -410,11 +408,11 @@ stash_size(
       if (!(inst.data.size.type = idl_strdup("char *")))
         goto err_type;
     } else if (idl_is_array(type_spec)) {
-      char *type;
+      char *type = NULL;
       size_t len, pos;
       const idl_const_expr_t *const_expr;
 
-      if (!(type = typename(type_spec)))
+      if (IDL_PRINT(&type, print_type, type_spec) < 0)
         goto err_type;
 
       len = pos = strlen(type);
@@ -436,7 +434,7 @@ stash_size(
         memmove(inst.data.size.type + pos, "[0]", 3);
       inst.data.size.type[pos] = '\0';
     } else {
-      if (!(inst.data.size.type = typename(type_spec)))
+      if (IDL_PRINT(&inst.data.size.type, print_type, type_spec) < 0)
         goto err_type;
     }
   }
@@ -461,7 +459,7 @@ stash_constant(
   char **strp = &inst.data.constant.value;
 
   if (idl_is_enumerator(const_expr)) {
-    *strp = typename(const_expr);
+    cnt = IDL_PRINT(strp, print_type, const_expr);
   } else {
     const idl_literal_t *literal = const_expr;
 
@@ -729,7 +727,7 @@ emit_union(
       return ret;
     pop_type(descriptor);
   } else {
-    const idl_case_t *branch;
+    const idl_case_t *_case;
     const idl_case_label_t *label;
 
     if ((ret = push_type(descriptor, node, &type)))
@@ -739,9 +737,9 @@ emit_union(
 
     /* determine total number of case labels as opcodes for complex elements
        are stored after case label opcodes */
-    branch = ((const idl_union_t *)node)->branches;
-    for (; branch; branch = idl_next(branch)) {
-      for (label = branch->labels; label; label = idl_next(label))
+    _case = ((const idl_union_t *)node)->cases;
+    for (; _case; _case = idl_next(_case)) {
+      for (label = _case->labels; label; label = idl_next(label))
         type->labels++;
     }
 
@@ -1132,11 +1130,11 @@ static int print_opcodes(FILE *fp, const struct descriptor *descriptor)
   const struct instruction *inst;
   enum dds_stream_opcode opcode;
   enum dds_stream_typecode_primary optype;
-  char *type;
+  char *type = NULL;
   const char *seps[] = { ", ", ",\n  " };
   const char *sep = "  ";
 
-  if (!(type = AUTO(typename(descriptor->topic))))
+  if (IDL_PRINTA(&type, print_type, descriptor->topic) < 0)
     return -1;
   if (idl_fprintf(fp, "static const uint32_t %s_ops [] =\n{\n", type) < 0)
     return -1;
@@ -1200,7 +1198,7 @@ static int print_keys(FILE *fp, struct descriptor *descriptor, bool keylist)
     return 0;
   if (!(keys = calloc(descriptor->keys, sizeof(*keys))))
     goto err_keys;
-  if (!(type = typename(descriptor->topic)))
+  if (IDL_PRINT(&type, print_type, descriptor->topic) < 0)
     goto err_type;
   for (uint32_t i=0,k=0; i < descriptor->instructions.count && k < descriptor->keys; i++) {
     const struct instruction *inst = &descriptor->instructions.table[i];
@@ -1287,7 +1285,7 @@ err_keys:
 static int print_flags(FILE *fp, struct descriptor *descriptor)
 {
   const char *fmt;
-  const char *vec[3] = { NULL, NULL, NULL };
+  const char *vec[4] = { NULL };
   size_t cnt, len = 0;
 
   if (descriptor->flags & DDS_TOPIC_NO_OPTIMIZE)
@@ -1296,6 +1294,22 @@ static int print_flags(FILE *fp, struct descriptor *descriptor)
     vec[len++] = "DDS_TOPIC_CONTAINS_UNION";
   if (descriptor->flags & DDS_TOPIC_FIXED_KEY)
     vec[len++] = "DDS_TOPIC_FIXED_KEY";
+
+  bool fixed_size = true;
+  for (uint32_t op = 0; op < descriptor->instructions.count && fixed_size; op++)
+  {
+    struct instruction i = descriptor->instructions.table[op];
+    if (i.type != OPCODE)
+      continue;
+
+    if (((i.data.opcode.code>>16)&0xFF) == DDS_OP_VAL_STR ||
+      ((i.data.opcode.code >> 16) & 0xFF) == DDS_OP_VAL_BST ||
+      ((i.data.opcode.code >> 16) & 0xFF) == DDS_OP_VAL_SEQ)
+      fixed_size = false;
+  }
+
+  if (fixed_size)
+    vec[len++] = "DDS_TOPIC_FIXED_SIZE";
 
   if (!len)
     vec[len++] = "0u";
@@ -1313,9 +1327,9 @@ static int print_descriptor(FILE *fp, struct descriptor *descriptor)
   char *name, *type;
   const char *fmt;
 
-  if (!(name = AUTO(absolute_name(descriptor->topic, "::"))))
+  if (IDL_PRINTA(&name, print_scoped_name, descriptor->topic) < 0)
     return -1;
-  if (!(type = AUTO(typename(descriptor->topic))))
+  if (IDL_PRINTA(&type, print_type, descriptor->topic) < 0)
     return -1;
   fmt = "const dds_topic_descriptor_t %1$s_desc =\n{\n"
         "  sizeof (%1$s),\n" /* size of type */
@@ -1392,6 +1406,10 @@ generate_descriptor(
 
 err_print:
 err_emit:
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 6001)
+#endif
   for (size_t i=0; i < descriptor.instructions.count; i++) {
     struct instruction *inst = &descriptor.instructions.table[i];
     switch (inst->type) {
@@ -1415,5 +1433,8 @@ err_emit:
   }
   if (descriptor.instructions.table)
     free(descriptor.instructions.table);
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
   return ret;
 }
