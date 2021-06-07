@@ -349,6 +349,7 @@ static int valid_Data (const struct receiver_state *rst, Data_t *msg, size_t siz
        though one would expect octetsToInlineQos and size to be in
        agreement or octetsToInlineQos to be 0 or so */
     *payloadp = NULL;
+    *keyhashp = NULL;
     sampleinfo->size = 0; /* size is full payload size, no payload & unfragmented => size = 0 */
     sampleinfo->statusinfo = 0;
     sampleinfo->complex_qos = 0;
@@ -370,10 +371,8 @@ static int valid_Data (const struct receiver_state *rst, Data_t *msg, size_t siz
     src.encoding = (msg->x.smhdr.flags & SMFLAG_ENDIANNESS) ? PL_CDR_LE : PL_CDR_BE;
     src.buf = ptr;
     src.bufsz = (unsigned) ((unsigned char *) msg + size - src.buf); /* end of message, that's all we know */
-    src.factory = NULL;
-    src.logconfig = &rst->gv->logconfig;
     /* just a quick scan, gathering only what we _really_ need */
-    if ((ptr = ddsi_plist_quickscan (sampleinfo, keyhashp, &src)) == NULL)
+    if ((ptr = ddsi_plist_quickscan (sampleinfo, keyhashp, &src, rst->gv)) == NULL)
       return 0;
   }
   else
@@ -473,10 +472,8 @@ static int valid_DataFrag (const struct receiver_state *rst, DataFrag_t *msg, si
     src.encoding = (msg->x.smhdr.flags & SMFLAG_ENDIANNESS) ? PL_CDR_LE : PL_CDR_BE;
     src.buf = ptr;
     src.bufsz = (unsigned) ((unsigned char *) msg + size - src.buf); /* end of message, that's all we know */
-    src.factory = NULL;
-    src.logconfig = &rst->gv->logconfig;
     /* just a quick scan, gathering only what we _really_ need */
-    if ((ptr = ddsi_plist_quickscan (sampleinfo, keyhashp, &src)) == NULL)
+    if ((ptr = ddsi_plist_quickscan (sampleinfo, keyhashp, &src, rst->gv)) == NULL)
       return 0;
   }
   else
@@ -2165,9 +2162,7 @@ static int deliver_user_data (const struct nn_rsample_info *sampleinfo, const st
     src.buf = NN_RMSG_PAYLOADOFF (fragchain->rmsg, qos_offset);
     src.bufsz = NN_RDATA_PAYLOAD_OFF (fragchain) - qos_offset;
     src.strict = DDSI_SC_STRICT_P (gv->config);
-    src.factory = gv->m_factory;
-    src.logconfig = &gv->logconfig;
-    if ((plist_ret = ddsi_plist_init_frommsg (&qos, NULL, PP_STATUSINFO | PP_KEYHASH | PP_COHERENT_SET, 0, &src)) < 0)
+    if ((plist_ret = ddsi_plist_init_frommsg (&qos, NULL, PP_STATUSINFO | PP_KEYHASH | PP_COHERENT_SET, 0, &src, gv)) < 0)
     {
       if (plist_ret != DDS_RETCODE_UNSUPPORTED)
         GVWARNING ("data(application, vendor %u.%u): "PGUIDFMT" #%"PRId64": invalid inline qos\n",
@@ -2904,6 +2899,7 @@ static int handle_submsg_sequence
     bool byteswap;
     unsigned octetsToNextHeader;
 
+    DDSRT_WARNING_MSVC_OFF(6326)
     if (sm->smhdr.flags & SMFLAG_ENDIANNESS)
     {
       byteswap = !(DDSRT_ENDIAN == DDSRT_LITTLE_ENDIAN);
@@ -2912,6 +2908,7 @@ static int handle_submsg_sequence
     {
       byteswap =  (DDSRT_ENDIAN == DDSRT_LITTLE_ENDIAN);
     }
+    DDSRT_WARNING_MSVC_ON(6326)
     if (byteswap)
     {
       sm->smhdr.octetsToNextHeader = ddsrt_bswap2u (sm->smhdr.octetsToNextHeader);
@@ -3228,6 +3225,7 @@ static bool do_packet (struct thread_state1 * const ts1, struct ddsi_domaingv *g
     {
       int swap;
 
+      DDSRT_WARNING_MSVC_OFF(6326)
       if (ml->smhdr.flags & SMFLAG_ENDIANNESS)
       {
         swap = !(DDSRT_ENDIAN == DDSRT_LITTLE_ENDIAN);
@@ -3236,6 +3234,7 @@ static bool do_packet (struct thread_state1 * const ts1, struct ddsi_domaingv *g
       {
         swap =  (DDSRT_ENDIAN == DDSRT_LITTLE_ENDIAN);
       }
+      DDSRT_WARNING_MSVC_ON(6326)
       if (swap)
       {
         ml->length = ddsrt_bswap4u (ml->length);
@@ -3480,7 +3479,8 @@ void trigger_recv_threads (const struct ddsi_domaingv *gv)
         iov.iov_base = &dummy;
         iov.iov_len = 1;
         GVTRACE ("trigger_recv_threads: %"PRIu32" single %s\n", i, ddsi_locator_to_string (buf, sizeof (buf), dst));
-        ddsi_conn_write (gv->xmit_conn, dst, 1, &iov, 0);
+        // all sockets listen on at least the interfaces used for transmitting (at least for now)
+        ddsi_conn_write (gv->xmit_conns[0], dst, 1, &iov, 0);
         break;
       }
       case RTM_MANY: {
@@ -3580,5 +3580,7 @@ uint32_t recv_thread (void *vrecv_thread_arg)
     }
     local_participant_set_fini (&lps);
   }
+  
+  GVTRACE ("done\n");
   return 0;
 }

@@ -296,10 +296,13 @@ const struct dds_entity_deriver dds_entity_deriver_writer = {
 
 #ifdef DDS_HAS_SHM
 #define DDS_WRITER_QOS_CHECK_FIELDS (QP_LIVELINESS|QP_DEADLINE|QP_RELIABILITY|QP_DURABILITY|QP_HISTORY)
-static bool dds_writer_support_shm(const struct ddsi_config* cfg, const dds_qos_t* qos)
+static bool dds_writer_support_shm(const struct ddsi_config* cfg, const dds_qos_t* qos, const struct dds_topic *tp)
 {
   if (NULL == cfg ||
       false == cfg->enable_shm)
+    return false;
+
+  if (!tp->m_stype->fixed_size)
     return false;
 
   uint32_t pub_history_cap = cfg->pub_history_capacity;
@@ -406,20 +409,20 @@ dds_entity_t dds_create_writer (dds_entity_t participant_or_publisher, dds_entit
   bool async_mode = (wqos->latency_budget.duration > 0);
 
   /* Create writer */
-  ddsi_tran_conn_t conn = gv->xmit_conn;
   struct dds_writer * const wr = dds_alloc (sizeof (*wr));
   const dds_entity_t writer = dds_entity_init (&wr->m_entity, &pub->m_entity, DDS_KIND_WRITER, false, wqos, listener, DDS_WRITER_STATUS_MASK);
   wr->m_topic = tp;
   dds_entity_add_ref_locked (&tp->m_entity);
-  wr->m_xp = nn_xpack_new (conn, get_bandwidth_limit (wqos->transport_priority), async_mode);
+  wr->m_xp = nn_xpack_new (gv, get_bandwidth_limit (wqos->transport_priority), async_mode);
   wrinfo = whc_make_wrinfo (wr, wqos);
   wr->m_whc = whc_new (gv, wrinfo);
   whc_free_wrinfo (wrinfo);
   wr->whc_batch = gv->config.whc_batch;
 
 #ifdef DDS_HAS_SHM
-  wqos->shared_memory.enabled = dds_writer_support_shm(&gv->config, wqos);
-  wqos->present |= QP_SHARED_MEMORY;
+  assert(wqos->present & QP_LOCATOR_MASK);
+  if (!dds_writer_support_shm(&gv->config, wqos, tp))
+    wqos->ignore_locator_type |= NN_LOCATOR_KIND_SHEM;
 #endif
 
   rc = new_writer (&wr->m_wr, &wr->m_entity.m_guid, NULL, pp, tp->m_name, tp->m_stype, wqos, wr->m_whc, dds_writer_status_cb, wr);
@@ -427,7 +430,7 @@ dds_entity_t dds_create_writer (dds_entity_t participant_or_publisher, dds_entit
   thread_state_asleep (lookup_thread_state ());
 
 #ifdef DDS_HAS_SHM
-  if (wqos->shared_memory.enabled)
+  if (0x0 == (wqos->ignore_locator_type & NN_LOCATOR_KIND_SHEM))
   {
     size_t name_size, type_name_size;
     rc = dds_get_name_size (topic, &name_size);
@@ -445,7 +448,7 @@ dds_entity_t dds_create_writer (dds_entity_t participant_or_publisher, dds_entit
     iox_pub_options_t opts;
     iox_pub_options_init(&opts);
     opts.historyCapacity = wr->m_entity.m_domain->gv.config.pub_history_capacity;
-    wr->m_iox_pub = iox_pub_init(&wr->m_iox_pub_stor, "DDS_CYCLONE", type_name, topic_name, &opts);
+    wr->m_iox_pub = iox_pub_init(&wr->m_iox_pub_stor, gv->config.iceoryx_service, type_name, topic_name, &opts);
     memset(wr->m_iox_pub_loans, 0, sizeof(wr->m_iox_pub_loans));
     dds_sleepfor(DDS_MSECS(10));
   }
