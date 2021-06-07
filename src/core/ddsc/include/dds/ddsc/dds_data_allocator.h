@@ -54,6 +54,23 @@ typedef struct dds_data_allocator {
  */
 DDS_EXPORT dds_return_t dds_data_allocator_init (dds_entity_t entity, dds_data_allocator_t *data_allocator);
 
+/** @brief Initialize an object for performing standard allocations/frees on the heap
+ *
+ * @param[out] data_allocator opaque allocator object to initialize
+ *
+ * @returns success or a generic error indication
+ *
+ * @retval DDS_RETCODE_OK
+ *    the allocator object was successfully initialized
+ * @retval DDS_RETCODE_BAD_PARAMETER
+ *    entity is invalid, data_allocator is a null pointer
+ * @retval DDS_RETCODE_PRECONDITION_NOT_MET
+ *    Cyclone DDS is not initialized
+ * @retval DDS_RETCODE_ILLEGAL_OPERATION
+ *    operation not supported on this entity
+ */
+DDS_EXPORT dds_return_t dds_data_allocator_init_heap (dds_data_allocator_t *data_allocator);
+
 /** @brief Finalize a previously initialized allocator object
  *
  * @param[in,out] data_allocator object to finalize
@@ -83,8 +100,17 @@ DDS_EXPORT void *dds_data_allocator_alloc (dds_data_allocator_t *data_allocator,
  *
  * @param[in,out] data_allocator  initialized allocator object
  * @param[in] ptr memory to free
+ *
+ * @returns success or an error indication
+ *
+ * @retval DDS_RETCODE_OK
+ *    the memory was successfully released
+ * @retval DDS_RETCODE_BAD_PARAMETER
+ *    data_allocator does not reference a valid entity
+ *  @retval DDS_RETCODE_PRECONDITION_NOT_MET
+ *    dds_data_allocator already finalized
  */
-DDS_EXPORT void dds_data_allocator_free (dds_data_allocator_t *data_allocator, void *ptr);
+DDS_EXPORT dds_return_t dds_data_allocator_free (dds_data_allocator_t *data_allocator, void *ptr);
 
 /** @brief Check if a Loan is available to reader/writer
  *

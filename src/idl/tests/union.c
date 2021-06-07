@@ -51,8 +51,9 @@ CU_Test(idl_union, single_case)
   CU_ASSERT_EQUAL_FATAL(ret, IDL_RETCODE_OK);
   u = (idl_union_t *)pstate->root;
   CU_ASSERT_FATAL(idl_is_union(u));
+  assert(u);
   CU_ASSERT(idl_type(u->switch_type_spec->type_spec) == IDL_LONG);
-  c = (idl_case_t *)u->branches;
+  c = (idl_case_t *)u->cases;
   CU_ASSERT_FATAL(idl_is_case(c));
   CU_ASSERT_PTR_EQUAL(idl_parent(c), u);
   CU_ASSERT(idl_is_case_label(c->labels));
@@ -79,8 +80,9 @@ CU_Test(idl_union, single_default_case)
   CU_ASSERT_EQUAL_FATAL(ret, IDL_RETCODE_OK);
   u = (idl_union_t *)pstate->root;
   CU_ASSERT_FATAL(idl_is_union(u));
+  assert(u);
   CU_ASSERT(idl_type(u->switch_type_spec->type_spec) == IDL_CHAR);
-  c = (idl_case_t *)u->branches;
+  c = (idl_case_t *)u->cases;
   CU_ASSERT_FATAL(idl_is_case(c));
   CU_ASSERT_PTR_EQUAL(idl_parent(c), u);
   CU_ASSERT(idl_is_default_case(c));
@@ -126,6 +128,7 @@ CU_Test(idl_union, enumerator_switch_type)
   CU_ASSERT_EQUAL_FATAL(ret, IDL_RETCODE_OK);
   e = (idl_enum_t *)pstate->root;
   CU_ASSERT_FATAL(idl_is_enum(e));
+  assert(e);
   el = e->enumerators;
   CU_ASSERT_FATAL(idl_is_enumerator(el));
   CU_ASSERT_STRING_EQUAL(idl_identifier(el), "Red");
@@ -137,7 +140,7 @@ CU_Test(idl_union, enumerator_switch_type)
   CU_ASSERT_STRING_EQUAL(idl_identifier(el), "Blue");
   u = (idl_union_t *)idl_next(e);
   CU_ASSERT_FATAL(idl_is_union(u));
-  c = u->branches;
+  c = u->cases;
   CU_ASSERT_FATAL(idl_is_case(c));
   CU_ASSERT((uintptr_t)c->labels->const_expr == (uintptr_t)e->enumerators);
   idl_delete_pstate(pstate);
@@ -162,6 +165,7 @@ CU_Test(idl_union, typedef_switch_types)
   ret = idl_create_pstate(0u, NULL, &pstate);
   CU_ASSERT_EQUAL_FATAL(ret, IDL_RETCODE_OK);
   CU_ASSERT_PTR_NOT_NULL(pstate);
+  assert(pstate);
   str = T("char", "baz") U("baz");
   ret = idl_parse_string(pstate, str);
   CU_ASSERT_EQUAL_FATAL(ret, IDL_RETCODE_OK);
@@ -175,6 +179,7 @@ CU_Test(idl_union, typedef_switch_types)
   ret = idl_create_pstate(0u, NULL, &pstate);
   CU_ASSERT_EQUAL_FATAL(ret, IDL_RETCODE_OK);
   CU_ASSERT_PTR_NOT_NULL(pstate);
+  assert(pstate);
   str = M("foo", T("char", "baz") U("baz"));
   ret = idl_parse_string(pstate, str);
   CU_ASSERT_EQUAL_FATAL(ret, IDL_RETCODE_OK);
@@ -190,6 +195,7 @@ CU_Test(idl_union, typedef_switch_types)
   ret = idl_create_pstate(0u, NULL, &pstate);
   CU_ASSERT_EQUAL_FATAL(ret, IDL_RETCODE_OK);
   CU_ASSERT_PTR_NOT_NULL(pstate);
+  assert(pstate);
   str = M("foo", T("char", "baz")) M("bar", U("foo::baz"));
   ret = idl_parse_string(pstate, str);
   CU_ASSERT_EQUAL_FATAL(ret, IDL_RETCODE_OK);
@@ -253,23 +259,23 @@ CU_Test(idl_union, default_discriminator_bool)
   static const struct {
     const char *cases;
     idl_retcode_t result;
-    unsigned int condition;
+    enum { FIRST_DISCRIMINANT, DEFAULT_CASE, IMPLICIT_DEFAULT_CASE } condition;
     bool discriminant;
   } tests[] = {
     { "case FALSE: char x;",
-      IDL_RETCODE_OK, IDL_IMPLICIT_DEFAULT, true },
+      IDL_RETCODE_OK, IMPLICIT_DEFAULT_CASE, true },
     { "case FALSE: char x; default: char y;",
-      IDL_RETCODE_OK, IDL_DEFAULT_CASE, true },
+      IDL_RETCODE_OK, DEFAULT_CASE, true },
     { "case TRUE:  char x;",
-      IDL_RETCODE_OK, IDL_IMPLICIT_DEFAULT, false },
+      IDL_RETCODE_OK, IMPLICIT_DEFAULT_CASE, false },
     { "case TRUE:  char x; default: char y;",
-      IDL_RETCODE_OK, IDL_DEFAULT_CASE, false },
+      IDL_RETCODE_OK, DEFAULT_CASE, false },
     { "case FALSE: char x; case TRUE:  char y;",
-      IDL_RETCODE_OK, IDL_FIRST_DISCRIMINANT, false },
+      IDL_RETCODE_OK, FIRST_DISCRIMINANT, false },
     { "case TRUE:  char x; case FALSE: char y;",
-      IDL_RETCODE_OK, IDL_FIRST_DISCRIMINANT, true },
+      IDL_RETCODE_OK, FIRST_DISCRIMINANT, true },
     { "case FALSE: char x; case TRUE:  char y; default: char z;",
-      IDL_RETCODE_SEMANTIC_ERROR, IDL_DEFAULT_CASE, false }
+      IDL_RETCODE_SEMANTIC_ERROR, DEFAULT_CASE, false }
   };
 
   for (size_t i=0, n=sizeof(tests)/sizeof(tests[0]); i < n; i++) {
@@ -285,33 +291,38 @@ CU_Test(idl_union, default_discriminator_bool)
       const idl_union_t *u;
 
       CU_ASSERT_PTR_NOT_NULL_FATAL(pstate);
+      assert(pstate);
       u = (const idl_union_t *)pstate->root;
       CU_ASSERT_FATAL(idl_is_union(u));
-      c = u->branches;
+      c = u->cases;
       CU_ASSERT_FATAL(idl_is_case(c));
       cl = c->labels;
       CU_ASSERT_FATAL(idl_is_case_label(cl));
       CU_ASSERT_FATAL(idl_is_literal(cl->const_expr));
       l = cl->const_expr;
       CU_ASSERT_FATAL(idl_type(l) == IDL_BOOL);
-      if (tests[i].condition == IDL_DEFAULT_CASE) {
+      if (tests[i].condition == DEFAULT_CASE) {
+        static const idl_mask_t mask = IDL_DEFAULT_CASE_LABEL;
         CU_ASSERT_EQUAL(l->value.bln, !tests[i].discriminant);
-        CU_ASSERT_EQUAL(u->default_discriminator.condition, IDL_DEFAULT_CASE);
-        CU_ASSERT_FATAL(idl_type(u->default_discriminator.const_expr) == IDL_BOOL);
-        CU_ASSERT_PTR_EQUAL(u->default_discriminator.branch, idl_next(c));
-      } else if (tests[i].condition == IDL_IMPLICIT_DEFAULT) {
+        CU_ASSERT_NOT_EQUAL(u->unused_labels, 0);
+        CU_ASSERT(idl_mask(u->default_case) == mask);
+        CU_ASSERT_PTR_EQUAL(idl_parent(u->default_case), idl_next(c));
+      } else if (tests[i].condition == IMPLICIT_DEFAULT_CASE) {
+        static const idl_mask_t mask = IDL_IMPLICIT_DEFAULT_CASE_LABEL;
         CU_ASSERT_EQUAL(l->value.bln, !tests[i].discriminant);
-        CU_ASSERT_EQUAL(u->default_discriminator.condition, IDL_IMPLICIT_DEFAULT);
-        CU_ASSERT_FATAL(idl_type(u->default_discriminator.const_expr) == IDL_BOOL);
-        CU_ASSERT_PTR_NULL(u->default_discriminator.branch);
+        CU_ASSERT_NOT_EQUAL(u->unused_labels, 0);
+        CU_ASSERT(idl_mask(u->default_case) == mask);
+        CU_ASSERT_PTR_EQUAL(idl_parent(u->default_case), u);
       } else {
+        static const idl_mask_t mask = IDL_CASE_LABEL;
         CU_ASSERT_EQUAL(l->value.bln, tests[i].discriminant);
-        CU_ASSERT_EQUAL(u->default_discriminator.condition, IDL_FIRST_DISCRIMINANT);
-        CU_ASSERT_PTR_EQUAL(u->default_discriminator.const_expr, cl->const_expr);
-        CU_ASSERT_PTR_EQUAL(u->default_discriminator.branch, c);
+        CU_ASSERT_EQUAL(u->unused_labels, 0);
+        CU_ASSERT(idl_mask(u->default_case) == mask);
+        CU_ASSERT_PTR_EQUAL(idl_parent(u->default_case), c);
       }
-      l = u->default_discriminator.const_expr;
+      l = u->default_case ? u->default_case->const_expr : NULL;
       CU_ASSERT_FATAL(idl_type(l) == IDL_BOOL);
+      assert(l);
       CU_ASSERT_EQUAL(l->value.bln, tests[i].discriminant);
     }
     idl_delete_pstate(pstate);
@@ -354,9 +365,10 @@ CU_Test(idl_union, default_discriminator_signed_int)
     ret = parse_string(buf, &pstate);
     CU_ASSERT_EQUAL_FATAL(ret, IDL_RETCODE_OK);
     CU_ASSERT_PTR_NOT_NULL_FATAL(pstate);
+    assert(pstate);
     u = (const idl_union_t *)pstate->root;
     CU_ASSERT_FATAL(idl_is_union(u));
-    c = u->branches;
+    c = u->cases;
     CU_ASSERT_FATAL(idl_is_case(c));
     cl = c->labels;
     CU_ASSERT_FATAL(idl_is_case_label(cl));
@@ -365,14 +377,14 @@ CU_Test(idl_union, default_discriminator_signed_int)
     CU_ASSERT_FATAL(idl_type(l) == IDL_INT8);
     CU_ASSERT_EQUAL(l->value.int8, tests[i].label);
     if (tests[i].branch) {
-      CU_ASSERT_EQUAL(u->default_discriminator.condition, IDL_DEFAULT_CASE);
-      CU_ASSERT_PTR_EQUAL(u->default_discriminator.branch, idl_next(c));
+      CU_ASSERT(idl_mask(u->default_case) == IDL_DEFAULT_CASE_LABEL);
+      CU_ASSERT_PTR_EQUAL(idl_parent(u->default_case), idl_next(c));
     } else {
-      CU_ASSERT_EQUAL(u->default_discriminator.condition, IDL_IMPLICIT_DEFAULT);
-      CU_ASSERT_PTR_NULL(u->default_discriminator.branch);
+      CU_ASSERT(idl_mask(u->default_case) == IDL_IMPLICIT_DEFAULT_CASE_LABEL);
+      CU_ASSERT_PTR_EQUAL(idl_parent(u->default_case), u);
     }
-    CU_ASSERT_FATAL(idl_is_literal(u->default_discriminator.const_expr));
-    l = u->default_discriminator.const_expr;
+    CU_ASSERT_FATAL(idl_is_literal(u->default_case->const_expr));
+    l = u->default_case->const_expr;
     CU_ASSERT_FATAL(idl_type(l) == IDL_INT8);
     CU_ASSERT_EQUAL(l->value.int8, tests[i].discriminant);
     idl_delete_pstate(pstate);
@@ -418,9 +430,10 @@ CU_Test(idl_union, default_discriminator_unsigned_int)
     ret = parse_string(buf, &pstate);
     CU_ASSERT_EQUAL_FATAL(ret, IDL_RETCODE_OK);
     CU_ASSERT_PTR_NOT_NULL_FATAL(pstate);
+    assert(pstate);
     u = (const idl_union_t *)pstate->root;
     CU_ASSERT_FATAL(idl_is_union(u));
-    c = u->branches;
+    c = u->cases;
     CU_ASSERT_FATAL(idl_is_case(c));
     cl = c->labels;
     CU_ASSERT_FATAL(idl_is_case_label(cl));
@@ -429,14 +442,16 @@ CU_Test(idl_union, default_discriminator_unsigned_int)
     CU_ASSERT_FATAL(idl_type(l) == IDL_UINT8);
     CU_ASSERT_EQUAL(l->value.uint8, tests[i].label);
     if (tests[i].branch) {
-      CU_ASSERT_EQUAL(u->default_discriminator.condition, IDL_DEFAULT_CASE);
-      CU_ASSERT_PTR_EQUAL(u->default_discriminator.branch, idl_next(c));
+      CU_ASSERT(u->default_case && u->default_case->const_expr);
+      CU_ASSERT(idl_mask(u->default_case) == IDL_DEFAULT_CASE_LABEL);
+      CU_ASSERT_PTR_EQUAL(idl_parent(u->default_case), idl_next(c));
     } else {
-      CU_ASSERT_EQUAL(u->default_discriminator.condition, IDL_IMPLICIT_DEFAULT);
-      CU_ASSERT_PTR_NULL(u->default_discriminator.branch);
+      CU_ASSERT(idl_mask(u->default_case) == IDL_IMPLICIT_DEFAULT_CASE_LABEL);
+      CU_ASSERT(u->default_case && u->default_case->const_expr);
+      CU_ASSERT_PTR_EQUAL(idl_parent(u->default_case), u);
     }
-    CU_ASSERT_FATAL(idl_is_literal(u->default_discriminator.const_expr));
-    l = u->default_discriminator.const_expr;
+    CU_ASSERT_FATAL(idl_is_literal(u->default_case->const_expr));
+    l = u->default_case->const_expr;
     CU_ASSERT_FATAL(idl_type(l) == IDL_UINT8);
     CU_ASSERT_EQUAL(l->value.uint8, tests[i].discriminant);
     idl_delete_pstate(pstate);
@@ -465,15 +480,15 @@ CU_Test(idl_union, default_discriminator_enum)
   ret = parse_string(idl, &pstate);
   CU_ASSERT_EQUAL_FATAL(ret, IDL_RETCODE_OK);
   CU_ASSERT_PTR_NOT_NULL_FATAL(pstate);
+  assert(pstate);
   e1 = (const idl_enum_t *)pstate->root;
   CU_ASSERT_FATAL(idl_is_enum(e1));
   e1x = e1->enumerators;
   CU_ASSERT_FATAL(idl_is_enumerator(e1x));
   u1 = idl_next(e1);
   CU_ASSERT_FATAL(idl_is_union(u1));
-  CU_ASSERT_EQUAL(u1->default_discriminator.condition, IDL_IMPLICIT_DEFAULT);
-  CU_ASSERT_PTR_EQUAL(u1->default_discriminator.const_expr, e1x);
-  CU_ASSERT_PTR_NULL(u1->default_discriminator.branch);
+  CU_ASSERT_FATAL(idl_mask(u1->default_case) == IDL_IMPLICIT_DEFAULT_CASE_LABEL);
+  CU_ASSERT(u1->default_case && u1->default_case->const_expr == e1x);
   idl_delete_pstate(pstate);
 
   idl = "enum e1 { e11, e12 };\n"
@@ -482,15 +497,15 @@ CU_Test(idl_union, default_discriminator_enum)
   ret = parse_string(idl, &pstate);
   CU_ASSERT_EQUAL_FATAL(ret, IDL_RETCODE_OK);
   CU_ASSERT_PTR_NOT_NULL_FATAL(pstate);
+  assert(pstate);
   e1 = (const idl_enum_t *)pstate->root;
   CU_ASSERT_FATAL(idl_is_enum(e1));
   e1x = idl_next(e1->enumerators);
   CU_ASSERT_FATAL(idl_is_enumerator(e1x));
   u1 = idl_next(e1);
   CU_ASSERT_FATAL(idl_is_union(u1));
-  CU_ASSERT_EQUAL(u1->default_discriminator.condition, IDL_IMPLICIT_DEFAULT);
-  CU_ASSERT_PTR_EQUAL(u1->default_discriminator.const_expr, e1x);
-  CU_ASSERT_PTR_NULL(u1->default_discriminator.branch);
+  CU_ASSERT_FATAL(idl_mask(u1->default_case) == IDL_IMPLICIT_DEFAULT_CASE_LABEL);
+  CU_ASSERT(u1->default_case && u1->default_case->const_expr == e1x);
   idl_delete_pstate(pstate);
 
   idl = "enum e1 { e11, e12 };\n"
@@ -499,20 +514,20 @@ CU_Test(idl_union, default_discriminator_enum)
   ret = parse_string(idl, &pstate);
   CU_ASSERT_EQUAL_FATAL(ret, IDL_RETCODE_OK);
   CU_ASSERT_PTR_NOT_NULL_FATAL(pstate);
+  assert(pstate);
   e1 = (const idl_enum_t *)pstate->root;
   CU_ASSERT_FATAL(idl_is_enum(e1));
   e1x = e1->enumerators;
   CU_ASSERT_FATAL(idl_is_enumerator(e1x));
   u1 = idl_next(e1);
   CU_ASSERT_FATAL(idl_is_union(u1));
-  c = idl_next(u1->branches);
+  c = idl_next(u1->cases);
   CU_ASSERT_FATAL(idl_is_case(c));
   cl = c->labels;
   CU_ASSERT_FATAL(idl_is_case_label(cl));
-  CU_ASSERT_PTR_NULL(cl->const_expr);
-  CU_ASSERT_EQUAL(u1->default_discriminator.condition, IDL_DEFAULT_CASE);
-  CU_ASSERT_PTR_EQUAL(u1->default_discriminator.const_expr, e1x);
-  CU_ASSERT_PTR_EQUAL(u1->default_discriminator.branch, c);
+  CU_ASSERT_PTR_NOT_NULL(cl->const_expr);
+  CU_ASSERT_FATAL(idl_mask(u1->default_case) == IDL_DEFAULT_CASE_LABEL);
+  CU_ASSERT(u1->default_case && u1->default_case->const_expr == e1x);
   idl_delete_pstate(pstate);
 
   idl = "enum e1 { e11, e12 };\n"
@@ -521,20 +536,20 @@ CU_Test(idl_union, default_discriminator_enum)
   ret = parse_string(idl, &pstate);
   CU_ASSERT_EQUAL_FATAL(ret, IDL_RETCODE_OK);
   CU_ASSERT_PTR_NOT_NULL_FATAL(pstate);
+  assert(pstate);
   e1 = (const idl_enum_t *)pstate->root;
   CU_ASSERT_FATAL(idl_is_enum(e1));
   e1x = idl_next(e1->enumerators);
   CU_ASSERT_FATAL(idl_is_enumerator(e1x));
   u1 = idl_next(e1);
   CU_ASSERT_FATAL(idl_is_union(u1));
-  c = u1->branches;
+  c = u1->cases;
   CU_ASSERT_FATAL(idl_is_case(c));
   cl = c->labels;
   CU_ASSERT_FATAL(idl_is_case_label(cl));
   CU_ASSERT_PTR_EQUAL(cl->const_expr, e1x);
-  CU_ASSERT_EQUAL(u1->default_discriminator.condition, IDL_FIRST_DISCRIMINANT);
-  CU_ASSERT_PTR_EQUAL(u1->default_discriminator.const_expr, e1x);
-  CU_ASSERT_PTR_EQUAL(u1->default_discriminator.branch, c);
+  CU_ASSERT(idl_mask(u1->default_case) == IDL_CASE_LABEL);
+  CU_ASSERT_PTR_EQUAL(u1->default_case, cl);
   idl_delete_pstate(pstate);
 
   idl = "enum e1 { e11, e12 };\n"

@@ -81,11 +81,20 @@ struct ddsi_config_listelem {
 };
 
 #ifdef DDS_HAS_NETWORK_PARTITIONS
+struct networkpartition_address {
+  struct networkpartition_address *next;
+  ddsi_locator_t loc;
+};
+
 struct ddsi_config_networkpartition_listelem {
   struct ddsi_config_networkpartition_listelem *next;
   char *name;
   char *address_string;
-  struct addrset *as;
+  struct networkpartition_address *uc_addresses;
+  struct networkpartition_address *asm_addresses;
+#ifdef DDS_HAS_SSM
+  struct networkpartition_address *ssm_addresses;
+#endif
 };
 
 struct ddsi_config_ignoredpartition_listelem {
@@ -384,6 +393,7 @@ struct ddsi_config
 
   int use_multicast_if_mreqn;
   struct ddsi_config_prune_deleted_ppant prune_deleted_ppant;
+  int redundant_networking;
 
 #ifdef DDS_HAS_SECURITY
   struct ddsi_config_omg_security_listelem *omg_security_configuration;
@@ -391,6 +401,8 @@ struct ddsi_config
 
 #ifdef DDS_HAS_SHM
   int enable_shm;
+  char *shm_locator;
+  char *iceoryx_service;
   enum ddsi_shm_loglevel shm_log_lvl;
   uint32_t sub_queue_capacity;
   uint32_t sub_history_request;

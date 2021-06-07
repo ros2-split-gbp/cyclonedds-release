@@ -16,14 +16,13 @@
 
 #include "dds/ddsrt/bswap.h"
 #include "dds/ddsi/q_protocol.h" /* for, e.g., SubmessageKind_t */
-#include "dds/ddsi/ddsi_xqos.h" /* for, e.g., octetseq, stringseq */
+//#include "dds/ddsi/ddsi_xqos.h" /* for, e.g., octetseq, stringseq */
 #include "dds/ddsi/ddsi_tran.h"
 #include "dds/features.h"
 
 #ifdef DDS_HAS_SHM
 #include "dds/ddsi/ddsi_keyhash.h"
 #endif
-
 
 #if defined (__cplusplus)
 extern "C" {
@@ -86,7 +85,7 @@ void nn_xmsgpool_free (struct nn_xmsgpool *pool);
 struct nn_xmsg *nn_xmsg_new (struct nn_xmsgpool *pool, const ddsi_guid_t *src_guid, struct participant *pp, size_t expected_size, enum nn_xmsg_kind kind);
 
 /* For sending to a particular destination (participant) */
-void nn_xmsg_setdst1 (struct ddsi_domaingv *gv, struct nn_xmsg *m, const ddsi_guid_prefix_t *gp, const ddsi_locator_t *addr);
+void nn_xmsg_setdst1 (struct ddsi_domaingv *gv, struct nn_xmsg *m, const ddsi_guid_prefix_t *gp, const ddsi_xlocator_t *addr);
 bool nn_xmsg_getdst1prefix (struct nn_xmsg *m, ddsi_guid_prefix_t *gp);
 
 /* For sending to a particular proxy reader; this is a convenience
@@ -165,7 +164,7 @@ int nn_xmsg_addpar_sentinel_ifparam (struct nn_xmsg *m);
 
 /* XPACK */
 
-struct nn_xpack * nn_xpack_new (ddsi_tran_conn_t conn, uint32_t bw_limit, bool async_mode);
+struct nn_xpack * nn_xpack_new (struct ddsi_domaingv *gv, uint32_t bw_limit, bool async_mode);
 void nn_xpack_free (struct nn_xpack *xp);
 void nn_xpack_send (struct nn_xpack *xp, bool immediately /* unused */);
 int nn_xpack_addmsg (struct nn_xpack *xp, struct nn_xmsg *m, const uint32_t flags);
