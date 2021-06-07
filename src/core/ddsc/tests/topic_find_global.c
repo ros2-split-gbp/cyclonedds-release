@@ -102,6 +102,8 @@ CU_Test(ddsc_topic_find_global, participant, .init = topic_find_global_init, .fi
   CU_ASSERT_FATAL (topic > 0);
 }
 
+static void msg (const char *msg, ...) ddsrt_attribute_format((printf, 1, 2));
+
 static void msg (const char *msg, ...)
 {
   va_list args;
@@ -202,7 +204,7 @@ CU_Theory ((uint32_t num_local_pp, uint32_t num_remote_pp, uint32_t num_tp), dds
     create_args[n].num_tp = num_tp;
     create_args[n].pp = remote ? participant_remote : g_participant1;
     create_unique_topic_name ("ddsc_topic_find_global", create_args[n].topic_name_prefix, MAX_NAME_SIZE);
-    create_args[n].topic_desc = n % 3 ? (n % 3 == 1 ? &Space_Type2_desc : &Space_Type3_desc) : &Space_Type1_desc;
+    create_args[n].topic_desc = (n % 3) ? (n % 3 == 1 ? &Space_Type2_desc : &Space_Type3_desc) : &Space_Type1_desc;
 
     ddsrt_thread_t thread_id;
     ddsrt_threadattr_t thread_attr;
