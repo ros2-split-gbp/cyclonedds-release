@@ -529,7 +529,7 @@ static size_t cfg_note (struct cfgst *cfgst, uint32_t cat, size_t bsz, const cha
   return 0;
 }
 
-static void cfg_warning (struct cfgst *cfgst, const char *fmt, ...) ddsrt_attribute_format ((printf, 2, 3));
+static void cfg_warning (struct cfgst *cfgst, const char *fmt, ...) ddsrt_attribute_format_printf(2, 3);
 
 static void cfg_warning (struct cfgst *cfgst, const char *fmt, ...)
 {
@@ -542,7 +542,7 @@ static void cfg_warning (struct cfgst *cfgst, const char *fmt, ...)
   } while (bsz > 0);
 }
 
-static enum update_result cfg_error (struct cfgst *cfgst, const char *fmt, ...) ddsrt_attribute_format ((printf, 2, 3));
+static enum update_result cfg_error (struct cfgst *cfgst, const char *fmt, ...) ddsrt_attribute_format_printf(2, 3);
 
 static enum update_result cfg_error (struct cfgst *cfgst, const char *fmt, ...)
 {
@@ -556,7 +556,7 @@ static enum update_result cfg_error (struct cfgst *cfgst, const char *fmt, ...)
   return URES_ERROR;
 }
 
-static void cfg_logelem (struct cfgst *cfgst, uint32_t sources, const char *fmt, ...) ddsrt_attribute_format ((printf, 3, 4));
+static void cfg_logelem (struct cfgst *cfgst, uint32_t sources, const char *fmt, ...) ddsrt_attribute_format_printf(3, 4);
 
 static void cfg_logelem (struct cfgst *cfgst, uint32_t sources, const char *fmt, ...)
 {
@@ -627,10 +627,16 @@ static void *cfg_address (UNUSED_ARG (struct cfgst *cfgst), void *parent, struct
   return (char *) parent + cfgelem->elem_offset;
 }
 
-static void *cfg_deref_address (UNUSED_ARG (struct cfgst *cfgst), void *parent, struct cfgelem const * const cfgelem)
+static struct ddsi_config_listelem **cfg_list_address (UNUSED_ARG (struct cfgst *cfgst), void *parent, struct cfgelem const * const cfgelem)
 {
   assert (cfgelem->multiplicity > 1);
-  return *((void **) ((char *) parent + cfgelem->elem_offset));
+  return ((struct ddsi_config_listelem **) ((char *) parent + cfgelem->elem_offset));
+}
+
+static void *cfg_deref_address (struct cfgst *cfgst, void *parent, struct cfgelem const * const cfgelem)
+{
+  assert (cfgelem->multiplicity > 1);
+  return (void *) *cfg_list_address (cfgst, parent, cfgelem);
 }
 
 static void *if_common (UNUSED_ARG (struct cfgst *cfgst), void *parent, struct cfgelem const * const cfgelem, unsigned size)
@@ -686,7 +692,7 @@ static int if_network_partition (struct cfgst *cfgst, void *parent, struct cfgel
 static int if_ignored_partition (struct cfgst *cfgst, void *parent, struct cfgelem const * const cfgelem)
 {
   struct ddsi_config_ignoredpartition_listelem *new = if_common (cfgst, parent, cfgelem, sizeof(*new));
-  if (if_common (cfgst, parent, cfgelem, sizeof (struct ddsi_config_ignoredpartition_listelem)) == NULL)
+  if (new == NULL)
     return -1;
   new->DCPSPartitionTopic = NULL;
   return 0;
@@ -830,7 +836,7 @@ static enum update_result uf_natint64_unit(struct cfgst *cfgst, int64_t *elem, c
   if (*value == 0) {
     *elem = 0; /* some static analyzers don't "get it" */
     return cfg_error(cfgst, "%s: empty string is not a valid value", value);
-  } else if (sscanf (value, "%lld%n", (long long int *) &v_int, &pos) == 1 && (mult = lookup_multiplier (cfgst, unittab, value, pos, v_int == 0, def_mult, 0)) != 0) {
+  } else if (sscanf (value, "%" SCNd64 "%n", &v_int, &pos) == 1 && (mult = lookup_multiplier (cfgst, unittab, value, pos, v_int == 0, def_mult, 0)) != 0) {
     assert(mult > 0);
     if (v_int < 0 || v_int > max / mult || mult * v_int < min)
       return cfg_error (cfgst, "%s: value out of range", value);
@@ -1595,7 +1601,6 @@ static int set_defaults (struct cfgst *cfgst, void *parent, int isattr, struct c
   return ok;
 }
 
-
 static void print_configitems (struct cfgst *cfgst, void *parent, int isattr, struct cfgelem const * const cfgelem, uint32_t sources)
 {
   for (const struct cfgelem *ce = cfgelem; ce && ce->name; ce++)
@@ -2170,6 +2175,47 @@ static FILE *config_open_file (char *tok, char **cursor, uint32_t domid)
   return fp;
 }
 
+static void reverse_config_list (struct ddsi_config_listelem **list)
+{
+  struct ddsi_config_listelem *rev = NULL;
+  while (*list)
+  {
+    struct ddsi_config_listelem *e = *list;
+    *list = e->next;
+    e->next = rev;
+    rev = e;
+  }
+  *list = rev;
+}
+
+static void reverse_lists (struct cfgst *cfgst, void *parent, struct cfgelem const * const cfgelem)
+{
+  for (const struct cfgelem *ce = cfgelem; ce && ce->name; ce++)
+  {
+    if (ce->name[0] == '>') /* moved, so don't care */
+      continue;
+
+    if (ce->multiplicity <= 1)
+    {
+      if (ce->children)
+        reverse_lists (cfgst, parent, ce->children);
+      if (ce->attributes)
+        reverse_lists (cfgst, parent, ce->attributes);
+    }
+    else
+    {
+      reverse_config_list (cfg_list_address (cfgst, parent, ce));
+      for (struct ddsi_config_listelem *p = cfg_deref_address (cfgst, parent, ce); p; p = p->next)
+      {
+        if (ce->children)
+          reverse_lists (cfgst, p, ce->children);
+        if (ce->attributes)
+          reverse_lists (cfgst, p, ce->attributes);
+      }
+    }
+  }
+}
+
 struct cfgst *config_init (const char *config, struct ddsi_config *cfg, uint32_t domid)
 {
   int ok = 1;
@@ -2263,6 +2309,9 @@ struct cfgst *config_init (const char *config, struct ddsi_config *cfg, uint32_t
   /* Set defaults for everything not set that we have a default value
      for, signal errors for things unset but without a default. */
   ok = ok && set_defaults (cfgst, cfgst->cfg, 0, root_cfgelems);
+
+  /* All lists are reversed compared to the input; undo that (mostly for cosmetic reasons, but for partition mappings the order really matters) */
+  reverse_lists (cfgst, cfgst->cfg, root_cfgelems);
 
   /* Domain id UINT32_MAX can only happen if the application specified DDS_DOMAIN_DEFAULT
      and the configuration has "any" (either explicitly or as a default).  In that case,

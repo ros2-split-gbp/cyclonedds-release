@@ -70,7 +70,7 @@ static void cover_makeroom (struct cover **c, int rdidx)
     (*c) = ddsrt_realloc (*c, cover_size ((*c)->nreaders + chunk, (*c)->nlocs));
     (*c)->nreaders += chunk;
     if ((*c)->rdnames)
-      (*c)->rdnames = ddsrt_realloc ((*c)->rdnames, (size_t) (*c)->nreaders * sizeof ((*c)->rdnames));
+      (*c)->rdnames = ddsrt_realloc ((*c)->rdnames, (size_t) (*c)->nreaders * sizeof (*(*c)->rdnames));
   }
 }
 
@@ -594,6 +594,7 @@ static bool wras_calc_cover (const struct writer *wr, const struct locset *locs,
   return true;
 
 addrset_changed:
+  locset_free (work_locs);
   cover_free (cov);
   return false;
 }
@@ -609,6 +610,8 @@ static struct costmap *wras_calc_costmap (const struct cover *covered, bool pref
 
 static void wras_trace_cover (const struct ddsi_domaingv *gv, const struct locset *locs, const struct costmap *wm, const struct cover *covered)
 {
+  if (!(gv->logconfig.c.mask & DDS_LC_DISCOVERY))
+    return;
   const int nreaders = cover_get_nreaders (covered);
   const int nlocs = cover_get_nlocs (covered);
   assert (nlocs == locs->nlocs);

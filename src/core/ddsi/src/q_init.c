@@ -71,7 +71,6 @@
 
 #ifdef DDS_HAS_SHM
 #include "dds/ddsrt/io.h"
-#include "dds/ddsi/shm_sync.h"
 #include "iceoryx_binding_c/runtime.h"
 #include "dds/ddsi/shm_init.h"
 #endif
@@ -180,27 +179,23 @@ static int set_recvips (struct ddsi_domaingv *gv)
   {
     if (ddsrt_strcasecmp (gv->config.networkRecvAddressStrings[0], "all") == 0)
     {
-#if DDSRT_HAVE_IPV6
-      if (gv->ipv6_link_local)
+      if (gv->using_link_local_intf)
       {
-        GVWARNING ("DDSI2EService/General/MulticastRecvNetworkInterfaceAddresses: using 'preferred' instead of 'all' because of IPv6 link-local address\n");
+        GVWARNING ("DDSI2EService/General/MulticastRecvNetworkInterfaceAddresses: using 'preferred' instead of 'all' because of link-local address\n");
         gv->recvips_mode = RECVIPS_MODE_PREFERRED;
       }
       else
-#endif
       {
         gv->recvips_mode = RECVIPS_MODE_ALL;
       }
     }
     else if (ddsrt_strcasecmp (gv->config.networkRecvAddressStrings[0], "any") == 0)
     {
-#if DDSRT_HAVE_IPV6
-      if (gv->ipv6_link_local)
+      if (gv->using_link_local_intf)
       {
-        GVERROR ("DDSI2EService/General/MulticastRecvNetworkInterfaceAddresses: 'any' is unsupported in combination with an IPv6 link-local address\n");
+        GVERROR ("DDSI2EService/General/MulticastRecvNetworkInterfaceAddresses: 'any' is unsupported in combination with a link-local address\n");
         return -1;
       }
-#endif
       gv->recvips_mode = RECVIPS_MODE_ANY;
     }
     else if (ddsrt_strcasecmp (gv->config.networkRecvAddressStrings[0], "preferred") == 0)
@@ -211,8 +206,7 @@ static int set_recvips (struct ddsi_domaingv *gv)
     {
       gv->recvips_mode = RECVIPS_MODE_NONE;
     }
-#if DDSRT_HAVE_IPV6
-    else if (gv->ipv6_link_local)
+    else if (gv->using_link_local_intf)
     {
       /* If the configuration explicitly includes the selected
        interface, treat it as "preferred", else as "none"; warn if
@@ -238,7 +232,6 @@ static int set_recvips (struct ddsi_domaingv *gv)
         GVWARNING ("DDSI2EService/General/MulticastRecvNetworkInterfaceAddresses: using 'preferred' because of IPv6 local address\n");
       }
     }
-#endif
     else
     {
       struct config_in_addr_node **recvnode = &gv->recvips;
@@ -1122,7 +1115,7 @@ static void free_conns (struct ddsi_domaingv *gv)
 static int iceoryx_init (struct ddsi_domaingv *gv)
 {
   shm_set_loglevel(gv->config.shm_log_lvl);
-  
+
   char *sptr;
   ddsrt_asprintf (&sptr, "iceoryx_rt_%"PRIdPID"_%"PRId64, ddsrt_getpid (), gv->tstart.v);
   GVLOG (DDS_LC_SHM, "Current process name for iceoryx is %s\n", sptr);
@@ -1159,7 +1152,7 @@ static int iceoryx_init (struct ddsi_domaingv *gv)
   else
   {
     int if_index;
-    
+
     // Try to avoid loopback interfaces for getting a MAC address, but if all
     // we have are loopback interfaces, then it really doesn't matter.
     for (if_index = 0; if_index < gv->n_interfaces; if_index++)
@@ -1211,8 +1204,6 @@ static int iceoryx_init (struct ddsi_domaingv *gv)
   intf->netmask.port = NN_LOCATOR_PORT_INVALID;
   memset (intf->netmask.address, 0, sizeof (intf->netmask.address) - 6);
   gv->n_interfaces++;
-
-  shm_mutex_init();
   return 0;
 }
 #endif
@@ -1251,12 +1242,13 @@ static int convert_network_partition_addresses (struct ddsi_domaingv *gv, uint32
 
     struct networkpartition_address **nextp_uc = &np->uc_addresses;
     struct networkpartition_address **nextp_asm = &np->asm_addresses;
+    assert (*nextp_uc == NULL && *nextp_asm == NULL);
 #ifdef DDS_HAS_SSM
     struct networkpartition_address **nextp_ssm = &np->ssm_addresses;
+    assert (*nextp_ssm == NULL);
 #endif
-    assert (*nextp_uc == NULL && *nextp_asm == NULL && *nextp_ssm == NULL);
     char *copy = ddsrt_strdup (np->address_string), *cursor = copy, *tok;
-    while (rc >= 0 && (tok = ddsrt_strsep (&cursor, ",;")) != NULL)
+    while (rc >= 0 && (tok = ddsrt_strsep (&cursor, ",")) != NULL)
     {
       if (strspn (tok, " \t") == strlen (tok))
         continue;
@@ -1475,36 +1467,32 @@ int rtps_init (struct ddsi_domaingv *gv)
   gv->xmsgpool = nn_xmsgpool_new ();
   gv->serpool = ddsi_serdatapool_new ();
 
-  ddsi_plist_init_default_participant (&gv->default_plist_pp);
-  ddsi_plist_init_default_participant (&gv->default_local_plist_pp);
-  ddsi_xqos_init_default_reader (&gv->default_xqos_rd);
-  ddsi_xqos_init_default_writer (&gv->default_xqos_wr);
-  ddsi_xqos_init_default_writer_noautodispose (&gv->default_xqos_wr_nad);
-  ddsi_xqos_init_default_topic (&gv->default_xqos_tp);
-  ddsi_xqos_init_default_subscriber (&gv->default_xqos_sub);
-  ddsi_xqos_init_default_publisher (&gv->default_xqos_pub);
-  ddsi_xqos_copy (&gv->spdp_endpoint_xqos, &gv->default_xqos_rd);
-  ddsi_xqos_mergein_missing (&gv->spdp_endpoint_xqos, &gv->default_xqos_wr, ~(uint64_t)0);
+  // copy default participant plist into one that is used for this domain's participants
+  // a plain copy is safe because it doesn't alias anything
+  gv->default_local_plist_pp = ddsi_default_plist_participant;
+  assert (gv->default_local_plist_pp.aliased == 0 && gv->default_local_plist_pp.qos.aliased == 0);
+  ddsi_xqos_copy (&gv->spdp_endpoint_xqos, &ddsi_default_qos_reader);
+  ddsi_xqos_mergein_missing (&gv->spdp_endpoint_xqos, &ddsi_default_qos_writer, ~(uint64_t)0);
   gv->spdp_endpoint_xqos.durability.kind = DDS_DURABILITY_TRANSIENT_LOCAL;
   assert (gv->spdp_endpoint_xqos.reliability.kind == DDS_RELIABILITY_BEST_EFFORT);
-  make_builtin_endpoint_xqos (&gv->builtin_endpoint_xqos_rd, &gv->default_xqos_rd);
-  make_builtin_endpoint_xqos (&gv->builtin_endpoint_xqos_wr, &gv->default_xqos_wr);
+  make_builtin_endpoint_xqos (&gv->builtin_endpoint_xqos_rd, &ddsi_default_qos_reader);
+  make_builtin_endpoint_xqos (&gv->builtin_endpoint_xqos_wr, &ddsi_default_qos_writer);
 #ifdef DDS_HAS_TYPE_DISCOVERY
-  make_builtin_volatile_endpoint_xqos(&gv->builtin_volatile_xqos_rd, &gv->default_xqos_rd);
-  make_builtin_volatile_endpoint_xqos(&gv->builtin_volatile_xqos_wr, &gv->default_xqos_wr);
+  make_builtin_volatile_endpoint_xqos(&gv->builtin_volatile_xqos_rd, &ddsi_default_qos_reader);
+  make_builtin_volatile_endpoint_xqos(&gv->builtin_volatile_xqos_wr, &ddsi_default_qos_writer);
 #endif
 #ifdef DDS_HAS_SECURITY
-  make_builtin_volatile_endpoint_xqos(&gv->builtin_secure_volatile_xqos_rd, &gv->default_xqos_rd);
-  make_builtin_volatile_endpoint_xqos(&gv->builtin_secure_volatile_xqos_wr, &gv->default_xqos_wr);
-  ddsi_xqos_copy (&gv->builtin_stateless_xqos_rd, &gv->default_xqos_rd);
-  ddsi_xqos_copy (&gv->builtin_stateless_xqos_wr, &gv->default_xqos_wr);
+  make_builtin_volatile_endpoint_xqos(&gv->builtin_secure_volatile_xqos_rd, &ddsi_default_qos_reader);
+  make_builtin_volatile_endpoint_xqos(&gv->builtin_secure_volatile_xqos_wr, &ddsi_default_qos_writer);
+  ddsi_xqos_copy (&gv->builtin_stateless_xqos_rd, &ddsi_default_qos_reader);
+  ddsi_xqos_copy (&gv->builtin_stateless_xqos_wr, &ddsi_default_qos_writer);
   gv->builtin_stateless_xqos_wr.reliability.kind = DDS_RELIABILITY_BEST_EFFORT;
   gv->builtin_stateless_xqos_wr.durability.kind = DDS_DURABILITY_VOLATILE;
 
   /* Setting these properties allows the CryptoKeyFactory to recognize
    * the entities (see DDS Security spec chapter 8.8.8.1). */
-  add_property_to_xqos(&gv->builtin_secure_volatile_xqos_rd, "dds.sec.builtin_endpoint_name", "BuiltinParticipantVolatileMessageSecureReader");
-  add_property_to_xqos(&gv->builtin_secure_volatile_xqos_wr, "dds.sec.builtin_endpoint_name", "BuiltinParticipantVolatileMessageSecureWriter");
+  add_property_to_xqos(&gv->builtin_secure_volatile_xqos_rd, DDS_SEC_PROP_BUILTIN_ENDPOINT_NAME, "BuiltinParticipantVolatileMessageSecureReader");
+  add_property_to_xqos(&gv->builtin_secure_volatile_xqos_wr, DDS_SEC_PROP_BUILTIN_ENDPOINT_NAME, "BuiltinParticipantVolatileMessageSecureWriter");
 #endif
 
   ddsrt_mutex_init (&gv->sertypes_lock);
@@ -1929,14 +1917,7 @@ err_unicast_sockets:
   ddsi_xqos_fini (&gv->builtin_endpoint_xqos_wr);
   ddsi_xqos_fini (&gv->builtin_endpoint_xqos_rd);
   ddsi_xqos_fini (&gv->spdp_endpoint_xqos);
-  ddsi_xqos_fini (&gv->default_xqos_pub);
-  ddsi_xqos_fini (&gv->default_xqos_sub);
-  ddsi_xqos_fini (&gv->default_xqos_tp);
-  ddsi_xqos_fini (&gv->default_xqos_wr_nad);
-  ddsi_xqos_fini (&gv->default_xqos_wr);
-  ddsi_xqos_fini (&gv->default_xqos_rd);
   ddsi_plist_fini (&gv->default_local_plist_pp);
-  ddsi_plist_fini (&gv->default_plist_pp);
 
   ddsi_serdatapool_free (gv->serpool);
   nn_xmsgpool_free (gv->xmsgpool);
@@ -2314,14 +2295,7 @@ void rtps_fini (struct ddsi_domaingv *gv)
   ddsi_xqos_fini (&gv->builtin_endpoint_xqos_wr);
   ddsi_xqos_fini (&gv->builtin_endpoint_xqos_rd);
   ddsi_xqos_fini (&gv->spdp_endpoint_xqos);
-  ddsi_xqos_fini (&gv->default_xqos_pub);
-  ddsi_xqos_fini (&gv->default_xqos_sub);
-  ddsi_xqos_fini (&gv->default_xqos_tp);
-  ddsi_xqos_fini (&gv->default_xqos_wr_nad);
-  ddsi_xqos_fini (&gv->default_xqos_wr);
-  ddsi_xqos_fini (&gv->default_xqos_rd);
   ddsi_plist_fini (&gv->default_local_plist_pp);
-  ddsi_plist_fini (&gv->default_plist_pp);
 
   ddsrt_mutex_destroy (&gv->lock);
 
