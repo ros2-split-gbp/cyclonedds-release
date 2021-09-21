@@ -31,14 +31,6 @@ typedef enum {
     AUTH_ALGO_KIND_EC_PRIME256V1
 } AuthenticationAlgoKind_t;
 
-typedef enum {
-    AUTH_CONF_ITEM_PREFIX_UNKNOWN,
-    AUTH_CONF_ITEM_PREFIX_FILE,
-    AUTH_CONF_ITEM_PREFIX_DATA,
-    AUTH_CONF_ITEM_PREFIX_PKCS11
-} AuthConfItemPrefix_t;
-
-
 typedef struct AuthenticationChallenge {
     unsigned char value[DDS_SECURITY_AUTHENTICATION_CHALLENGE_SIZE];
 } AuthenticationChallenge;
@@ -47,15 +39,6 @@ typedef struct {
     uint32_t length;
     X509 **buffer;
 } X509Seq;
-
-typedef unsigned char HashValue_t[SHA256_DIGEST_LENGTH];
-
-/* Return a string that contains an openssl error description
- * When a openssl function returns an error this function can be
- * used to retrieve a descriptive error string.
- * Note that the returned string should be freed.
- */
-char * get_openssl_error_message(void);
 
 /* Return the subject name of contained in a X509 certificate
  * Note that the returned string should be freed.
@@ -86,15 +69,18 @@ DDS_Security_ValidationResult_t load_X509_certificate_from_file(const char *file
 /* Load a Private Key for the provided data (private key uri) */
 DDS_Security_ValidationResult_t load_X509_private_key(const char *data, const char *password, EVP_PKEY **privateKey, DDS_Security_SecurityException *ex);
 
+/* Load a Certificate Revocation List (CRL) for the provided data (CRL uri) */
+DDS_Security_ValidationResult_t load_X509_CRL(const char *data, X509_CRL **crl, DDS_Security_SecurityException *ex);
+
 /* Validate an identity certificate against the identityCA
  * The provided identity certificate is checked if it is
  * signed by the identity corresponding to the identityCA.
  *
  * Note: Currently only a self signed CA is supported
- *       The function does not yet check a CLR or ocsp
+ *       The function does not yet check OCSP
  *       for expiry of identity certificate.
  */
-DDS_Security_ValidationResult_t verify_certificate(X509 *identityCert, X509 *identityCa, DDS_Security_SecurityException *ex);
+DDS_Security_ValidationResult_t verify_certificate(X509 *identityCert, X509 *identityCa, X509_CRL *crl, DDS_Security_SecurityException *ex);
 
 DDS_Security_ValidationResult_t check_certificate_expiry(const X509 *cert, DDS_Security_SecurityException *ex);
 AuthenticationAlgoKind_t get_authentication_algo_kind(X509 *cert);
@@ -103,7 +89,6 @@ DDS_Security_ValidationResult_t get_certificate_contents(X509 *cert, unsigned ch
 DDS_Security_ValidationResult_t generate_dh_keys(EVP_PKEY **dhkey, AuthenticationAlgoKind_t authKind, DDS_Security_SecurityException *ex);
 DDS_Security_ValidationResult_t dh_public_key_to_oct(EVP_PKEY *pkey, AuthenticationAlgoKind_t algo, unsigned char **buffer, uint32_t *length, DDS_Security_SecurityException *ex);
 DDS_Security_ValidationResult_t dh_oct_to_public_key(EVP_PKEY **data, AuthenticationAlgoKind_t algo, const unsigned char *str, uint32_t size, DDS_Security_SecurityException *ex);
-AuthConfItemPrefix_t get_conf_item_type(const char *str, char **data);
 void free_ca_list_contents(X509Seq *ca_list);
 DDS_Security_ValidationResult_t get_trusted_ca_list(const char* trusted_ca_dir, X509Seq *ca_list, DDS_Security_SecurityException *ex);
 char * string_from_data(const unsigned char *data, uint32_t size);

@@ -19,7 +19,7 @@
 extern "C" {
 #endif
 
-DEFINE_ENTITY_LOCK_UNLOCK(inline, dds_subscriber, DDS_KIND_SUBSCRIBER)
+DEFINE_ENTITY_LOCK_UNLOCK(dds_subscriber, DDS_KIND_SUBSCRIBER)
 
 dds_entity_t
 dds__create_subscriber_l(
@@ -35,6 +35,10 @@ dds_subscriber_begin_coherent(
 dds_return_t
 dds_subscriber_end_coherent (
   dds_entity_t e);
+
+bool dds_subscriber_compute_data_on_readers_locked (dds_subscriber *sub);
+
+void dds_subscriber_adjust_materialize_data_on_readers (dds_subscriber *sub, bool materialization_needed) ddsrt_nonnull_all;
 
 #if defined (__cplusplus)
 }

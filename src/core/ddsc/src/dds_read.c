@@ -101,11 +101,10 @@ static dds_return_t dds_read_impl (bool take, dds_entity_t reader_or_condition, 
 
   /* read/take resets data available status -- must reset before reading because
      the actual writing is protected by RHC lock, not by rd->m_entity.m_lock */
-  dds_entity_status_reset (&rd->m_entity, DDS_DATA_AVAILABLE_STATUS);
-
-  /* reset DATA_ON_READERS status on subscriber after successful read/take */
-  assert (dds_entity_kind (rd->m_entity.m_parent) == DDS_KIND_SUBSCRIBER);
-  dds_entity_status_reset (rd->m_entity.m_parent, DDS_DATA_ON_READERS_STATUS);
+  const uint32_t sm_old = dds_entity_status_reset_ov (&rd->m_entity, DDS_DATA_AVAILABLE_STATUS);
+  /* reset DATA_ON_READERS status on subscriber after successful read/take if materialized */
+  if (sm_old & (DDS_DATA_ON_READERS_STATUS << SAM_ENABLED_SHIFT))
+    dds_entity_status_reset (rd->m_entity.m_parent, DDS_DATA_ON_READERS_STATUS);
 
   if (take)
     ret = dds_rhc_take (rd->m_rhc, lock, buf, si, maxs, mask, hand, cond);
@@ -165,11 +164,10 @@ static dds_return_t dds_readcdr_impl (bool take, dds_entity_t reader_or_conditio
 
   /* read/take resets data available status -- must reset before reading because
      the actual writing is protected by RHC lock, not by rd->m_entity.m_lock */
-  dds_entity_status_reset (&rd->m_entity, DDS_DATA_AVAILABLE_STATUS);
-
-  /* reset DATA_ON_READERS status on subscriber after successful read/take */
-  assert (dds_entity_kind (rd->m_entity.m_parent) == DDS_KIND_SUBSCRIBER);
-  dds_entity_status_reset (rd->m_entity.m_parent, DDS_DATA_ON_READERS_STATUS);
+  const uint32_t sm_old = dds_entity_status_reset_ov (&rd->m_entity, DDS_DATA_AVAILABLE_STATUS);
+  /* reset DATA_ON_READERS status on subscriber after successful read/take if materialized */
+  if (sm_old & (DDS_DATA_ON_READERS_STATUS << SAM_ENABLED_SHIFT))
+    dds_entity_status_reset (rd->m_entity.m_parent, DDS_DATA_ON_READERS_STATUS);
 
   if (take)
     ret = dds_rhc_takecdr (rd->m_rhc, lock, buf, si, maxs, mask & DDS_ANY_SAMPLE_STATE, mask & DDS_ANY_VIEW_STATE, mask & DDS_ANY_INSTANCE_STATE, hand);
@@ -509,32 +507,13 @@ dds_return_t dds_take_next_wl (dds_entity_t reader, void **buf, dds_sample_info_
   return dds_read_impl (true, reader, buf, 1u, 1u, si, mask, DDS_HANDLE_NIL, true, true);
 }
 
-dds_return_t dds_return_loan (dds_entity_t reader_or_condition, void **buf, int32_t bufsz)
+dds_return_t dds_return_reader_loan (dds_reader *rd, void **buf, int32_t bufsz)
 {
-  dds_reader *rd;
-  dds_entity *entity;
-  dds_return_t ret;
-
-  if (buf == NULL || (buf[0] == NULL && bufsz > 0) || (buf[0] != NULL && bufsz <= 0))
-    return DDS_RETCODE_BAD_PARAMETER;
-
-  if ((ret = dds_entity_pin (reader_or_condition, &entity)) < 0) {
-    return ret;
-  } else if (dds_entity_kind (entity) == DDS_KIND_READER) {
-    rd = (dds_reader *) entity;
-  } else if (dds_entity_kind (entity) != DDS_KIND_COND_READ && dds_entity_kind (entity) != DDS_KIND_COND_QUERY) {
-    dds_entity_unpin (entity);
-    return DDS_RETCODE_ILLEGAL_OPERATION;
-  } else {
-    rd = (dds_reader *) entity->m_parent;
-  }
-
   if (bufsz <= 0)
   {
     /* No data whatsoever, or an invocation following a failed read/take call.  Read/take
        already take care of restoring the state prior to their invocation if they return
        no data.  Return late so invalid handles can be detected. */
-    dds_entity_unpin (entity);
     return DDS_RETCODE_OK;
   }
   assert (buf[0] != NULL);
@@ -558,7 +537,6 @@ dds_return_t dds_return_loan (dds_entity_t reader_or_condition, void **buf, int3
   {
     /* Trying to return a loan that has been returned already */
     ddsrt_mutex_unlock (&rd->m_entity.m_mutex);
-    dds_entity_unpin (entity);
     return DDS_RETCODE_PRECONDITION_NOT_MET;
   }
   else
@@ -572,6 +550,5 @@ dds_return_t dds_return_loan (dds_entity_t reader_or_condition, void **buf, int3
     buf[0] = NULL;
   }
   ddsrt_mutex_unlock (&rd->m_entity.m_mutex);
-  dds_entity_unpin (entity);
   return DDS_RETCODE_OK;
 }

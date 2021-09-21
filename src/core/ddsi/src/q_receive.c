@@ -3156,7 +3156,7 @@ static int handle_submsg_sequence
     state = "parse:shortmsg";
     state_smkind = SMID_PAD;
     GVTRACE ("short (size %"PRIuSIZE" exp %p act %p)", submsg_size, (void *) submsg, (void *) end);
-    goto malformed_asleep;
+    goto malformed;
   }
   thread_state_asleep (ts1);
   assert (thread_is_asleep ());
@@ -3167,8 +3167,6 @@ static int handle_submsg_sequence
 
 malformed:
   thread_state_asleep (ts1);
-  assert (thread_is_asleep ());
-malformed_asleep:
   assert (thread_is_asleep ());
   malformed_packet_received (rst->gv, msg, submsg, len, state, state_smkind, hdr->vendorid);
   defer_hb_state_fini (gv, &defer_hb_state);
@@ -3533,6 +3531,19 @@ uint32_t recv_thread (void *vrecv_thread_arg)
       if ((rc = recv_thread_waitset_add_conn (waitset, gv->data_conn_mc)) < 0)
         DDS_FATAL("recv_thread: failed to add data_conn_mc to waitset\n");
       num_fixed += (unsigned)rc;
+
+      // OpenDDS doesn't respect the locator lists and insists on sending to the
+      // socket it received packets from
+      for (int i = 0; i < gv->n_interfaces; i++)
+      {
+        // Iceoryx gets added as a pseudo-interface but there's no socket to wait
+        // for input on
+        if (ddsi_conn_handle (gv->xmit_conns[i]) == DDSRT_INVALID_SOCKET)
+          continue;
+        if ((rc = recv_thread_waitset_add_conn (waitset, gv->xmit_conns[i])) < 0)
+          DDS_FATAL("recv_thread: failed to add transmit_conn[%d] to waitset\n", i);
+        num_fixed += (unsigned)rc;
+      }
     }
 
     while (ddsrt_atomic_ld32 (&gv->rtps_keepgoing))

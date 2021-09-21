@@ -51,6 +51,17 @@ target_include_directories(
 # SOVERSION should increase on incompatible ABI change
 set_target_properties(ddsc PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR})
 
+# define target property to indicate if Cyclone DDS is compiled with SHM support
+define_property(TARGET
+    PROPERTY SHM_SUPPORT_IS_AVAILABLE
+    BRIEF_DOCS "Indicator whether SHM support is available with current Cyclone DDS build configuration."
+    FULL_DOCS "Indicator whether SHM support is available with current Cyclone DDS build configuration."
+    )
+set_target_properties(ddsc PROPERTIES
+    SHM_SUPPORT_IS_AVAILABLE "${DDS_HAS_SHM}")
+set_target_properties(ddsc PROPERTIES EXPORT_PROPERTIES
+    "SHM_SUPPORT_IS_AVAILABLE")
+
 # Create a pseudo-target that other targets (i.e. examples, tests) can depend
 # on and can also be provided as import-target by a package-file when building
 # those targets outside the regular Cyclone build-tree (i.e. the installed tree)
@@ -78,6 +89,7 @@ endif()
 if(BUILD_DOCS)
   set(DOXYGEN_GENERATE_HTML NO)
   set(DOXYGEN_GENERATE_XML YES)
+  set(DOXYGEN_STRIP_FROM_PATH "ddsc/include/dds/")
   set(DOXYGEN_EXCLUDE_PATTERNS "*/tests/*")
   set(DOXYGEN_MACRO_EXPANSION YES)
   set(DOXYGEN_PREDEFINED
@@ -85,8 +97,9 @@ if(BUILD_DOCS)
     "__attribute__="
     "__declspec(x)="
     "DDS_EXPORT="
+    "DDS_INLINE_EXPORT="
     "DDS_DEPRECATED_EXPORT="
     "DDSRT_STATIC_ASSERT(x)=")
   find_package(Doxygen REQUIRED)
-  doxygen_add_docs(ddsc_api_docs "ddsc/include")
+  doxygen_add_docs(ddsc_api_docs "ddsc/include/dds/")
 endif()

@@ -277,7 +277,7 @@ create_node(
   node->describe = methods->describe;
   node->references = 1;
 
-  *((idl_node_t **)nodep) = node;
+  *((void **)nodep) = (void *)node;
   return IDL_RETCODE_OK;
 }
 
@@ -1471,7 +1471,7 @@ idl_finalize_union(
   if (used != 0) { /* sort labels to detect duplicates and determine default */
     size_t count;
 
-    if (!(labels = malloc(used * sizeof(*labels))))
+    if (!(labels = malloc((size_t)used * sizeof(*labels))))
       return IDL_RETCODE_NO_MEMORY;
 
     count = 0;
@@ -1485,7 +1485,7 @@ idl_finalize_union(
     }
 
     assert(count == used);
-    qsort(labels, used, sizeof(*labels), &compare_label);
+    qsort(labels, (size_t)used, sizeof(*labels), &compare_label);
 
     /* if a member corresponds to the default case label, its simple modifier
        shall set the discriminant to the first available default value
@@ -1741,6 +1741,18 @@ bool idl_is_default_case(const void *ptr)
 {
   const idl_case_t *node = ptr;
   static const idl_mask_t mask = IDL_DEFAULT_CASE_LABEL;
+  if (!(idl_mask(node) & IDL_CASE))
+    return false;
+  for (const idl_case_label_t *cl = node->labels; cl; cl = idl_next(cl))
+    if ((idl_mask(cl) & mask) == mask)
+      return true;
+  return false;
+}
+
+bool idl_is_implicit_default_case(const void *ptr)
+{
+  const idl_case_t *node = ptr;
+  static const idl_mask_t mask = IDL_IMPLICIT_DEFAULT_CASE_LABEL;
   if (!(idl_mask(node) & IDL_CASE))
     return false;
   for (const idl_case_label_t *cl = node->labels; cl; cl = idl_next(cl))
@@ -2367,7 +2379,7 @@ enum_is_consistent(
     for (b = rhs->enumerators; b; b = idl_next(b))
       if (strcmp(idl_identifier(a), idl_identifier(b)) == 0)
         break;
-    if (!n || a->value != b->value)
+    if (!b || a->value != b->value)
       return false;
   }
 
@@ -2617,6 +2629,7 @@ bool idl_is_annotation_appl(const void *ptr)
 {
 #if !defined(NDEBUG)
   static const idl_mask_t mask = IDL_MODULE |
+                                 IDL_ENUM |
                                  IDL_STRUCT | IDL_MEMBER |
                                  IDL_UNION | IDL_SWITCH_TYPE_SPEC;
 #endif
@@ -2748,6 +2761,8 @@ idl_type_spec_t *idl_type_spec(const void *node)
     return ((const idl_sequence_t *)node)->type_spec;
   if (mask & IDL_SWITCH_TYPE_SPEC)
     return ((const idl_switch_type_spec_t *)node)->type_spec;
+  if (mask & IDL_CONST)
+    return ((const idl_const_t *)node)->type_spec;
   return NULL;
 }
 
@@ -2791,9 +2806,8 @@ static bool no_specific_key(const void *node)
       if (member->key == IDL_TRUE)
         return false;
     }
-  } else {
-    assert(idl_mask(node) & IDL_UNION);
-    if (((const idl_union_t *)node)->switch_type_spec->key == IDL_TRUE)
+  } else if (idl_mask(node) & IDL_UNION) {
+    if (((const idl_union_t*)node)->switch_type_spec->key == IDL_TRUE)
       return false;
   }
 
