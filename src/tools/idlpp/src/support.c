@@ -1538,7 +1538,7 @@ int     get_ch( void)
     }
 
     if (mcpp_debug & GETC) {
-        mcpp_fprintf( DBG, "get_ch(%s) '%c' line %ld, bptr = %d, buffer"
+        mcpp_fprintf( DBG, "get_ch(%s) '%c' line %zu, bptr = %d, buffer"
             , file->fp ? cur_fullname : file->real_fname ? file->real_fname
             : file->filename ? file->filename : "NULL"
             , *file->bptr & UCHARMAX
@@ -1598,11 +1598,6 @@ int     get_ch( void)
         /* Do not free file->real_fname and file->full_fname        */
         cur_fullname = infile->full_fname;
         cur_fname = infile->real_fname;     /* Restore current fname*/
-        if (infile->pos != 0L) {            /* Includer was closed  */
-            infile->fp = fopen( cur_fullname, "r");
-            assert( infile->fp);
-            fseek( infile->fp, infile->pos, SEEK_SET);
-        }   /* Re-open the includer and restore the file-position   */
         len = (int) (infile->bptr - infile->buffer);
         infile->buffer = xrealloc( infile->buffer, NBUFF);
             /* Restore full size buffer to get the next line        */
@@ -1802,12 +1797,13 @@ end_line:
             temp++;
         if (*temp == '#'        /* This line starts with # token    */
                 || (mcpp_mode == STD && *temp == '%' && *(temp + 1) == ':'))
-            if (warn_level & 1)
+            if (warn_level & 1) {
                 assert( macro_line >= (ssize_t)LONG_MIN &&
                         macro_line <= (ssize_t)LONG_MAX);
                 cwarn(
     "Macro started at line %.0s%ld swallowed directive-like line"
                     , NULL, (long)macro_line, NULL);              /* _W1_ */
+            }
     }
     return  infile->buffer;
 }
@@ -2293,7 +2289,6 @@ FILEINFO *  get_file(
     file->buffer[ 0] = EOS;                 /* Force first read     */
     file->line = 0L;                        /* (Not used just yet)  */
     file->fp = NULL;                        /* No file yet          */
-    file->pos = 0L;                         /* No pos to remember   */
     file->parent = infile;                  /* Chain files together */
     file->initif = ifptr;                   /* Initial ifstack      */
     file->include_opt = include_opt;        /* Specified by -include*/
@@ -2563,6 +2558,7 @@ static void do_msg(
         if (file->fp == NULL) {             /* Macro                */
             if (file->filename) {
                 defp = look_id( file->filename);
+                assert (defp);
                 if ((defp->nargs > DEF_NOARGS_STANDARD)
                     && ! (file->parent && file->parent->filename
                         && str_eq( file->filename, file->parent->filename)))
@@ -2573,13 +2569,13 @@ static void do_msg(
             if (file->buffer[ 0] == '\0')
                 strcpy( file->buffer, "\n");
             if (mcpp_mode != OLD_PREP) {
-                mcpp_fprintf( ERR, "    from %s: %ld:    %s",
+                mcpp_fprintf( ERR, "    from %s: %zu:    %s",
                     file->line ? file->full_fname       /* Full-path-list   */
                         : "<stdin>",        /* Included by -include */
                     file->line,             /* Current line number  */
                     file->buffer);          /* The source line      */
             } else {
-                mcpp_fprintf( ERR, "    from %s: %ld:    ", file->full_fname
+                mcpp_fprintf( ERR, "    from %s: %zu:    ", file->full_fname
                         , file->line);
                 put_line( file->buffer, fp_err);
             }

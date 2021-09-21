@@ -85,6 +85,12 @@ static void *create_iox_chunk(dds_writer *wr)
     sample = SHIFT_PAST_ICEORYX_HEADER(ice_hdr);
     return sample;
 }
+
+static void release_iox_chunk(dds_writer *wr, void *sample)
+{
+  iceoryx_header_t *ice_hdr = SHIFT_BACK_TO_ICEORYX_HEADER(sample);
+  iox_pub_release_chunk(wr->m_iox_pub, ice_hdr);
+}
 #endif
 
 dds_return_t dds_loan_sample(dds_entity_t writer, void** sample)
@@ -111,6 +117,51 @@ dds_return_t dds_loan_sample(dds_entity_t writer, void** sample)
     ret = DDS_RETCODE_UNSUPPORTED;
   }
   dds_writer_unlock (wr);
+  return ret;
+#endif
+}
+
+dds_return_t dds_return_writer_loan(dds_writer *writer, void **buf, int32_t bufsz)
+{
+#ifndef DDS_HAS_SHM
+  (void) writer; (void) buf; (void) bufsz;
+  return DDS_RETCODE_UNSUPPORTED;
+#else
+  // Iceoryx publisher pointer is a constant so we can check outside the locks
+  if (writer->m_iox_pub == NULL)
+    return DDS_RETCODE_UNSUPPORTED;
+  if (bufsz <= 0)
+  {
+    // analogous to long-standing behaviour for the reader case, where it makes (some) sense
+    // as it allows passing in the result of a read/take operation regardless of whether that
+    // operation was successful
+    return DDS_RETCODE_OK;
+  }
+
+  ddsrt_mutex_lock (&writer->m_entity.m_mutex);
+  dds_return_t ret = DDS_RETCODE_OK;
+  for (int32_t i = 0; i < bufsz; i++)
+  {
+    if (buf[i] == NULL)
+    {
+      ret = DDS_RETCODE_BAD_PARAMETER;
+      break;
+    }
+    else if (!deregister_pub_loan (writer, buf[i]))
+    {
+      ret = DDS_RETCODE_PRECONDITION_NOT_MET;
+      break;
+    }
+    else
+    {
+      release_iox_chunk (writer, buf[i]);
+      // return loan on the reader nulls buf[0], but here it makes more sense to clear all
+      // successfully returned ones: then, on failure, the application can figure out which
+      // ones weren't returned by looking for the first non-null pointer
+      buf[i] = NULL;
+    }
+  }
+  ddsrt_mutex_unlock (&writer->m_entity.m_mutex);
   return ret;
 #endif
 }

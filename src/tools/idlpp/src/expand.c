@@ -807,8 +807,8 @@ static char *   replace(
         dump_string( "prescan exit", catbuf);
     }
 
-    assert( arglist);
     if (nargs > 0) {    /* Function-like macro with any argument    */
+        assert( arglist);
         expbuf = xmalloc( (size_t) (NMACWORK + IDMAX));
         if (mcpp_debug & EXPAND) {
             mcpp_fprintf( DBG, "(%s)", defp->name);
@@ -827,9 +827,11 @@ static char *   replace(
             dump_string( "substitute exit", expbuf);
         }
     } else {                                /* Object-like macro or */
-        if (nargs == 0 && ! enable_trace_macro)
+        if (nargs == 0 && ! enable_trace_macro) {
                             /* Function-like macro with no argument */
+            assert( arglist);
             free( arglist[ 0]);
+        }
         free( arglist);
         out_p = expbuf = catbuf;
     }
@@ -1401,9 +1403,9 @@ static char *     remove_magics(
         *ep++ = RT_END;
     *ep = EOS;
     if ((from_last && !last) || (!from_last && !first))
-        return  arg_p;
+        goto done;
     if (mac_n == 0 && arg_n == 0)           /* No magic sequence    */
-        return  arg_p;
+        goto done;
     token = from_last ? last : first;
 
     /* Remove pair of magics surrounding the last (or first) token  */
@@ -1551,6 +1553,12 @@ static char *     remove_magics(
         get_ch();                               /* Clear the "file" */
     unget_ch();
 
+done:
+    free (arg_id);
+    free (arg_loc);
+    free (mac_loc);
+    free (mac_id);
+    free (mgc_index);
     return  arg_p;
 }
 

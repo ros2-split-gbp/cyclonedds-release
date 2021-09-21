@@ -45,7 +45,7 @@
 
 /* Define the target compiler to GNUC to output GCC line directives, which
    are required to construct an include stack. */
-#define COMPILER            GNUC
+#define COMPILER            IDLC
 /* __GNUC__ and __GNUC_MINOR__ are required if COMPILER equals GNUC. */
 #define COMPILER_EXT        "__GNUC__"
 #define COMPILER_EXT_VAL    "0"
@@ -90,6 +90,7 @@
 #define WIN_SYMANTECC       0x7470  /* Symantec for Windows */
 #define LCC                 0x74C0  /* LCC-Win32 */
 #define GNUC                0x00E0  /* GNU C (GCC) */
+#define IDLC                0xFFFE  /* Eclipse Cyclone DDS IDL Compiler */
 #define INDEPENDENT         0xFFFF  /* No target, compiler-independent-build */
 
 #define SYS_FAMILY          (SYSTEM & 0xF000)
@@ -273,17 +274,26 @@ something so go through the trouble of defining it!
 #define HOST_CMP_NAME       "@idlpp_host_cmp_name@"
 
 #if HOST_COMPILER == GNUC
-#define MCPP_ATTRIBUTE(...) __attribute__(__VA_ARGS__)
-#define MCPP_ATTRIBUTE_NORETURN() __attribute__((noreturn))
-#define MSC_PRAGMA(...) /* empty */
+# define MCPP_ATTRIBUTE(...) __attribute__(__VA_ARGS__)
+# define MCPP_ATTRIBUTE_NORETURN() __attribute__((noreturn))
+# if __MINGW32__
+#   define MCPP_ATTRIBUTE_FORMAT_PRINTF(string_index, first_to_check) \
+      __attribute__ ((format (__MINGW_PRINTF_FORMAT, string_index, first_to_check)))
+# else
+#   define MCPP_ATTRIBUTE_FORMAT_PRINTF(string_index, first_to_check) \
+      __attribute__ ((format (printf, string_index, first_to_check)))
+# endif
+# define MSC_PRAGMA(...)
 #elif HOST_COMPILER == MSC
-#define MCPP_ATTRIBUTE(...) /* empty */
-#define MCPP_ATTRIBUTE_NORETURN() __declspec(noreturn)
-#define MSC_PRAGMA(...) __pragma(__VA_ARGS__)
+# define MCPP_ATTRIBUTE(...)
+# define MCPP_ATTRIBUTE_NORETURN() __declspec(noreturn)
+# define MCPP_ATTRIBUTE_FORMAT_PRINTF(string_index, first_to_check)
+# define MSC_PRAGMA(...) __pragma(__VA_ARGS__)
 #else
-#define MCPP_ATTRIBUTE(...) /* empty */
-#define MCPP_ATTRIBUTE_NORETURN() /* empty */
-#define MSC_PRAGMA(...) /* empty */
+# define MCPP_ATTRIBUTE(...)
+# define MCPP_ATTRIBUTE_NORETURN()
+# define MCPP_ATTRIBUTE_FORMAT_PRINTF(string_index, first_to_check)
+# define MSC_PRAGMA(...)
 #endif
 
 /*
