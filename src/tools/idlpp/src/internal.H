@@ -230,7 +230,6 @@ typedef struct fileinfo {
         char *          bptr;       /* Current pointer into buffer  */
         size_t          line;       /* Current line number of file  */
         FILE *          fp;         /* Source file if non-null      */
-        long            pos;        /* Position next to #include    */
         struct fileinfo *   parent; /* Link to includer             */
         struct ifinfo *     initif; /* Initial ifstack (return there on EOF)*/
         int             sys_header; /* System header file or not    */
@@ -246,7 +245,7 @@ typedef struct fileinfo {
         int (* last_fputc)  ( int c, OUTDEST od);
         int (* last_fputs)  ( const char * s, OUTDEST od);
         int (* last_fprintf)( OUTDEST od, const char * format, ...)
-                MCPP_ATTRIBUTE((format (printf, 2, 3)));
+                MCPP_ATTRIBUTE_FORMAT_PRINTF(2, 3);
 #endif
 } FILEINFO;
 
@@ -505,7 +504,7 @@ extern void     dump_unget( const char * why);
 extern int      (* mcpp_fputc)( int c, OUTDEST od);
 extern int      (* mcpp_fputs)( const char * s, OUTDEST od);
 extern int      (* mcpp_fprintf)( OUTDEST od, const char * format, ...)
-        MCPP_ATTRIBUTE((format (printf, 2, 3)));
+        MCPP_ATTRIBUTE_FORMAT_PRINTF(2, 3);
 
 /* system.c */
 extern void     do_options( int argc, char ** argv, char ** in_pp

@@ -14,29 +14,13 @@
 #include "CUnit/Test.h"
 #include "common/src/loader.h"
 #include "config_env.h"
-
-static const char * AUTH_PROTOCOL_CLASS_ID          = "DDS:Auth:PKI-DH:1.0";
-static const char * PERM_ACCESS_CLASS_ID            = "DDS:Access:Permissions:1.0";
-
-static const char * PROPERTY_IDENTITY_CA            = "dds.sec.auth.identity_ca";
-static const char * PROPERTY_PRIVATE_KEY            = "dds.sec.auth.private_key";
-static const char * PROPERTY_IDENTITY_CERT          = "dds.sec.auth.identity_certificate";
-static const char * PROPERTY_TRUSTED_CA_DIR          = "dds.sec.auth.trusted_ca_dir";
-
-static const char * PROPERTY_CERT_SUBJECT_NAME      = "dds.cert.sn";
-static const char * PROPERTY_CERT_ALGORITHM         = "dds.cert.algo";
-static const char * PROPERTY_CA_SUBJECT_NAME        = "dds.ca.sn";
-static const char * PROPERTY_CA_ALGORITHM           = "dds.ca.aglo";
-
-static const char * PROPERTY_PERM_CA_SUBJECT_NAME   = "ds.perm_ca.sn";
+#include "auth_tokens.h"
+#include "ac_tokens.h"
 
 static const char * SUBJECT_NAME_IDENTITY_CERT      = "CN=CHAM-574 client,O=Some Company,ST=Some-State,C=NL";
 static const char * SUBJECT_NAME_IDENTITY_CA        = "CN=CHAM-574 authority,O=Some Company,ST=Some-State,C=NL";
 
 static const char * RSA_2048_ALGORITHM_NAME         = "RSA-2048";
-
-static const char * AUTH_REQUEST_TOKEN_CLASS_ID         = "DDS:Auth:PKI-DH:1.0+AuthReq";
-static const char * AUTH_REQUEST_TOKEN_FUTURE_PROP_NAME = "future_challenge";
 
 static const char * AUTH_HANDSHAKE_REQUEST_TOKEN_CLASS_ID = "DDS:Auth:PKI-DH:1.0+Req";
 static const char * AUTH_HANDSHAKE_REPLY_TOKEN_CLASS_ID   = "DDS:Auth:PKI-DH:1.0+Reply";
@@ -206,81 +190,118 @@ static const char *unrelated_identity =
 
 
 static const char *remote_identity_trusted =
-                "-----BEGIN CERTIFICATE-----\n"
-                "MIIDcDCCAligAwIBAgIBBTANBgkqhkiG9w0BAQsFADByMQswCQYDVQQGEwJOTDEL\n"
-                "MAkGA1UECBMCT1YxEzARBgNVBAoTCkFETGluayBJU1QxGTAXBgNVBAMTEElkZW50\n"
-                "aXR5IENBIFRlc3QxJjAkBgkqhkiG9w0BCQEWF2luZm9AaXN0LmFkbGlua3RlY2gu\n"
-                "Y29tMB4XDTE4MDMxMjAwMDAwMFoXDTI3MDMxMTIzNTk1OVowcDELMAkGA1UEBhMC\n"
-                "TkwxCzAJBgNVBAgTAk9WMQ8wDQYDVQQKEwZBRExpbmsxETAPBgNVBAsTCElTVCBU\n"
-                "ZXN0MREwDwYDVQQDEwhCb2IgVGVzdDEdMBsGCSqGSIb3DQEJARYOYm9iQGFkbGlu\n"
-                "ay5pc3QwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDB5vqhuWnwhxXZ\n"
-                "qffPmfjzge7w91oX4ISlboIfBXp3sLj2mqLSsYhgBNJAn/Fl1OZeFw0d4gVibBgx\n"
-                "5Zdcjsi+ClvYK8H534iTJfNriMyhg4kSWxZF1Tixfw3FS7LqjKEY5ZNPfp5a4P+8\n"
-                "UveorYJusrnlv1DiF6aPhJQh8J62J6bhx62DNLO7dZbN0BUsnWtyDcfi5DOjf2/r\n"
-                "3lSRfecn3uBr1QYRaS5FrV+MSoGcjI3M75mei1TTUp7YT4ZWRR5rKUMql605xsms\n"
-                "d6sqJaKofYmw7wCuaVJ86pb/w8srdddKt21xUeQNMKn49H6raezMOE3U5BUMtZ+P\n"
-                "2OBLk/CPAgMBAAGjEzARMA8GA1UdDwEB/wQFAwMH/4AwDQYJKoZIhvcNAQELBQAD\n"
-                "ggEBAJV71Ckf1zsks5mJXqdUb8bTVHg4hN32pwjCL5c6W2XHAv+YHwE/fN3C1VIY\n"
-                "bC8zjUC9dCOyC2AvOQyZQ1eC/WoK6FlXjHVX2upL4lXQ9WL9ztt1mgdRrhvUPuUn\n"
-                "aBE8VgNU0t4jl93xMIaU8hB0kQsV+kdcN0cWbrF3mT4s9njRvopJ8hS2UE60V2wA\n"
-                "ceUOazH+QGPh1k0jkynrTlVR9GrpebQwZ2UFeinVO0km17IAyQkz+OmPc4jQLJMl\n"
-                "CmkbmMwowdLMKC6r/HyE87dN7NvFnRM5iByJklRwN7WDYZrl72HoUOlgTZ7PjW2G\n"
-                "jTxK8xXtDCXC/3CNpe0YFnOga8g=\n"
-                "-----END CERTIFICATE-----\n";
+        "-----BEGIN CERTIFICATE-----\n"
+        "MIIDcDCCAligAwIBAgIBBTANBgkqhkiG9w0BAQsFADByMQswCQYDVQQGEwJOTDEL\n"
+        "MAkGA1UECBMCT1YxEzARBgNVBAoTCkFETGluayBJU1QxGTAXBgNVBAMTEElkZW50\n"
+        "aXR5IENBIFRlc3QxJjAkBgkqhkiG9w0BCQEWF2luZm9AaXN0LmFkbGlua3RlY2gu\n"
+        "Y29tMB4XDTE4MDMxMjAwMDAwMFoXDTI3MDMxMTIzNTk1OVowcDELMAkGA1UEBhMC\n"
+        "TkwxCzAJBgNVBAgTAk9WMQ8wDQYDVQQKEwZBRExpbmsxETAPBgNVBAsTCElTVCBU\n"
+        "ZXN0MREwDwYDVQQDEwhCb2IgVGVzdDEdMBsGCSqGSIb3DQEJARYOYm9iQGFkbGlu\n"
+        "ay5pc3QwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDB5vqhuWnwhxXZ\n"
+        "qffPmfjzge7w91oX4ISlboIfBXp3sLj2mqLSsYhgBNJAn/Fl1OZeFw0d4gVibBgx\n"
+        "5Zdcjsi+ClvYK8H534iTJfNriMyhg4kSWxZF1Tixfw3FS7LqjKEY5ZNPfp5a4P+8\n"
+        "UveorYJusrnlv1DiF6aPhJQh8J62J6bhx62DNLO7dZbN0BUsnWtyDcfi5DOjf2/r\n"
+        "3lSRfecn3uBr1QYRaS5FrV+MSoGcjI3M75mei1TTUp7YT4ZWRR5rKUMql605xsms\n"
+        "d6sqJaKofYmw7wCuaVJ86pb/w8srdddKt21xUeQNMKn49H6raezMOE3U5BUMtZ+P\n"
+        "2OBLk/CPAgMBAAGjEzARMA8GA1UdDwEB/wQFAwMH/4AwDQYJKoZIhvcNAQELBQAD\n"
+        "ggEBAJV71Ckf1zsks5mJXqdUb8bTVHg4hN32pwjCL5c6W2XHAv+YHwE/fN3C1VIY\n"
+        "bC8zjUC9dCOyC2AvOQyZQ1eC/WoK6FlXjHVX2upL4lXQ9WL9ztt1mgdRrhvUPuUn\n"
+        "aBE8VgNU0t4jl93xMIaU8hB0kQsV+kdcN0cWbrF3mT4s9njRvopJ8hS2UE60V2wA\n"
+        "ceUOazH+QGPh1k0jkynrTlVR9GrpebQwZ2UFeinVO0km17IAyQkz+OmPc4jQLJMl\n"
+        "CmkbmMwowdLMKC6r/HyE87dN7NvFnRM5iByJklRwN7WDYZrl72HoUOlgTZ7PjW2G\n"
+        "jTxK8xXtDCXC/3CNpe0YFnOga8g=\n"
+        "-----END CERTIFICATE-----\n";
 
 static const char *remote_identity_untrusted =
-                "-----BEGIN CERTIFICATE-----\n"
-                "MIIELTCCAxWgAwIBAgIBATANBgkqhkiG9w0BAQsFADB0MQswCQYDVQQGEwJOTDEL\n"
-                "MAkGA1UECBMCT1YxEzARBgNVBAoTCkFETGluayBJU1QxGzAZBgNVBAMTEkJvYiBU\n"
-                "ZXN0IFVudHJ1c3RlZDEmMCQGCSqGSIb3DQEJARYXaW5mb0Bpc3QuYWRsaW5rdGVj\n"
-                "aC5jb20wHhcNMTgwNjIwMDAwMDAwWhcNMjcwNjE5MjM1OTU5WjB0MQswCQYDVQQG\n"
-                "EwJOTDELMAkGA1UECBMCT1YxEzARBgNVBAoTCkFETGluayBJU1QxGzAZBgNVBAMT\n"
-                "EkJvYiBUZXN0IFVudHJ1c3RlZDEmMCQGCSqGSIb3DQEJARYXaW5mb0Bpc3QuYWRs\n"
-                "aW5rdGVjaC5jb20wggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDB5vqh\n"
-                "uWnwhxXZqffPmfjzge7w91oX4ISlboIfBXp3sLj2mqLSsYhgBNJAn/Fl1OZeFw0d\n"
-                "4gVibBgx5Zdcjsi+ClvYK8H534iTJfNriMyhg4kSWxZF1Tixfw3FS7LqjKEY5ZNP\n"
-                "fp5a4P+8UveorYJusrnlv1DiF6aPhJQh8J62J6bhx62DNLO7dZbN0BUsnWtyDcfi\n"
-                "5DOjf2/r3lSRfecn3uBr1QYRaS5FrV+MSoGcjI3M75mei1TTUp7YT4ZWRR5rKUMq\n"
-                "l605xsmsd6sqJaKofYmw7wCuaVJ86pb/w8srdddKt21xUeQNMKn49H6raezMOE3U\n"
-                "5BUMtZ+P2OBLk/CPAgMBAAGjgckwgcYwDAYDVR0TBAUwAwEB/zAdBgNVHQ4EFgQU\n"
-                "QpxLPHT5o/GQRwdBw2scINXnWlUwHwYDVR0jBBgwFoAUQpxLPHT5o/GQRwdBw2sc\n"
-                "INXnWlUwDwYDVR0PAQH/BAUDAwf/gDBlBgNVHSUBAf8EWzBZBggrBgEFBQcDAQYI\n"
-                "KwYBBQUHAwIGCCsGAQUFBwMDBggrBgEFBQcDBAYIKwYBBQUHAwgGCCsGAQUFBwMJ\n"
-                "BggrBgEFBQcDDQYIKwYBBQUHAw4GBysGAQUCAwUwDQYJKoZIhvcNAQELBQADggEB\n"
-                "ABcyab7F7OAsjUSW0YWkVRX1SUMkW25xLLs8koXhHrdnBqgnmOur0xO72/fmTTX9\n"
-                "KnCUmQj+dAOmmZrAaIZzqLtMyp4ibHZPfOBwmM0MFnyuwyEnCEYvjPN3FTB0HEgS\n"
-                "vCoFH1001LVi4oC1mEMxYaNW4/5Tgl+DTqGF+tctJe3hvbxh+Uu5M0320VAvASjt\n"
-                "cJ0me6Ug1FJJ60tgXgZ+M/8V6AXhrQGNgN6WkPMFbbLi5IyEld186QPeLdZ8vCtz\n"
-                "StjIV9HZGR1XLotlXarbjVtjxavZJjtwiySeYkAgG7Zjy7LalPSJiIdAD3R/ny+S\n"
-                "9kXDKiw/HgYxb8xiy9gdlSc=\n"
-                "-----END CERTIFICATE-----\n";
+        "-----BEGIN CERTIFICATE-----\n"
+        "MIIELTCCAxWgAwIBAgIBATANBgkqhkiG9w0BAQsFADB0MQswCQYDVQQGEwJOTDEL\n"
+        "MAkGA1UECBMCT1YxEzARBgNVBAoTCkFETGluayBJU1QxGzAZBgNVBAMTEkJvYiBU\n"
+        "ZXN0IFVudHJ1c3RlZDEmMCQGCSqGSIb3DQEJARYXaW5mb0Bpc3QuYWRsaW5rdGVj\n"
+        "aC5jb20wHhcNMTgwNjIwMDAwMDAwWhcNMjcwNjE5MjM1OTU5WjB0MQswCQYDVQQG\n"
+        "EwJOTDELMAkGA1UECBMCT1YxEzARBgNVBAoTCkFETGluayBJU1QxGzAZBgNVBAMT\n"
+        "EkJvYiBUZXN0IFVudHJ1c3RlZDEmMCQGCSqGSIb3DQEJARYXaW5mb0Bpc3QuYWRs\n"
+        "aW5rdGVjaC5jb20wggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDB5vqh\n"
+        "uWnwhxXZqffPmfjzge7w91oX4ISlboIfBXp3sLj2mqLSsYhgBNJAn/Fl1OZeFw0d\n"
+        "4gVibBgx5Zdcjsi+ClvYK8H534iTJfNriMyhg4kSWxZF1Tixfw3FS7LqjKEY5ZNP\n"
+        "fp5a4P+8UveorYJusrnlv1DiF6aPhJQh8J62J6bhx62DNLO7dZbN0BUsnWtyDcfi\n"
+        "5DOjf2/r3lSRfecn3uBr1QYRaS5FrV+MSoGcjI3M75mei1TTUp7YT4ZWRR5rKUMq\n"
+        "l605xsmsd6sqJaKofYmw7wCuaVJ86pb/w8srdddKt21xUeQNMKn49H6raezMOE3U\n"
+        "5BUMtZ+P2OBLk/CPAgMBAAGjgckwgcYwDAYDVR0TBAUwAwEB/zAdBgNVHQ4EFgQU\n"
+        "QpxLPHT5o/GQRwdBw2scINXnWlUwHwYDVR0jBBgwFoAUQpxLPHT5o/GQRwdBw2sc\n"
+        "INXnWlUwDwYDVR0PAQH/BAUDAwf/gDBlBgNVHSUBAf8EWzBZBggrBgEFBQcDAQYI\n"
+        "KwYBBQUHAwIGCCsGAQUFBwMDBggrBgEFBQcDBAYIKwYBBQUHAwgGCCsGAQUFBwMJ\n"
+        "BggrBgEFBQcDDQYIKwYBBQUHAw4GBysGAQUCAwUwDQYJKoZIhvcNAQELBQADggEB\n"
+        "ABcyab7F7OAsjUSW0YWkVRX1SUMkW25xLLs8koXhHrdnBqgnmOur0xO72/fmTTX9\n"
+        "KnCUmQj+dAOmmZrAaIZzqLtMyp4ibHZPfOBwmM0MFnyuwyEnCEYvjPN3FTB0HEgS\n"
+        "vCoFH1001LVi4oC1mEMxYaNW4/5Tgl+DTqGF+tctJe3hvbxh+Uu5M0320VAvASjt\n"
+        "cJ0me6Ug1FJJ60tgXgZ+M/8V6AXhrQGNgN6WkPMFbbLi5IyEld186QPeLdZ8vCtz\n"
+        "StjIV9HZGR1XLotlXarbjVtjxavZJjtwiySeYkAgG7Zjy7LalPSJiIdAD3R/ny+S\n"
+        "9kXDKiw/HgYxb8xiy9gdlSc=\n"
+        "-----END CERTIFICATE-----\n";
 
 static const char *remote_identity_trusted_expired =
-                "-----BEGIN CERTIFICATE-----\n"
-                "MIIEKTCCAxGgAwIBAgIBBjANBgkqhkiG9w0BAQsFADByMQswCQYDVQQGEwJOTDEL\n"
-                "MAkGA1UECBMCT1YxEzARBgNVBAoTCkFETGluayBJU1QxGTAXBgNVBAMTEElkZW50\n"
-                "aXR5IENBIFRlc3QxJjAkBgkqhkiG9w0BCQEWF2luZm9AaXN0LmFkbGlua3RlY2gu\n"
-                "Y29tMB4XDTE4MDMwMTAwMDAwMFoXDTE4MDQyMzIzNTk1OVowcjELMAkGA1UEBhMC\n"
-                "TkwxCzAJBgNVBAgTAk9WMRMwEQYDVQQKEwpBRExpbmsgSVNUMRkwFwYDVQQDExBC\n"
-                "b2IgVGVzdCBFeHBpcmVkMSYwJAYJKoZIhvcNAQkBFhdpbmZvQGlzdC5hZGxpbmt0\n"
-                "ZWNoLmNvbTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMHm+qG5afCH\n"
-                "Fdmp98+Z+POB7vD3WhfghKVugh8FenewuPaaotKxiGAE0kCf8WXU5l4XDR3iBWJs\n"
-                "GDHll1yOyL4KW9grwfnfiJMl82uIzKGDiRJbFkXVOLF/DcVLsuqMoRjlk09+nlrg\n"
-                "/7xS96itgm6yueW/UOIXpo+ElCHwnrYnpuHHrYM0s7t1ls3QFSyda3INx+LkM6N/\n"
-                "b+veVJF95yfe4GvVBhFpLkWtX4xKgZyMjczvmZ6LVNNSnthPhlZFHmspQyqXrTnG\n"
-                "yax3qyoloqh9ibDvAK5pUnzqlv/Dyyt110q3bXFR5A0wqfj0fqtp7Mw4TdTkFQy1\n"
-                "n4/Y4EuT8I8CAwEAAaOByTCBxjAMBgNVHRMEBTADAQH/MB0GA1UdDgQWBBRCnEs8\n"
-                "dPmj8ZBHB0HDaxwg1edaVTAfBgNVHSMEGDAWgBRNVUJNFzhJPReYT4QSx6dK53CX\n"
-                "CTAPBgNVHQ8BAf8EBQMDB/+AMGUGA1UdJQEB/wRbMFkGCCsGAQUFBwMBBggrBgEF\n"
-                "BQcDAgYIKwYBBQUHAwMGCCsGAQUFBwMEBggrBgEFBQcDCAYIKwYBBQUHAwkGCCsG\n"
-                "AQUFBwMNBggrBgEFBQcDDgYHKwYBBQIDBTANBgkqhkiG9w0BAQsFAAOCAQEAdY5n\n"
-                "5ElOhpHq/YPWUs68t8HNIhqfokqjLZAgzNyU5QFppb9tPpmFCugerfjlScNwp5HB\n"
-                "X6/WjK4runDrgzXfmrBogR4Kscb1KJSm8KAmnzXVUNr1iyASlHxI7241kYdQvTH2\n"
-                "LL6b0kjsD5lKAnNh4id0SDHfy/CKg5d7dUxxO1mX48jUiIZtmFqgjej8tFLHy/w/\n"
-                "usI5ErlI0qzI6lkoRxPCEWLbXWeBDm3/smHeDbYa/+Lw4Bid8U1+ZSAuC1CT7a7F\n"
-                "O3gAjPUL0jzRztp5Yj3dYPV8YyJHLEKr75IXNedV9YKhT4f6kTS3UEjMTqYbYsix\n"
-                "MtqgY283RjsExzjNvw==\n"
-                "-----END CERTIFICATE-----\n";
+        "-----BEGIN CERTIFICATE-----\n"
+        "MIIEKTCCAxGgAwIBAgIBBjANBgkqhkiG9w0BAQsFADByMQswCQYDVQQGEwJOTDEL\n"
+        "MAkGA1UECBMCT1YxEzARBgNVBAoTCkFETGluayBJU1QxGTAXBgNVBAMTEElkZW50\n"
+        "aXR5IENBIFRlc3QxJjAkBgkqhkiG9w0BCQEWF2luZm9AaXN0LmFkbGlua3RlY2gu\n"
+        "Y29tMB4XDTE4MDMwMTAwMDAwMFoXDTE4MDQyMzIzNTk1OVowcjELMAkGA1UEBhMC\n"
+        "TkwxCzAJBgNVBAgTAk9WMRMwEQYDVQQKEwpBRExpbmsgSVNUMRkwFwYDVQQDExBC\n"
+        "b2IgVGVzdCBFeHBpcmVkMSYwJAYJKoZIhvcNAQkBFhdpbmZvQGlzdC5hZGxpbmt0\n"
+        "ZWNoLmNvbTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMHm+qG5afCH\n"
+        "Fdmp98+Z+POB7vD3WhfghKVugh8FenewuPaaotKxiGAE0kCf8WXU5l4XDR3iBWJs\n"
+        "GDHll1yOyL4KW9grwfnfiJMl82uIzKGDiRJbFkXVOLF/DcVLsuqMoRjlk09+nlrg\n"
+        "/7xS96itgm6yueW/UOIXpo+ElCHwnrYnpuHHrYM0s7t1ls3QFSyda3INx+LkM6N/\n"
+        "b+veVJF95yfe4GvVBhFpLkWtX4xKgZyMjczvmZ6LVNNSnthPhlZFHmspQyqXrTnG\n"
+        "yax3qyoloqh9ibDvAK5pUnzqlv/Dyyt110q3bXFR5A0wqfj0fqtp7Mw4TdTkFQy1\n"
+        "n4/Y4EuT8I8CAwEAAaOByTCBxjAMBgNVHRMEBTADAQH/MB0GA1UdDgQWBBRCnEs8\n"
+        "dPmj8ZBHB0HDaxwg1edaVTAfBgNVHSMEGDAWgBRNVUJNFzhJPReYT4QSx6dK53CX\n"
+        "CTAPBgNVHQ8BAf8EBQMDB/+AMGUGA1UdJQEB/wRbMFkGCCsGAQUFBwMBBggrBgEF\n"
+        "BQcDAgYIKwYBBQUHAwMGCCsGAQUFBwMEBggrBgEFBQcDCAYIKwYBBQUHAwkGCCsG\n"
+        "AQUFBwMNBggrBgEFBQcDDgYHKwYBBQIDBTANBgkqhkiG9w0BAQsFAAOCAQEAdY5n\n"
+        "5ElOhpHq/YPWUs68t8HNIhqfokqjLZAgzNyU5QFppb9tPpmFCugerfjlScNwp5HB\n"
+        "X6/WjK4runDrgzXfmrBogR4Kscb1KJSm8KAmnzXVUNr1iyASlHxI7241kYdQvTH2\n"
+        "LL6b0kjsD5lKAnNh4id0SDHfy/CKg5d7dUxxO1mX48jUiIZtmFqgjej8tFLHy/w/\n"
+        "usI5ErlI0qzI6lkoRxPCEWLbXWeBDm3/smHeDbYa/+Lw4Bid8U1+ZSAuC1CT7a7F\n"
+        "O3gAjPUL0jzRztp5Yj3dYPV8YyJHLEKr75IXNedV9YKhT4f6kTS3UEjMTqYbYsix\n"
+        "MtqgY283RjsExzjNvw==\n"
+        "-----END CERTIFICATE-----\n";
+
+static const char *remote_identity_revoked =
+        "-----BEGIN CERTIFICATE-----\n"
+        "MIIDRDCCAiwCFCxXj0QLcpHA597b3QgDf0J3tnQ1MA0GCSqGSIb3DQEBCwUAMF8x\n"
+        "CzAJBgNVBAYTAk5MMRMwEQYDVQQIEwpTb21lLVN0YXRlMSEwHwYDVQQKExhJbnRl\n"
+        "cm5ldCBXaWRnaXRzIFB0eSBMdGQxGDAWBgNVBAMTD0NIQU01MDAgcm9vdCBjYTAg\n"
+        "Fw0yMTA2MDkyMDU2MDFaGA8yMjIxMDQyMjIwNTYwMVowXDELMAkGA1UEBhMCTkwx\n"
+        "EzARBgNVBAgMClNvbWUtU3RhdGUxITAfBgNVBAoMGEludGVybmV0IFdpZGdpdHMg\n"
+        "UHR5IEx0ZDEVMBMGA1UEAwwMQ0hBTTUwMSBjZXJ0MIIBIjANBgkqhkiG9w0BAQEF\n"
+        "AAOCAQ8AMIIBCgKCAQEAxQJq8im5z1/RZcXS5OKM4PvjH5PXoEIPuIHEZXPH8Eqp\n"
+        "jB3Wi9pUIE27nd8Gm3+i4IUBrOUx/LUtmI+k2sd87LxdNsuYm/yVExhAKbYRGW8P\n"
+        "90XOAbivMILgjYPitKJazhvKEQLTkMVKO8pcBVtl6KWy15gyLd6eCxXfXPfdJkrO\n"
+        "1zYmx4FXttUq7z/gJBRkbV2fb5Tb5lX/8VbjynvYYGGFAexH04XxnHnbrHY/4MoP\n"
+        "nTYcZqyEaALrT3Lcv2UrJJTw0mpUCrIy9LReKVIeOGrd9wE0jt3qk41EFZ2RWo8C\n"
+        "IL3GfYqo1QtEzAbzsAAXL9S1HUN0OWJV+NoUqqzSvwIDAQABMA0GCSqGSIb3DQEB\n"
+        "CwUAA4IBAQC0yJZXJv8nLGG2/60jmG8BobLn6Cas1CLkpVch9N0/e698PHxRqHfs\n"
+        "9R/SG6kpfJdOOeBNdw2Z3/s0E2Vuan++DEgAyvVLEHI1RHUue+0GvdyeNJSst/iz\n"
+        "1jyFm0nvaiT/jVYpM86c+R0emAtr3rBtxkh/Kop4TM1SOEzutIB4w/vXqklXD5ui\n"
+        "XAzosVskfkcnt24c7U9mf9JQt73lB1HbXkyivuQ1lAaVAfhUCSOXi/p3whELeTjL\n"
+        "y56eGZ9PcGfDP6NW7YQBKmATkwUwMJzEseM3amwOOd6bHvpeuJzXGLHe92D2e/gr\n"
+        "GHRAQsBeyglL3TH2CliOouhtKIoFeVZe\n"
+        "-----END CERTIFICATE-----\n";
+
+static const char *crl =
+        "data:,-----BEGIN X509 CRL-----\n"
+        "MIIB4zCBzAIBATANBgkqhkiG9w0BAQsFADBfMQswCQYDVQQGEwJOTDETMBEGA1UE\n"
+        "CBMKU29tZS1TdGF0ZTEhMB8GA1UEChMYSW50ZXJuZXQgV2lkZ2l0cyBQdHkgTHRk\n"
+        "MRgwFgYDVQQDEw9DSEFNNTAwIHJvb3QgY2EXDTIxMDcxNDE0NTIzNFoYDzIyMjEw\n"
+        "NTI3MTQ1MjM0WjAnMCUCFCxXj0QLcpHA597b3QgDf0J3tnQ1Fw0yMTA2MDkyMjA1\n"
+        "MjdaoA4wDDAKBgNVHRQEAwIBAjANBgkqhkiG9w0BAQsFAAOCAQEAWDkxzaGqznJE\n"
+        "bB9PvSGrfRVYFJous5bFqCqB9jJ3nFBh/mQeqdpL9Eiw2rfSWIHbQAqPhDUkGY0t\n"
+        "z34aPeIxZZDTDzZZz4bkwt8dLrQwF+rRYEawDpATIoBUeQghVRyhrFNRa4VhtTgc\n"
+        "tG55Rt2upphLVqaMMQFHpFlVaMx3P09sXwH2XtPjg+MWYiw/HP6iETPzwBBwGFKb\n"
+        "jsS1J7lEJFcdHBCshkloxiZ0B8bj//+mpf0cUTOtn+oVv8adE7REbv1+6B3XV0wQ\n"
+        "3Yw16d9jYJb5cFPHK3voGbzuU8JhyOM8cA58Phvv0VJoRvoyMcMmgh9Muk5Uz9EI\n"
+        "3qRdLdaghA==\n"
+        "-----END X509 CRL-----\n";
 
 static struct plugins_hdl *plugins = NULL;
 static dds_security_authentication *auth = NULL;
@@ -397,24 +418,24 @@ initialize_identity_token(
 {
     memset(token, 0, sizeof(*token));
 
-    token->class_id = ddsrt_strdup(AUTH_PROTOCOL_CLASS_ID);
+    token->class_id = ddsrt_strdup(DDS_AUTHTOKEN_CLASS_ID);
     token->properties._maximum = 4;
     token->properties._length  = 4;
     token->properties._buffer = DDS_Security_PropertySeq_allocbuf(4);
 
-    token->properties._buffer[0].name = ddsrt_strdup(PROPERTY_CERT_SUBJECT_NAME);
+    token->properties._buffer[0].name = ddsrt_strdup(DDS_AUTHTOKEN_PROP_CERT_SN);
     token->properties._buffer[0].value = ddsrt_strdup(SUBJECT_NAME_IDENTITY_CERT);
     token->properties._buffer[0].propagate = true;
 
-    token->properties._buffer[1].name = ddsrt_strdup(PROPERTY_CERT_ALGORITHM);
+    token->properties._buffer[1].name = ddsrt_strdup(DDS_AUTHTOKEN_PROP_CERT_ALGO);
     token->properties._buffer[1].value = ddsrt_strdup(certAlgo);
     token->properties._buffer[1].propagate = true;
 
-    token->properties._buffer[2].name = ddsrt_strdup(PROPERTY_CA_SUBJECT_NAME);
+    token->properties._buffer[2].name = ddsrt_strdup(DDS_AUTHTOKEN_PROP_CA_SN);
     token->properties._buffer[2].value = ddsrt_strdup(SUBJECT_NAME_IDENTITY_CA);
     token->properties._buffer[2].propagate = true;
 
-    token->properties._buffer[3].name = ddsrt_strdup(PROPERTY_CA_ALGORITHM);
+    token->properties._buffer[3].name = ddsrt_strdup(DDS_AUTHTOKEN_PROP_CA_ALGO);
     token->properties._buffer[3].value = ddsrt_strdup(caAlgo);
     token->properties._buffer[3].propagate = true;
 }
@@ -424,13 +445,13 @@ initialize_permissions_token(
     DDS_Security_PermissionsToken *token,
     const char *caAlgo)
 {
-    token->class_id = ddsrt_strdup(PERM_ACCESS_CLASS_ID);
+    token->class_id = ddsrt_strdup(DDS_ACTOKEN_PERMISSIONS_CLASS_ID);
     token->properties._length = 2;
     token->properties._maximum = 2;
     token->properties._buffer = DDS_Security_PropertySeq_allocbuf(4);
-    token->properties._buffer[0].name = ddsrt_strdup(PROPERTY_CERT_SUBJECT_NAME);
+    token->properties._buffer[0].name = ddsrt_strdup(DDS_AUTHTOKEN_PROP_CERT_SN);
     token->properties._buffer[0].value = ddsrt_strdup(SUBJECT_NAME_IDENTITY_CA);
-    token->properties._buffer[1].name = ddsrt_strdup(PROPERTY_PERM_CA_SUBJECT_NAME);
+    token->properties._buffer[1].name = ddsrt_strdup(DDS_ACTOKEN_PROP_PERM_CA_SN);
     token->properties._buffer[1].value = ddsrt_strdup(caAlgo);
 }
 
@@ -452,11 +473,11 @@ fill_auth_request_token(
 
     memset(token, 0, sizeof(*token));
 
-    token->class_id = ddsrt_strdup(AUTH_REQUEST_TOKEN_CLASS_ID);
+    token->class_id = ddsrt_strdup(DDS_SECURITY_AUTH_REQUEST_TOKEN_CLASS_ID);
     token->binary_properties._maximum = 1;
     token->binary_properties._length = 1;
     token->binary_properties._buffer = DDS_Security_BinaryPropertySeq_allocbuf(1);
-    token->binary_properties._buffer->name = ddsrt_strdup(AUTH_REQUEST_TOKEN_FUTURE_PROP_NAME);
+    token->binary_properties._buffer->name = ddsrt_strdup(DDS_AUTHTOKEN_PROP_FUTURE_CHALLENGE);
 
     token->binary_properties._buffer->value._maximum = len;
     token->binary_properties._buffer->value._length = len;
@@ -489,7 +510,7 @@ deinitialize_identity_token(
 }
 
 static int
-validate_local_identity(const char* trusted_ca_dir)
+validate_local_identity(const char *trusted_ca_dir, const char *crl_data)
 {
     int res = 0;
     DDS_Security_ValidationResult_t result;
@@ -502,32 +523,49 @@ validate_local_identity(const char* trusted_ca_dir)
     DDS_Security_ParticipantBuiltinTopicData *local_participant_data;
     unsigned char *sdata;
     size_t sz;
+    unsigned participant_qos_size = 3;
+    unsigned offset = 0;
+    DDS_Security_Property_t *valbuf;
+
+    trusted_ca_dir ? participant_qos_size++ : participant_qos_size;
+    crl_data ? participant_qos_size++ : participant_qos_size;
 
     memset(&local_participant_guid, 0, sizeof(local_participant_guid));
     memcpy(&candidate_participant_guid.prefix, &prefix, sizeof(prefix));
     memcpy(&candidate_participant_guid.entityId, &entityId, sizeof(entityId));
 
     memset(&participant_qos, 0, sizeof(participant_qos));
-    if( trusted_ca_dir != NULL){
+    dds_security_property_init(&participant_qos.property.value, participant_qos_size);
+
+    valbuf = &participant_qos.property.value._buffer[offset++];
+    valbuf->name = ddsrt_strdup(DDS_SEC_PROP_AUTH_IDENTITY_CERT);
+    valbuf->value = ddsrt_strdup(identity_certificate);
+
+    valbuf = &participant_qos.property.value._buffer[offset++];
+    valbuf->name = ddsrt_strdup(DDS_SEC_PROP_AUTH_IDENTITY_CA);
+    valbuf->value = ddsrt_strdup(identity_ca);
+
+    valbuf = &participant_qos.property.value._buffer[offset++];
+    valbuf->name = ddsrt_strdup(DDS_SEC_PROP_AUTH_PRIV_KEY);
+    valbuf->value = ddsrt_strdup(private_key);
+
+    if (trusted_ca_dir != NULL) {
         char trusted_ca_dir_path[1024];
-        dds_security_property_init(&participant_qos.property.value, 4);
 #ifdef WIN32
-    snprintf(trusted_ca_dir_path, 1024, "%s\\validate_begin_handshake_reply\\etc\\%s", CONFIG_ENV_TESTS_DIR,trusted_ca_dir);
+        snprintf(trusted_ca_dir_path, 1024, "%s\\validate_begin_handshake_reply\\etc\\%s", CONFIG_ENV_TESTS_DIR, trusted_ca_dir);
 #else
-    snprintf(trusted_ca_dir_path, 1024, "%s/validate_begin_handshake_reply/etc/%s", CONFIG_ENV_TESTS_DIR, trusted_ca_dir);
+        snprintf(trusted_ca_dir_path, 1024, "%s/validate_begin_handshake_reply/etc/%s", CONFIG_ENV_TESTS_DIR, trusted_ca_dir);
 #endif
-        participant_qos.property.value._buffer[3].name = ddsrt_strdup(PROPERTY_TRUSTED_CA_DIR);
-        participant_qos.property.value._buffer[3].value = ddsrt_strdup(trusted_ca_dir_path);
+        valbuf = &participant_qos.property.value._buffer[offset++];
+        valbuf->name = ddsrt_strdup(DDS_SEC_PROP_ACCESS_TRUSTED_CA_DIR);
+        valbuf->value = ddsrt_strdup(trusted_ca_dir_path);
     }
-    else{
-        dds_security_property_init(&participant_qos.property.value, 3);
+
+    if (crl_data != NULL) {
+      valbuf = &participant_qos.property.value._buffer[offset++];
+      valbuf->name = ddsrt_strdup(ORG_ECLIPSE_CYCLONEDDS_SEC_AUTH_CRL);
+      valbuf->value = ddsrt_strdup(crl_data);
     }
-    participant_qos.property.value._buffer[0].name = ddsrt_strdup(PROPERTY_IDENTITY_CERT);
-    participant_qos.property.value._buffer[0].value = ddsrt_strdup(identity_certificate);
-    participant_qos.property.value._buffer[1].name = ddsrt_strdup(PROPERTY_IDENTITY_CA);
-    participant_qos.property.value._buffer[1].value = ddsrt_strdup(identity_ca);
-    participant_qos.property.value._buffer[2].name = ddsrt_strdup(PROPERTY_PRIVATE_KEY);
-    participant_qos.property.value._buffer[2].value = ddsrt_strdup(private_key);
 
     /* Now call the function. */
     result = auth->validate_local_identity(
@@ -853,8 +891,8 @@ validate_remote_identities (const char *remote_id_certificate)
     remote_participant_data2->security_info.participant_security_attributes = 0x01;
     remote_participant_data2->security_info.plugin_participant_security_attributes = 0x02;
 
-    challenge1 = find_binary_property(&g_local_auth_request_token, AUTH_REQUEST_TOKEN_FUTURE_PROP_NAME);
-    challenge2 = find_binary_property(&g_remote_auth_request_token, AUTH_REQUEST_TOKEN_FUTURE_PROP_NAME);
+    challenge1 = find_binary_property(&g_local_auth_request_token, DDS_AUTHTOKEN_PROP_FUTURE_CHALLENGE);
+    challenge2 = find_binary_property(&g_remote_auth_request_token, DDS_AUTHTOKEN_PROP_FUTURE_CHALLENGE);
 
     return res;
 }
@@ -904,7 +942,7 @@ static void init_testcase(void)
                            &(const struct ddsi_domaingv){ .handshake_include_optional = true });
 
     if (plugins) {
-        res = validate_local_identity( NULL );
+        res = validate_local_identity( NULL, NULL );
         if (res == 0) {
             res = validate_remote_identities( remote_identity_certificate );
         }
@@ -1070,29 +1108,29 @@ fill_handshake_message_token(
 
     /* Store the Identity Certificate associated with the local identify in c.id property */
     if (certificate) {
-        set_binary_property_string(c_id, "c.id", certificate);
+        set_binary_property_string(c_id, DDS_AUTHTOKEN_PROP_C_ID, certificate);
     } else {
-        set_binary_property_string(c_id, "c.idx", "rubbish");
+        set_binary_property_string(c_id, DDS_AUTHTOKEN_PROP_C_ID "x", "rubbish");
     }
 
     /* Store the permission document in the c.perm property */
-    set_binary_property_string(c_perm, "c.perm", "permissions_document");
+    set_binary_property_string(c_perm, DDS_AUTHTOKEN_PROP_C_PERM, "permissions_document");
 
     /* Store the provided local_participant_data in the c.pdata property */
-    set_binary_property_value(c_pdata, "c.pdata", serialized_local_participant_data, serialized_local_participant_data_size);
+    set_binary_property_value(c_pdata, DDS_AUTHTOKEN_PROP_C_PDATA, serialized_local_participant_data, serialized_local_participant_data_size);
 
     /* Set the used signing algorithm descriptor in c.dsign_algo */
     if (dsign) {
-        set_binary_property_string(c_dsign_algo, "c.dsign_algo", dsign);
+        set_binary_property_string(c_dsign_algo, DDS_AUTHTOKEN_PROP_C_DSIGN_ALGO, dsign);
     } else {
-        set_binary_property_string(c_dsign_algo, "c.dsign_algox", "rubbish");
+        set_binary_property_string(c_dsign_algo, DDS_AUTHTOKEN_PROP_C_DSIGN_ALGO "x", "rubbish");
     }
 
     /* Set the used key algorithm descriptor in c.kagree_algo */
     if (kagree) {
-        set_binary_property_string(c_kagree_algo, "c.kagree_algo", kagree);
+        set_binary_property_string(c_kagree_algo, DDS_AUTHTOKEN_PROP_C_KAGREE_ALGO, kagree);
     } else {
-        set_binary_property_string(c_kagree_algo, "c.kagree_algox", "rubbish");
+        set_binary_property_string(c_kagree_algo, DDS_AUTHTOKEN_PROP_C_KAGREE_ALGO "x", "rubbish");
     }
 
     /* Calculate the hash_c1 */
@@ -1113,21 +1151,21 @@ fill_handshake_message_token(
         ddsrt_free(buffer);
         DDS_Security_Serializer_free(serializer);
 
-        set_binary_property_value(hash_c1, "hash_c1", (const unsigned char *) &hash, sizeof(hash));
+        set_binary_property_value(hash_c1, DDS_AUTHTOKEN_PROP_HASH_C1, (const unsigned char *) &hash, sizeof(hash));
     }
 
     /* Set the DH public key associated with the local participant in dh1 property */
     if (diffie_hellman) {
-        set_binary_property_value(dh1, "dh1", diffie_hellman, diffie_hellman_size);
+        set_binary_property_value(dh1, DDS_AUTHTOKEN_PROP_DH1, diffie_hellman, diffie_hellman_size);
     } else {
-        set_binary_property_string(dh1, "dh1x", "rubbish");
+        set_binary_property_string(dh1, DDS_AUTHTOKEN_PROP_DH1 "x", "rubbish");
     }
 
     /* Set the challenge in challenge1 property */
     if (challengeData) {
-        set_binary_property_value(challenge, "challenge1", challengeData, challengeDataSize);
+        set_binary_property_value(challenge, DDS_AUTHTOKEN_PROP_CHALLENGE1, challengeData, challengeDataSize);
     } else {
-        set_binary_property_value(challenge, "challenge1x", challenge2->value._buffer, challenge2->value._length);
+        set_binary_property_value(challenge, DDS_AUTHTOKEN_PROP_CHALLENGE1 "x", challenge2->value._buffer, challenge2->value._length);
     }
 
     token->class_id = ddsrt_strdup(AUTH_HANDSHAKE_REQUEST_TOKEN_CLASS_ID);
@@ -1167,36 +1205,36 @@ validate_handshake_token(
 
     if (!token->class_id || strcmp(token->class_id, AUTH_HANDSHAKE_REPLY_TOKEN_CLASS_ID) != 0) {
         CU_FAIL("HandshakeMessageToken incorrect class_id");
-    } else if ((property = find_binary_property(token, "c.id")) == NULL) {
-        CU_FAIL("HandshakeMessageToken incorrect property 'c.id' not found");
+    } else if ((property = find_binary_property(token, DDS_AUTHTOKEN_PROP_C_ID)) == NULL) {
+        CU_FAIL("HandshakeMessageToken incorrect property '"DDS_AUTHTOKEN_PROP_C_ID"' not found");
     } else if (!valid_c_id_property(&identity_certificate[6], &property->value)) {
-        CU_FAIL("HandshakeMessageToken incorrect property 'c.id' value is invalid");
-    } else if (find_binary_property(token, "c.pdata") == NULL) {
-        CU_FAIL("HandshakeMessageToken incorrect property 'c.pdata' not found");
-    } else if ((property = find_binary_property(token, "c.dsign_algo")) == NULL) {
-        CU_FAIL("HandshakeMessageToken incorrect property 'c.dsign_algo' not found");
+        CU_FAIL("HandshakeMessageToken incorrect property '"DDS_AUTHTOKEN_PROP_C_ID"' value is invalid");
+    } else if (find_binary_property(token, DDS_AUTHTOKEN_PROP_C_PDATA) == NULL) {
+        CU_FAIL("HandshakeMessageToken incorrect property '"DDS_AUTHTOKEN_PROP_C_PDATA"' not found");
+    } else if ((property = find_binary_property(token, DDS_AUTHTOKEN_PROP_C_DSIGN_ALGO)) == NULL) {
+        CU_FAIL("HandshakeMessageToken incorrect property '"DDS_AUTHTOKEN_PROP_C_DSIGN_ALGO"' not found");
     } else if (!valid_string_value(AUTH_DSIGN_ALGO_RSA_NAME, &property->value)) {
-        CU_FAIL("HandshakeMessageToken incorrect property 'c.dsign_algo' incorrect value");
-    } else if ((property = find_binary_property(token, "c.kagree_algo")) == NULL) {
-        CU_FAIL("HandshakeMessageToken incorrect property 'c.kagree_algo' not found");
+        CU_FAIL("HandshakeMessageToken incorrect property '"DDS_AUTHTOKEN_PROP_C_DSIGN_ALGO"' incorrect value");
+    } else if ((property = find_binary_property(token, DDS_AUTHTOKEN_PROP_C_KAGREE_ALGO)) == NULL) {
+        CU_FAIL("HandshakeMessageToken incorrect property '"DDS_AUTHTOKEN_PROP_C_KAGREE_ALGO"' not found");
     } else if (!valid_string_value(AUTH_KAGREE_ALGO_RSA_NAME, &property->value)) {
-        CU_FAIL("HandshakeMessageToken incorrect property 'c.kagree_algo' incorrect value");
-    } else if (find_binary_property(token, "hash_c2") == NULL) {
-         CU_FAIL("HandshakeMessageToken incorrect property 'hash_c2' not found");
-    } else if (find_binary_property(token, "dh2") == NULL) {
-        CU_FAIL("HandshakeMessageToken incorrect property 'dh2' not found");
-    } else if (find_binary_property(token, "hash_c1") == NULL) {
-        CU_FAIL("HandshakeMessageToken incorrect property 'hash_c1' not found");
-    } else if (find_binary_property(token, "dh1") == NULL) {
-        CU_FAIL("HandshakeMessageToken incorrect property 'dh1' not found");
-    } else if ((property = find_binary_property(token, "challenge1")) == NULL) {
-        CU_FAIL("HandshakeMessageToken incorrect property 'challenge1' not found");
+        CU_FAIL("HandshakeMessageToken incorrect property '"DDS_AUTHTOKEN_PROP_C_KAGREE_ALGO"' incorrect value");
+    } else if (find_binary_property(token, DDS_AUTHTOKEN_PROP_HASH_C2) == NULL) {
+         CU_FAIL("HandshakeMessageToken incorrect property '"DDS_AUTHTOKEN_PROP_HASH_C2"' not found");
+    } else if (find_binary_property(token, DDS_AUTHTOKEN_PROP_DH2) == NULL) {
+        CU_FAIL("HandshakeMessageToken incorrect property '"DDS_AUTHTOKEN_PROP_DH2"' not found");
+    } else if (find_binary_property(token, DDS_AUTHTOKEN_PROP_HASH_C1) == NULL) {
+        CU_FAIL("HandshakeMessageToken incorrect property '"DDS_AUTHTOKEN_PROP_HASH_C1"' not found");
+    } else if (find_binary_property(token, DDS_AUTHTOKEN_PROP_DH1) == NULL) {
+        CU_FAIL("HandshakeMessageToken incorrect property '"DDS_AUTHTOKEN_PROP_DH1"' not found");
+    } else if ((property = find_binary_property(token, DDS_AUTHTOKEN_PROP_CHALLENGE1)) == NULL) {
+        CU_FAIL("HandshakeMessageToken incorrect property '"DDS_AUTHTOKEN_PROP_CHALLENGE1"' not found");
     } else if (challenge_1 && compare_octet_seq(challenge_1, &property->value) != 0) {
-        CU_FAIL("HandshakeMessageToken incorrect property 'challenge1' incorrect value");
-    } else if ((property = find_binary_property(token, "challenge2")) == NULL) {
-        CU_FAIL("HandshakeMessageToken incorrect property 'challenge2' not found");
+        CU_FAIL("HandshakeMessageToken incorrect property '"DDS_AUTHTOKEN_PROP_CHALLENGE1"' incorrect value");
+    } else if ((property = find_binary_property(token, DDS_AUTHTOKEN_PROP_CHALLENGE2)) == NULL) {
+        CU_FAIL("HandshakeMessageToken incorrect property '"DDS_AUTHTOKEN_PROP_CHALLENGE2"' not found");
     } else if (challenge_2 && compare_octet_seq(challenge_2, &property->value) != 0) {
-        CU_FAIL("HandshakeMessageToken incorrect property 'challenge2' incorrect value");
+        CU_FAIL("HandshakeMessageToken incorrect property '"DDS_AUTHTOKEN_PROP_CHALLENGE2"' incorrect value");
     } else {
         return true;
     }
@@ -1985,7 +2023,7 @@ CU_Test(validate_begin_handshake_reply,extended_certificate_check,  .init = init
     release_local_identity();
     release_remote_identities();
 
-    CU_ASSERT_FATAL( !validate_local_identity("trusted_ca_dir") );
+    CU_ASSERT_FATAL( !validate_local_identity("trusted_ca_dir", NULL) );
     CU_ASSERT_FATAL( !validate_remote_identities( remote_identity_trusted ) );
 
     CU_ASSERT_FATAL (auth != NULL);
@@ -2035,7 +2073,7 @@ CU_Test(validate_begin_handshake_reply,extended_certificate_check,  .init = init
     release_local_identity();
     release_remote_identities();
 
-    CU_ASSERT_FATAL( !validate_local_identity("trusted_ca_dir") );
+    CU_ASSERT_FATAL( !validate_local_identity("trusted_ca_dir", NULL) );
     CU_ASSERT_FATAL( !validate_remote_identities( remote_identity_untrusted ) );
 
     CU_ASSERT_FATAL (auth != NULL);
@@ -2075,7 +2113,7 @@ CU_Test(validate_begin_handshake_reply,extended_certificate_check,  .init = init
     release_local_identity();
     release_remote_identities();
 
-    CU_ASSERT_FATAL( !validate_local_identity("trusted_ca_dir") );
+    CU_ASSERT_FATAL( !validate_local_identity("trusted_ca_dir", NULL) );
     CU_ASSERT_FATAL( !validate_remote_identities( remote_identity_trusted_expired ) );
 
     CU_ASSERT_FATAL (auth != NULL);
@@ -2111,4 +2149,54 @@ CU_Test(validate_begin_handshake_reply,extended_certificate_check,  .init = init
     handshake_message_deinit(&handshake_token_in);
     handshake_message_deinit(&handshake_token_out);
     reset_exception(&exception);
+}
+
+CU_Test(validate_begin_handshake_reply,crl,  .init = init_testcase, .fini = fini_testcase )
+{
+    DDS_Security_ValidationResult_t result;
+    DDS_Security_HandshakeHandle handshake_handle;
+    DDS_Security_HandshakeMessageToken handshake_token_in = DDS_SECURITY_TOKEN_INIT;
+    DDS_Security_HandshakeMessageToken handshake_token_out = DDS_SECURITY_TOKEN_INIT;
+    DDS_Security_SecurityException exception = {NULL, 0, 0};
+
+    release_local_identity();
+    release_remote_identities();
+
+    CU_ASSERT_FATAL( !validate_local_identity(NULL, crl) );
+    CU_ASSERT_FATAL( !validate_remote_identities( remote_identity_revoked ) );
+
+    CU_ASSERT_FATAL (auth != NULL);
+    assert (auth != NULL);
+    CU_ASSERT_FATAL (local_identity_handle != DDS_SECURITY_HANDLE_NIL);
+    CU_ASSERT_FATAL (remote_identity_handle1 != DDS_SECURITY_HANDLE_NIL);
+    CU_ASSERT_FATAL (remote_identity_handle2 != DDS_SECURITY_HANDLE_NIL);
+    CU_ASSERT_FATAL (auth->begin_handshake_reply != NULL);
+    assert (auth->begin_handshake_reply != 0);
+
+    fill_handshake_message_token(
+                    &handshake_token_in, remote_participant_data1, remote_identity_revoked,
+                AUTH_DSIGN_ALGO_RSA_NAME, AUTH_KAGREE_ALGO_RSA_NAME,
+                dh_pubkey_modp_2048_value, dh_pubkey_modp_2048_length, challenge2->value._buffer, challenge2->value._length);
+
+    result = auth->begin_handshake_reply(
+                    auth,
+                    &handshake_handle,
+                    &handshake_token_out,
+                    &handshake_token_in,
+                    remote_identity_handle2,
+                    local_identity_handle,
+                    &serialized_participant_data,
+                    &exception);
+
+    if (result == DDS_SECURITY_VALIDATION_OK) {
+        printf("begin_handshake_reply failed: %s\n", exception.message ? exception.message : "Error message missing");
+    }
+
+    CU_ASSERT_FATAL(result != DDS_SECURITY_VALIDATION_OK);
+    CU_ASSERT (exception.minor_code != 0);
+    CU_ASSERT (exception.message != NULL);
+
+    reset_exception(&exception);
+
+    handshake_message_deinit(&handshake_token_in);
 }

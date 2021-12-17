@@ -129,7 +129,7 @@ ddsrt_thread_setname(const char *__restrict name)
      name exceeds the limit, so silently truncate. */
   char buf[MAXTHREADNAMESIZE + 1] = "";
   (void)ddsrt_strlcpy(buf, name, sizeof(buf));
-  (void)pthread_setname_np(pthread_self(), name);
+  (void)pthread_setname_np(pthread_self(), buf);
 #elif defined(__APPLE__)
   (void)pthread_setname_np(name);
 #elif defined(__FreeBSD__)
@@ -563,15 +563,17 @@ static void thread_cleanup_fini(void *arg)
      nullified if invoked as destructor, i.e. not from ddsrt_thread_fini. */
 }
 
-void ddsrt_thread_init(void)
+void ddsrt_thread_init(uint32_t reason)
 {
+  (void)reason;
   thread_init();
 }
 
-void ddsrt_thread_fini(void)
+void ddsrt_thread_fini(uint32_t reason)
 {
   thread_cleanup_t *tail;
 
+  (void)reason;
   thread_init();
   if ((tail = pthread_getspecific(thread_cleanup_key)) != NULL) {
     thread_cleanup_fini(tail);

@@ -75,7 +75,7 @@ static bool cyclonedds_entity_ready (uint32_t s)
   else
   {
     struct dds_handle_link *x;
-    return dds_handle_pin_and_ref (DDS_CYCLONEDDS_HANDLE, &x) == DDS_RETCODE_OK;
+    return dds_handle_pin_and_ref_with_origin (DDS_CYCLONEDDS_HANDLE, false, &x) == DDS_RETCODE_OK;
   }
 }
 
@@ -121,7 +121,7 @@ dds_return_t dds_init (void)
     goto fail_handleserver;
   }
 
-  dds_entity_init (&dds_global.m_entity, NULL, DDS_KIND_CYCLONEDDS, true, NULL, NULL, 0);
+  dds_entity_init (&dds_global.m_entity, NULL, DDS_KIND_CYCLONEDDS, true, true, NULL, NULL, 0);
   dds_global.m_entity.m_iid = ddsi_iid_gen ();
   dds_handle_repin (&dds_global.m_entity.m_hdllink);
   dds_entity_add_ref_locked (&dds_global.m_entity);
