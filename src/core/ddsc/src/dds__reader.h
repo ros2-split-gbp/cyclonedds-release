@@ -23,6 +23,8 @@ struct status_cb_data;
 
 void dds_reader_status_cb (void *entity, const struct status_cb_data * data);
 
+dds_return_t dds_return_reader_loan (dds_reader *rd, void **buf, int32_t bufsz);
+
 /*
   dds_reader_lock_samples: Returns number of samples in read cache and locks the
   reader cache to make sure that the samples content doesn't change.
@@ -41,7 +43,7 @@ struct nn_rsample_info;
 struct nn_rdata;
 DDS_EXPORT void dds_reader_ddsi2direct (dds_entity_t entity, void (*cb) (const struct nn_rsample_info *sampleinfo, const struct nn_rdata *fragchain, void *arg), void *cbarg);
 
-DEFINE_ENTITY_LOCK_UNLOCK(inline, dds_reader, DDS_KIND_READER)
+DEFINE_ENTITY_LOCK_UNLOCK(dds_reader, DDS_KIND_READER)
 
 #if defined (__cplusplus)
 }

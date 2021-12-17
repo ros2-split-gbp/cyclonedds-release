@@ -166,17 +166,17 @@ static ssize_t normalize_segment(const char *path, char *segment)
 {
   WIN32_FIND_DATA find_data;
   HANDLE find;
-  ssize_t seglen = strlen(segment);
+  size_t seglen = strlen(segment);
 
   find = FindFirstFile(path, &find_data);
   if (find == INVALID_HANDLE_VALUE)
-
-  if (strlen(find_data.cFileName) == (size_t)seglen)
+    return -1;
+  if (strlen(find_data.cFileName) == seglen)
     memcpy(segment, find_data.cFileName, seglen);
   else
-    seglen = -1;
+    seglen = (size_t)-1;
   FindClose(find);
-  return seglen;
+  return (ssize_t)seglen;
 }
 #else
 static ssize_t normalize_segment(const char *path, char *segment)
@@ -239,7 +239,7 @@ idl_retcode_t idl_normalize_path(const char *path, char **normpathp)
 
   free(abspath);
   *normpathp = normpath;
-  return (idl_retcode_t)len;
+  return IDL_RETCODE_OK;
 err_seg:
   free(normpath);
 err_norm:
@@ -354,7 +354,7 @@ idl_retcode_t idl_relative_path(const char *base, const char *path, char **relpa
       rev[(i*3)+2] = sep;
   }
 
-  idl_asprintf(&rel, "%s%s", rev ? rev : "", fwd);
+  (void) idl_asprintf(&rel, "%s%s", rev ? rev : "", fwd);
   if (rev)
     free(rev);
   if (!rel)
