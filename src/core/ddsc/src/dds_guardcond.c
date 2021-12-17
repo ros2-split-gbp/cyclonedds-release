@@ -20,7 +20,7 @@
 #include "dds/ddsi/q_entity.h"
 #include "dds/ddsi/q_thread.h"
 
-DECL_ENTITY_LOCK_UNLOCK (extern inline, dds_guardcond)
+DECL_ENTITY_LOCK_UNLOCK (dds_guardcond)
 
 const struct dds_entity_deriver dds_entity_deriver_guardcondition = {
   .interrupt = dds_entity_deriver_dummy_interrupt,
@@ -59,7 +59,7 @@ dds_entity_t dds_create_guardcondition (dds_entity_t owner)
   }
 
   dds_guardcond *gcond = dds_alloc (sizeof (*gcond));
-  dds_entity_t hdl = dds_entity_init (&gcond->m_entity, e, DDS_KIND_COND_GUARD, false, NULL, NULL, 0);
+  dds_entity_t hdl = dds_entity_init (&gcond->m_entity, e, DDS_KIND_COND_GUARD, false, true, NULL, NULL, 0);
   gcond->m_entity.m_iid = ddsi_iid_gen ();
   dds_entity_register_child (e, &gcond->m_entity);
   dds_entity_init_complete (&gcond->m_entity);
@@ -83,10 +83,15 @@ dds_return_t dds_set_guardcondition (dds_entity_t condition, bool triggered)
     return rc;
   else
   {
-    if (triggered)
-      dds_entity_trigger_set (&gcond->m_entity, 1);
-    else
-      ddsrt_atomic_st32 (&gcond->m_entity.m_status.m_trigger, 0);
+    dds_entity * const e = &gcond->m_entity;
+    uint32_t oldst;
+    ddsrt_mutex_lock (&e->m_observers_lock);
+    do {
+      oldst = ddsrt_atomic_ld32 (&e->m_status.m_trigger);
+    } while (!ddsrt_atomic_cas32 (&e->m_status.m_trigger, oldst, triggered));
+    if (oldst == 0 && triggered != 0)
+      dds_entity_observers_signal (e, triggered);
+    ddsrt_mutex_unlock (&e->m_observers_lock);
     dds_guardcond_unlock (gcond);
     return DDS_RETCODE_OK;
   }

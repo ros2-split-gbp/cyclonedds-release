@@ -70,7 +70,7 @@ static void allowmulticast_aware_add_to_addrset (const struct ddsi_domaingv *gv,
       return;
   }
 #else
-  if (ddsi_is_mcaddr (gv, &loc->loc) && !(allow_multicast & AMC_ASM))
+  if (ddsi_is_mcaddr (gv, &loc->c) && !(allow_multicast & DDSI_AMC_ASM))
     return;
 #endif
   add_xlocator_to_addrset (gv, as, loc);
@@ -173,14 +173,15 @@ static struct addrset *addrset_from_locatorlists (const struct ddsi_domaingv *gv
     allow_loopback = (a || b);
   }
 
-  // if any non-loopback address is identical to one of our own addresses, assume it is the
-  // same machine, in which case loopback addresses may be picked up
+  // if any non-loopback address is identical to one of our own addresses (actual or advertised),
+  // assume it is the same machine, in which case loopback addresses may be picked up
   for (struct nn_locators_one *l = uc->first; l != NULL && !allow_loopback; l = l->next)
   {
     if (ddsi_is_loopbackaddr (gv, &l->loc))
       continue;
     for (int i = 0; i < gv->n_interfaces && !allow_loopback; i++)
-      allow_loopback = (memcmp (l->loc.address, gv->interfaces[i].loc.address, sizeof (l->loc.address)) == 0);
+      allow_loopback = (memcmp (l->loc.address, gv->interfaces[i].loc.address, sizeof (l->loc.address)) == 0 ||
+                        memcmp (l->loc.address, gv->interfaces[i].extloc.address, sizeof (l->loc.address)) == 0);
   }
   //GVTRACE(" allow_loopback=%d\n", allow_loopback);
 
@@ -199,7 +200,22 @@ static struct addrset *addrset_from_locatorlists (const struct ddsi_domaingv *gv
       continue;
 
     ddsi_locator_t loc = l->loc;
-    if (loc.kind == NN_LOCATOR_KIND_UDPv4 && gv->extmask.kind != NN_LOCATOR_KIND_INVALID)
+
+    // if the advertised locator matches our own external locator, than presumably
+    // it is the same machine and should be addressed using the actual interface
+    // address
+    bool extloc_of_self = false;
+    for (int i = 0; i < gv->n_interfaces; i++)
+    {
+      if (loc.kind == gv->interfaces[i].loc.kind && memcmp (loc.address, gv->interfaces[i].extloc.address, sizeof (loc.address)) == 0)
+      {
+        memcpy (loc.address, gv->interfaces[i].loc.address, sizeof (loc.address));
+        extloc_of_self = true;
+        break;
+      }
+    }
+
+    if (!extloc_of_self && loc.kind == NN_LOCATOR_KIND_UDPv4 && gv->extmask.kind != NN_LOCATOR_KIND_INVALID)
     {
       /* If the examined locator is in the same subnet as our own
          external IP address, this locator will be translated into one
@@ -207,7 +223,7 @@ static struct addrset *addrset_from_locatorlists (const struct ddsi_domaingv *gv
       assert (gv->n_interfaces == 1); // gv->extmask: the hack is only supported if limited to a single interface
       struct in_addr tmp4 = *((struct in_addr *) (loc.address + 12));
       const struct in_addr ownip = *((struct in_addr *) (gv->interfaces[0].loc.address + 12));
-      const struct in_addr extip = *((struct in_addr *) (gv->extloc.address + 12));
+      const struct in_addr extip = *((struct in_addr *) (gv->interfaces[0].extloc.address + 12));
       const struct in_addr extmask = *((struct in_addr *) (gv->extmask.address + 12));
 
       if ((tmp4.s_addr & extmask.s_addr) == (extip.s_addr & extmask.s_addr))
@@ -382,25 +398,37 @@ void get_participant_builtin_topic_data (const struct participant *pp, ddsi_plis
   {
     struct locators_builder def_uni = locators_builder_init (&dst->default_unicast_locators, locs->def_uni, MAX_XMIT_CONNS);
     struct locators_builder meta_uni = locators_builder_init (&dst->metatraffic_unicast_locators, locs->meta_uni, MAX_XMIT_CONNS);
-    if (pp->e.gv->config.many_sockets_mode == DDSI_MSM_MANY_UNICAST)
+    for (int i = 0; i < pp->e.gv->n_interfaces; i++)
     {
-      locators_add_one (&def_uni, &pp->m_locator, NN_LOCATOR_PORT_INVALID);
-      locators_add_one (&meta_uni, &pp->m_locator, NN_LOCATOR_PORT_INVALID);
-    }
-    else
-    {
-      for (int i = 0; i < pp->e.gv->n_interfaces; i++)
+      if (!pp->e.gv->xmit_conns[i]->m_factory->m_enable_spdp)
       {
-        if (!pp->e.gv->xmit_conns[i]->m_factory->m_enable_spdp)
-        {
-          // skip any interfaces where the address kind doesn't match the selected transport
-          // as a reasonablish way of not advertising iceoryx locators here
-          continue;
-        }
-        // FIXME: should have multiple loc_default_uc/loc_meta_uc or compute ports here
-        locators_add_one (&def_uni, &pp->e.gv->interfaces[i].loc, pp->e.gv->loc_default_uc.port);
-        locators_add_one (&meta_uni, &pp->e.gv->interfaces[i].loc, pp->e.gv->loc_meta_uc.port);
+        // skip any interfaces where the address kind doesn't match the selected transport
+        // as a reasonablish way of not advertising iceoryx locators here
+        continue;
       }
+#ifndef NDEBUG
+      int32_t kind;
+#endif
+      uint32_t data_port, meta_port;
+      if (pp->e.gv->config.many_sockets_mode != DDSI_MSM_MANY_UNICAST)
+      {
+#ifndef NDEBUG
+        kind = pp->e.gv->loc_default_uc.kind;
+#endif
+        assert (kind == pp->e.gv->loc_meta_uc.kind);
+        data_port = pp->e.gv->loc_default_uc.port;
+        meta_port = pp->e.gv->loc_meta_uc.port;
+      }
+      else
+      {
+#ifndef NDEBUG
+        kind = pp->m_locator.kind;
+#endif
+        data_port = meta_port = pp->m_locator.port;
+      }
+      assert (kind == pp->e.gv->interfaces[i].extloc.kind);
+      locators_add_one (&def_uni, &pp->e.gv->interfaces[i].extloc, data_port);
+      locators_add_one (&meta_uni, &pp->e.gv->interfaces[i].extloc, meta_port);
     }
     if (pp->e.gv->config.publish_uc_locators)
     {
@@ -468,7 +496,7 @@ void get_participant_builtin_topic_data (const struct participant *pp, ddsi_plis
 #endif
 
   /* Participant QoS's insofar as they are set, different from the default, and mapped to the SPDP data, rather than to the Adlink-specific CMParticipant endpoint.  Currently, that means just USER_DATA. */
-  qosdiff = ddsi_xqos_delta (&pp->plist->qos, &pp->e.gv->default_plist_pp.qos, QP_USER_DATA);
+  qosdiff = ddsi_xqos_delta (&pp->plist->qos, &ddsi_default_plist_participant.qos, QP_USER_DATA);
   if (pp->e.gv->config.explicitly_publish_qos_set_to_default)
     qosdiff |= ~QP_UNRECOGNIZED_INCOMPATIBLE_MASK;
 
@@ -1068,9 +1096,9 @@ static int sedp_write_endpoint_impl
   struct ddsi_domaingv * const gv = wr->e.gv;
   const dds_qos_t *defqos = NULL;
   if (is_writer_entityid (guid->entityid))
-    defqos = &gv->default_xqos_wr;
+    defqos = &ddsi_default_qos_writer;
   else if (is_reader_entityid (guid->entityid))
-    defqos = &gv->default_xqos_rd;
+    defqos = &ddsi_default_qos_reader;
   else
     assert (false);
 
@@ -1179,7 +1207,7 @@ static int sedp_write_endpoint_impl
               continue;
             }
             // FIXME: should have multiple loc_default_uc/loc_meta_uc or compute ports here
-            ddsi_locator_t loc = epcommon->pp->e.gv->interfaces[i].loc;
+            ddsi_locator_t loc = epcommon->pp->e.gv->interfaces[i].extloc;
             loc.port = epcommon->pp->e.gv->loc_default_uc.port;
             add_locator_to_ps(&loc, &arg);
           }
@@ -1213,7 +1241,7 @@ static int sedp_write_endpoint_impl
 static int sedp_write_topic_impl (struct writer *wr, int alive, const ddsi_guid_t *guid, const dds_qos_t *xqos, type_identifier_t *type_id)
 {
   struct ddsi_domaingv * const gv = wr->e.gv;
-  const dds_qos_t *defqos = &gv->default_xqos_tp;
+  const dds_qos_t *defqos = &ddsi_default_qos_topic;
 
   ddsi_plist_t ps;
   ddsi_plist_init_empty (&ps);
@@ -1531,13 +1559,15 @@ static void handle_sedp_alive_endpoint (const struct receiver_state *rst, seqno_
 
   xqos = &datap->qos;
   if (sedp_kind == SEDP_KIND_READER)
-    ddsi_xqos_mergein_missing (xqos, &gv->default_xqos_rd, ~(uint64_t)0);
+    ddsi_xqos_mergein_missing (xqos, &ddsi_default_qos_reader, ~(uint64_t)0);
   else if (sedp_kind == SEDP_KIND_WRITER)
   {
-    if (vendor_is_eclipse_or_adlink (vendorid))
-      ddsi_xqos_mergein_missing (xqos, &gv->default_xqos_wr, ~(uint64_t)0);
-    else
-      ddsi_xqos_mergein_missing (xqos, &gv->default_xqos_wr_nad, ~(uint64_t)0);
+    ddsi_xqos_mergein_missing (xqos, &ddsi_default_qos_writer, ~(uint64_t)0);
+    if (!vendor_is_eclipse_or_adlink (vendorid))
+    {
+      // there is a difference in interpretation of autodispose between vendors
+      xqos->writer_data_lifecycle.autodispose_unregistered_instances = 0;
+    }
   }
   else
     E (" invalid entity kind\n", err);
@@ -1727,7 +1757,7 @@ static void handle_sedp_alive_topic (const struct receiver_state *rst, seqno_t s
     return;
 
   xqos = &datap->qos;
-  ddsi_xqos_mergein_missing (xqos, &gv->default_xqos_tp, ~(uint64_t)0);
+  ddsi_xqos_mergein_missing (xqos, &ddsi_default_qos_topic, ~(uint64_t)0);
   /* After copy + merge, should have at least the ones present in the
      input. Also verify reliability and durability are present,
      because we explicitly read those. */

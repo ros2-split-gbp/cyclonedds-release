@@ -22,11 +22,7 @@
 #include <dds/ddsrt/string.h>
 #include <config_env.h>
 
-static const char * PROPERTY_IDENTITY_CA                = "dds.sec.auth.identity_ca";
-static const char * PROPERTY_PRIVATE_KEY                = "dds.sec.auth.private_key";
-static const char * PROPERTY_PASSWORD                   = "dds.sec.auth.password";
-static const char * PROPERTY_IDENTITY_CERT              = "dds.sec.auth.identity_certificate";
-static const char * PROPERTY_TRUSTED_CA_DIR              = "dds.sec.auth.trusted_ca_dir";
+// See ../etc/README.md for how the certificates and keys are generated.
 
 static const char *identity_certificate_filename = "identity_certificate";
 static const char *identity_certificate =
@@ -87,7 +83,7 @@ static const char *identity_ca =
         "-----END CERTIFICATE-----\n";
 
 static const char *private_key_filename = "private_key";
-static const char *private_key_pem =
+static const char *private_key =
         "data:,-----BEGIN RSA PRIVATE KEY-----\n"
         "MIIEogIBAAKCAQEAwqVYYrx/8ASMru+K70J3J0maisrKTegrw9aZlfcH7eTx4Vbf\n"
         "Y1e/b4Erm+SwA6ERwIBXb/XbmIAa9ezm+rkayGOAdfAnKwo4UHAuII8fMto5fT3m\n"
@@ -290,64 +286,115 @@ static const char *private_key_w_password =
 
 static const char *private_key_password ="CHAM569";
 
-const char *ec_identity_certificate_filename = "ec_identity_certificate";
-const char *ec_identity_certificate =
+static const char *revoked_identity_certificate_filename = "revoked_identity_certificate";
+static const char *revoked_identity_certificate =
         "data:,-----BEGIN CERTIFICATE-----\n"
-  "MIICOzCCAeGgAwIBAgICEAAwCgYIKoZIzj0EAwIwZTELMAkGA1UEBhMCTkwxEzAR\n"
-  "BgNVBAgMClNvbWUtU3RhdGUxHzAdBgNVBAoMFkFETElOSyBUZWNobm9sb2d5IEIu\n"
-  "Vi4xIDAeBgNVBAMMF0NIQU1fNTcwIENBIGNlcnRpZmljYXRlMB4XDTE5MDIxODEw\n"
-  "NTI0MVoXDTQ2MDcwNjEwNTI0MVowazELMAkGA1UEBhMCTkwxEzARBgNVBAgMClNv\n"
-  "bWUtU3RhdGUxHzAdBgNVBAoMFkFETElOSyBUZWNobm9sb2d5IEIuVi4xJjAkBgNV\n"
-  "BAMMHUNIQU1fNTcwIElkZW50aXR5IGNlcnRpZmljYXRlMFkwEwYHKoZIzj0CAQYI\n"
-  "KoZIzj0DAQcDQgAEnbV79f5j2iTkDCbFMlVVs396YOoNViwKheBbhVoBG2n8I3mY\n"
-  "M9Zg1dmrHh16HsJfrTCbc0VAOdkH91mNRPZr46N7MHkwCQYDVR0TBAIwADAsBglg\n"
-  "hkgBhvhCAQ0EHxYdT3BlblNTTCBHZW5lcmF0ZWQgQ2VydGlmaWNhdGUwHQYDVR0O\n"
-  "BBYEFMZoftcgs1FL1FBUJhKGvpvqVaHqMB8GA1UdIwQYMBaAFHUuWr3OtGtMktK9\n"
-  "QnKSSydxn4ewMAoGCCqGSM49BAMCA0gAMEUCIQCyp777C9Tih7Asybj6ELAYS9xq\n"
-  "vFhV6CJGk9ixW1AXdwIgKs9CEPx+Ajk3RErPm6OaVcsVLRKGBn7UuCR6VxNItWk=\n"
+        "MIIDRDCCAiwCFCxXj0QLcpHA597b3QgDf0J3tnQ1MA0GCSqGSIb3DQEBCwUAMF8x\n"
+        "CzAJBgNVBAYTAk5MMRMwEQYDVQQIEwpTb21lLVN0YXRlMSEwHwYDVQQKExhJbnRl\n"
+        "cm5ldCBXaWRnaXRzIFB0eSBMdGQxGDAWBgNVBAMTD0NIQU01MDAgcm9vdCBjYTAg\n"
+        "Fw0yMTA2MDkyMDU2MDFaGA8yMjIxMDQyMjIwNTYwMVowXDELMAkGA1UEBhMCTkwx\n"
+        "EzARBgNVBAgMClNvbWUtU3RhdGUxITAfBgNVBAoMGEludGVybmV0IFdpZGdpdHMg\n"
+        "UHR5IEx0ZDEVMBMGA1UEAwwMQ0hBTTUwMSBjZXJ0MIIBIjANBgkqhkiG9w0BAQEF\n"
+        "AAOCAQ8AMIIBCgKCAQEAxQJq8im5z1/RZcXS5OKM4PvjH5PXoEIPuIHEZXPH8Eqp\n"
+        "jB3Wi9pUIE27nd8Gm3+i4IUBrOUx/LUtmI+k2sd87LxdNsuYm/yVExhAKbYRGW8P\n"
+        "90XOAbivMILgjYPitKJazhvKEQLTkMVKO8pcBVtl6KWy15gyLd6eCxXfXPfdJkrO\n"
+        "1zYmx4FXttUq7z/gJBRkbV2fb5Tb5lX/8VbjynvYYGGFAexH04XxnHnbrHY/4MoP\n"
+        "nTYcZqyEaALrT3Lcv2UrJJTw0mpUCrIy9LReKVIeOGrd9wE0jt3qk41EFZ2RWo8C\n"
+        "IL3GfYqo1QtEzAbzsAAXL9S1HUN0OWJV+NoUqqzSvwIDAQABMA0GCSqGSIb3DQEB\n"
+        "CwUAA4IBAQC0yJZXJv8nLGG2/60jmG8BobLn6Cas1CLkpVch9N0/e698PHxRqHfs\n"
+        "9R/SG6kpfJdOOeBNdw2Z3/s0E2Vuan++DEgAyvVLEHI1RHUue+0GvdyeNJSst/iz\n"
+        "1jyFm0nvaiT/jVYpM86c+R0emAtr3rBtxkh/Kop4TM1SOEzutIB4w/vXqklXD5ui\n"
+        "XAzosVskfkcnt24c7U9mf9JQt73lB1HbXkyivuQ1lAaVAfhUCSOXi/p3whELeTjL\n"
+        "y56eGZ9PcGfDP6NW7YQBKmATkwUwMJzEseM3amwOOd6bHvpeuJzXGLHe92D2e/gr\n"
+        "GHRAQsBeyglL3TH2CliOouhtKIoFeVZe\n"
         "-----END CERTIFICATE-----\n";
 
-const char *ec_private_key_filename = "ec_private_key";
-const char *ec_private_key =
+static const char *revoked_private_key_filename = "revoked_private_key";
+static const char *revoked_private_key =
+        "data:,-----BEGIN RSA PRIVATE KEY-----\n"
+        "MIIEowIBAAKCAQEAxQJq8im5z1/RZcXS5OKM4PvjH5PXoEIPuIHEZXPH8EqpjB3W\n"
+        "i9pUIE27nd8Gm3+i4IUBrOUx/LUtmI+k2sd87LxdNsuYm/yVExhAKbYRGW8P90XO\n"
+        "AbivMILgjYPitKJazhvKEQLTkMVKO8pcBVtl6KWy15gyLd6eCxXfXPfdJkrO1zYm\n"
+        "x4FXttUq7z/gJBRkbV2fb5Tb5lX/8VbjynvYYGGFAexH04XxnHnbrHY/4MoPnTYc\n"
+        "ZqyEaALrT3Lcv2UrJJTw0mpUCrIy9LReKVIeOGrd9wE0jt3qk41EFZ2RWo8CIL3G\n"
+        "fYqo1QtEzAbzsAAXL9S1HUN0OWJV+NoUqqzSvwIDAQABAoIBABU7YHk+w/a0deXI\n"
+        "/ySJwfMRUnX5wfhUhks1OQxSAQ9FjKY8JP4nhn+AwSKPga/KfqxByV9vyAZbJFHX\n"
+        "0UV+0FjXKBiaspTFEO/g4jFcnNUn4gmdLUmENOU+haLavtkG0lB6MDnLGy/0Az8U\n"
+        "XPx60C3VhcO0dFv7LP822T60u9G/d8M034D8ruHsrLbpESUBORREXXDHAztH45nC\n"
+        "Z95Icy3iC6dLyM+6e5UULus3lmY53+xWIMrRqIsS6mKmh84nNxwtbqcCwVrUY7cH\n"
+        "XYgf8hqRFiSQiK+qtYjigpCTSM9B8ivDaxX5tdxuj/VuvVy+YPNcyq5+hrYPnYPO\n"
+        "G5XsJckCgYEA56rtOgjGczZjjs0e9/R1v3hhy4dy+jGkJGrzLR7BwDLXO6+EwK94\n"
+        "BcwQ16dDDxeRMaEGYeYc5egP/ODyAl+4Rd6auQkff8BfQK0UnPo6yPce0K6Yl56V\n"
+        "MCf8BV63Vedex1riIVRBOx0PwQBN5h9Vr7/oKaC5ITS6kehL2uxLpZsCgYEA2bOZ\n"
+        "+sbqKTylIJ/oSjoLhZ+S6I+2vY8IFtW65ZVaIveG0twxX6a1LnwmCNzXNs86mfs+\n"
+        "ASVjUHk6GbAcOEKkZ5jQeDbYyd3jOAljWYqFQaoArB8+7AS2SkrM0NoimlH/I1Uv\n"
+        "vVKT2JB+/5LK5KBxEz+6KZPpNPMZzwgfxa90y60CgYB0Hzc9ybw/b9nDcIm/W+fR\n"
+        "i7PpYwF863kNUBaIXUxc3J8KKdZvBwUwUrN2hT6VyAhdSgt68u81RncNGGv2SKiD\n"
+        "TStc6HfDf1e/gYI9lSf2J/hoPbv68+Bv/PrUbj+TbaASaTnD3wm7abvF0DM70CUR\n"
+        "LS5f/1IMlPOXw0qSd7MLVQKBgQDSvFjBuOvTHzF5c1GZCLc+kknTdcqflGVwNVTG\n"
+        "CN1IG/QXCa+BuA6LAQKQcbajB9biV6Kd2WNZ8v+a/i9TBq++2N50gCM6xd+9ztit\n"
+        "RLnZ5obgFx8BuU38fIvnYEE+wUEJIt0jl1wmtzk4jRB6YBUVXQsIVHXbG7hQAL1A\n"
+        "z6dvwQKBgHE7+xaHXeCBQxKsYeJWx9/WlUSGqcdOLOKrv4zo9PrpT2wb2pqGdVof\n"
+        "ANjJA1V0bMk6+kirzJSzQ9oBql5InF/fNKaMtSj1+bjr0MY3NaQ57NOLAWWlFFrD\n"
+        "cZ5yszaCk+uX7DACzN1XO7fL2FARNZkfHDZw/tQOKGDkl4x7IGml\n"
+        "-----END RSA PRIVATE KEY-----\n";
+
+static const char *ec_identity_certificate_filename = "ec_identity_certificate";
+static const char *ec_identity_certificate =
+        "data:,-----BEGIN CERTIFICATE-----\n"
+        "MIICOzCCAeGgAwIBAgICEAAwCgYIKoZIzj0EAwIwZTELMAkGA1UEBhMCTkwxEzAR\n"
+        "BgNVBAgMClNvbWUtU3RhdGUxHzAdBgNVBAoMFkFETElOSyBUZWNobm9sb2d5IEIu\n"
+        "Vi4xIDAeBgNVBAMMF0NIQU1fNTcwIENBIGNlcnRpZmljYXRlMB4XDTE5MDIxODEw\n"
+        "NTI0MVoXDTQ2MDcwNjEwNTI0MVowazELMAkGA1UEBhMCTkwxEzARBgNVBAgMClNv\n"
+        "bWUtU3RhdGUxHzAdBgNVBAoMFkFETElOSyBUZWNobm9sb2d5IEIuVi4xJjAkBgNV\n"
+        "BAMMHUNIQU1fNTcwIElkZW50aXR5IGNlcnRpZmljYXRlMFkwEwYHKoZIzj0CAQYI\n"
+        "KoZIzj0DAQcDQgAEnbV79f5j2iTkDCbFMlVVs396YOoNViwKheBbhVoBG2n8I3mY\n"
+        "M9Zg1dmrHh16HsJfrTCbc0VAOdkH91mNRPZr46N7MHkwCQYDVR0TBAIwADAsBglg\n"
+        "hkgBhvhCAQ0EHxYdT3BlblNTTCBHZW5lcmF0ZWQgQ2VydGlmaWNhdGUwHQYDVR0O\n"
+        "BBYEFMZoftcgs1FL1FBUJhKGvpvqVaHqMB8GA1UdIwQYMBaAFHUuWr3OtGtMktK9\n"
+        "QnKSSydxn4ewMAoGCCqGSM49BAMCA0gAMEUCIQCyp777C9Tih7Asybj6ELAYS9xq\n"
+        "vFhV6CJGk9ixW1AXdwIgKs9CEPx+Ajk3RErPm6OaVcsVLRKGBn7UuCR6VxNItWk=\n"
+        "-----END CERTIFICATE-----\n";
+
+static const char *ec_private_key_filename = "ec_private_key";
+static const char *ec_private_key =
         "data:,-----BEGIN PRIVATE KEY-----\n"
-  "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgP3SnBXzcCc0uUEiG\n"
-  "0CPNdcV0hBewOnVoh4d9q9E5U5ihRANCAASdtXv1/mPaJOQMJsUyVVWzf3pg6g1W\n"
-  "LAqF4FuFWgEbafwjeZgz1mDV2aseHXoewl+tMJtzRUA52Qf3WY1E9mvj\n"
+        "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgP3SnBXzcCc0uUEiG\n"
+        "0CPNdcV0hBewOnVoh4d9q9E5U5ihRANCAASdtXv1/mPaJOQMJsUyVVWzf3pg6g1W\n"
+        "LAqF4FuFWgEbafwjeZgz1mDV2aseHXoewl+tMJtzRUA52Qf3WY1E9mvj\n"
         "-----END PRIVATE KEY-----\n";
 
 static const char *ec_password ="CHAM-570";
 
-const char *ec_private_key_w_password_filename = "ec_private_key_w_password";
-const char *ec_private_key_w_password =
+static const char *ec_private_key_w_password_filename = "ec_private_key_w_password";
+static const char *ec_private_key_w_password =
         "data:,-----BEGIN EC PRIVATE KEY-----\n"
-  "Proc-Type: 4,ENCRYPTED\n"
-  "DEK-Info: AES-256-CBC,11055B75D406068EB1FF850646228EA9\n"
+        "Proc-Type: 4,ENCRYPTED\n"
+        "DEK-Info: AES-256-CBC,11055B75D406068EB1FF850646228EA9\n"
         "\n"
-  "GUnwN8e2gvUkopN3ak+2dK1dSTSKSJguers3h5C+qQDq57By933ijCCjUTu2LY/F\n"
-  "ERH6m8UD6H5ij/QDsXLx6tH/dFQ7An+Zao3eD2N2zquGED/OfTQJFv3gBKs4RUtg\n"
-  "66dfuv9mNSXt7Rnu9uBNtodm5JGifczdmIPHn0mNY2g=\n"
+        "GUnwN8e2gvUkopN3ak+2dK1dSTSKSJguers3h5C+qQDq57By933ijCCjUTu2LY/F\n"
+        "ERH6m8UD6H5ij/QDsXLx6tH/dFQ7An+Zao3eD2N2zquGED/OfTQJFv3gBKs4RUtg\n"
+        "66dfuv9mNSXt7Rnu9uBNtodm5JGifczdmIPHn0mNY2g=\n"
         "-----END EC PRIVATE KEY-----";
 
-const char *ec_identity_ca_filename = "ec_identity_ca";
-const char *ec_identity_ca =
+static const char *ec_identity_ca_filename = "ec_identity_ca";
+static const char *ec_identity_ca =
         "data:,-----BEGIN CERTIFICATE-----\n"
-  "MIICEDCCAbegAwIBAgIJAPOifu8ejrRRMAoGCCqGSM49BAMCMGUxCzAJBgNVBAYT\n"
-  "Ak5MMRMwEQYDVQQIDApTb21lLVN0YXRlMR8wHQYDVQQKDBZBRExJTksgVGVjaG5v\n"
-  "bG9neSBCLlYuMSAwHgYDVQQDDBdDSEFNXzU3MCBDQSBjZXJ0aWZpY2F0ZTAeFw0x\n"
-  "OTAyMTgxMDQwMTZaFw00NjA3MDYxMDQwMTZaMGUxCzAJBgNVBAYTAk5MMRMwEQYD\n"
-  "VQQIDApTb21lLVN0YXRlMR8wHQYDVQQKDBZBRExJTksgVGVjaG5vbG9neSBCLlYu\n"
-  "MSAwHgYDVQQDDBdDSEFNXzU3MCBDQSBjZXJ0aWZpY2F0ZTBZMBMGByqGSM49AgEG\n"
-  "CCqGSM49AwEHA0IABMXCYXBHEryADoYXMEE0Jw9aHlA7p3KVFzuypxuez0n7rKoX\n"
-  "k9kanNtrw5o2X4WSWKM7zkH4I6AU7xSAQgJN+8GjUDBOMB0GA1UdDgQWBBR1Llq9\n"
-  "zrRrTJLSvUJykksncZ+HsDAfBgNVHSMEGDAWgBR1Llq9zrRrTJLSvUJykksncZ+H\n"
-  "sDAMBgNVHRMEBTADAQH/MAoGCCqGSM49BAMCA0cAMEQCIHKRM3VeB2F7z3nJT752\n"
-  "gY5mNdj91ulmNX84TXA7UHNKAiA2ytpsV4OKURHkjyn1gnW48JDKtHGZF6/tMNvX\n"
-  "VrDITA==\n"
+        "MIICEDCCAbegAwIBAgIJAPOifu8ejrRRMAoGCCqGSM49BAMCMGUxCzAJBgNVBAYT\n"
+        "Ak5MMRMwEQYDVQQIDApTb21lLVN0YXRlMR8wHQYDVQQKDBZBRExJTksgVGVjaG5v\n"
+        "bG9neSBCLlYuMSAwHgYDVQQDDBdDSEFNXzU3MCBDQSBjZXJ0aWZpY2F0ZTAeFw0x\n"
+        "OTAyMTgxMDQwMTZaFw00NjA3MDYxMDQwMTZaMGUxCzAJBgNVBAYTAk5MMRMwEQYD\n"
+        "VQQIDApTb21lLVN0YXRlMR8wHQYDVQQKDBZBRExJTksgVGVjaG5vbG9neSBCLlYu\n"
+        "MSAwHgYDVQQDDBdDSEFNXzU3MCBDQSBjZXJ0aWZpY2F0ZTBZMBMGByqGSM49AgEG\n"
+        "CCqGSM49AwEHA0IABMXCYXBHEryADoYXMEE0Jw9aHlA7p3KVFzuypxuez0n7rKoX\n"
+        "k9kanNtrw5o2X4WSWKM7zkH4I6AU7xSAQgJN+8GjUDBOMB0GA1UdDgQWBBR1Llq9\n"
+        "zrRrTJLSvUJykksncZ+HsDAfBgNVHSMEGDAWgBR1Llq9zrRrTJLSvUJykksncZ+H\n"
+        "sDAMBgNVHRMEBTADAQH/MAoGCCqGSM49BAMCA0cAMEQCIHKRM3VeB2F7z3nJT752\n"
+        "gY5mNdj91ulmNX84TXA7UHNKAiA2ytpsV4OKURHkjyn1gnW48JDKtHGZF6/tMNvX\n"
+        "VrDITA==\n"
         "-----END CERTIFICATE-----\n";
 
-
-const char *ec_identity_certificate_unsupported_filename = "ec_identity_certificate_unsupported";
-const char *ec_identity_certificate_unsupported =
+static const char *ec_identity_certificate_unsupported =
         "data:,-----BEGIN CERTIFICATE-----\n"
         "MIICFTCCAbygAwIBAgICEAEwCgYIKoZIzj0EAwIwWjELMAkGA1UEBhMCTkwxEzAR\n"
         "BgNVBAgMClNvbWUtU3RhdGUxITAfBgNVBAoMGEludGVybmV0IFdpZGdpdHMgUHR5\n"
@@ -363,8 +410,7 @@ const char *ec_identity_certificate_unsupported =
         "Q1y5Vo8CdXQQ\n"
         "-----END CERTIFICATE-----\n";
 
-const char *ec_private_key_unsupported_filename = "ec_private_key_unsupported";
-const char *ec_private_key_unsupported =
+static const char *ec_private_key_unsupported =
         "data:,-----BEGIN PRIVATE KEY-----\n"
         "MG8CAQAwEwYHKoZIzj0CAQYIKoZIzj0DAQIEVTBTAgEBBBh8p6kwBS7jT86ctN33\n"
         "Vs4vosHh7upPZBWhNAMyAAQq3cdg+cOUQ5LNipPNPalq3Kt4sc3Ym3LbYpfCNo0C\n"
@@ -372,35 +418,22 @@ const char *ec_private_key_unsupported =
         "-----END PRIVATE KEY-----\n";
 
 
-const char *private_key_not_matching_filename = "private_key_not_matching";
-const char *private_key_not_matching =
-        "data:,-----BEGIN RSA PRIVATE KEY-----\n"
-        "MIIEpgIBAAKCAQEAz90I7hABwJ27DQ0ypKEOlO8ZPoMKVMUAkTxl+48Icqo2SJxF\n"
-        "vKOxVd8XflJ2jor3YqzPgbuLVGolTafxzuGDYQVTNrSUgaCZMdX8O8UFxsBrQ+m9\n"
-        "0pJeg+1I0OHrn8Y7VHuh5IVHNqmqwsw9TA5aLjp1i9Gc9pvGzbXEfGfnol64bvht\n"
-        "p3k8xMG8DZKKJNg8GUcYlLvwY+jcE8yMvQzM+gya6Y7w1JVgj4wQNjWULgqTJlUq\n"
-        "q1Wch9o7/tp1wzX3E4B8AeTCEsYEL9tUASp6V6/4Yf/jbGM2/nfaczj8lW0Gez6a\n"
-        "xHkMBh22vqLzZvvOFTX6U46KG/iWZAehKdPJrwIDAQABAoIBAQDGvQsAsoU6aJSj\n"
-        "Ee9NwD903nZAcoG6MvEr65eGQWdOWre0DNYQWmH/PGH2AVohR3Tn/1oXK/03JJWt\n"
-        "/dkQeEVoyfKZ52Xl2mseXv3fF61CLk9gi2dWoWOEt6ZbMOZbyOiJCfvrxhIkjWwa\n"
-        "+7PPuBk5AePJXwy4LJCTtiq61418i2Bbl6JamytgxsiVK9kZXdN6JqEVYmweMpmR\n"
-        "T1mzi7lssyttBIXwG8ajStUteIYLyi8d+UX4S08EyV0VGL0p5+F8xTY1jVX/t6Y0\n"
-        "KbANJdjEab9mbndzbxprJlS08KBLgdnAO4w0nmINiaO2isXOLoV8SU3tTqHC3W7c\n"
-        "CCSKJdGBAoGBAP9vCSP1AaEjYa6sfEUgThpCo7PhRuOMEDb+4ldv9O+hzXv5I8td\n"
-        "gbDs1g3jyhb0yhW9uV9NsuKBtsmv1zYFswZDNbdr2S1VZPMpAx+SeLHQWy6HbU/t\n"
-        "oHoOO+l8erFVvR2uqit5rBDzN6/lh4SoQzYE9JDAnXJp9W0rKAdtBSLRAoGBANBT\n"
-        "AIErbPo4EuU13DaEa+EfoU4Abktyi+L8dpdoXMq6sHg3Mlhifr+ryoybrMMA3tmT\n"
-        "6ekBCSVThF0/+HAFRAJthnyBgUd0D710JDHro47Mg37CxU+V8JYqZJGHUSfqng7/\n"
-        "pM7LjM99VhigquH4PoDH4YpL8vnIeEMNmny4iER/AoGBAJj8k+jpUXSFkHfh7vwo\n"
-        "AR9RUmLmRmL6/KsztbTQ5U6xBjV+XqXq90ZUU1A2Yk+lhXPIEkK2crGfJy9dFfTR\n"
-        "LQxPLNkSyxyPzMqmgaxjOc6mEDap/hqlJDx2UgPh/kpAI+inOFyZnyj3wx6ixqv5\n"
-        "a2frR996vdJNDCW6d1sbPLxBAoGBAMO66IN0UJy76Izw0Olr+4v10vFdmENM6T+o\n"
-        "IqhZBq33P+yDN8sxJ5NgjhsT/Pruq3LT9XbVYUlvsbKHcx2U5PQ/AZejedqvokZH\n"
-        "g+ZfVjnJz1ZfG1GOOBBu3jSZZdfSKRVAfhFJ0A/229ihxEwxmFAY/MCaYTzsbInb\n"
-        "kyXRnz5zAoGBAIT9Fuk7zhfubYvkzIQ0kj/IxL3QohVRKcoGapDMSwNjTvxZdKxF\n"
-        "WXkhhJT095QznHP1fhp90fBKlOdsReDWfZXMYtZTqo2+ezK8qb6xMlm+LE09y+Na\n"
-        "f7pp1EPnIqyEX27B4aQ81M8tkCqbdlv3CdjFSusp6SsWTGTjr/5SAMDS\n"
-        "-----END RSA PRIVATE KEY-----\n";
+const char *crl_filename = "crl";
+const char *crl =
+        "data:,-----BEGIN X509 CRL-----\n"
+        "MIIB4zCBzAIBATANBgkqhkiG9w0BAQsFADBfMQswCQYDVQQGEwJOTDETMBEGA1UE\n"
+        "CBMKU29tZS1TdGF0ZTEhMB8GA1UEChMYSW50ZXJuZXQgV2lkZ2l0cyBQdHkgTHRk\n"
+        "MRgwFgYDVQQDEw9DSEFNNTAwIHJvb3QgY2EXDTIxMDcxNDE0NTIzNFoYDzIyMjEw\n"
+        "NTI3MTQ1MjM0WjAnMCUCFCxXj0QLcpHA597b3QgDf0J3tnQ1Fw0yMTA2MDkyMjA1\n"
+        "MjdaoA4wDDAKBgNVHRQEAwIBAjANBgkqhkiG9w0BAQsFAAOCAQEAWDkxzaGqznJE\n"
+        "bB9PvSGrfRVYFJous5bFqCqB9jJ3nFBh/mQeqdpL9Eiw2rfSWIHbQAqPhDUkGY0t\n"
+        "z34aPeIxZZDTDzZZz4bkwt8dLrQwF+rRYEawDpATIoBUeQghVRyhrFNRa4VhtTgc\n"
+        "tG55Rt2upphLVqaMMQFHpFlVaMx3P09sXwH2XtPjg+MWYiw/HP6iETPzwBBwGFKb\n"
+        "jsS1J7lEJFcdHBCshkloxiZ0B8bj//+mpf0cUTOtn+oVv8adE7REbv1+6B3XV0wQ\n"
+        "3Yw16d9jYJb5cFPHK3voGbzuU8JhyOM8cA58Phvv0VJoRvoyMcMmgh9Muk5Uz9EI\n"
+        "3qRdLdaghA==\n"
+        "-----END X509 CRL-----\n";
+
 
 static struct plugins_hdl *plugins = NULL;
 static dds_security_authentication *auth = NULL;
@@ -478,83 +511,108 @@ reset_exception(
     ex->message = NULL;
 }
 
-static void fill_participant_qos(DDS_Security_Qos *participant_qos,
-                bool is_file_certificate, const char *certificate,
-                bool is_file_ca, const char *ca,
-                bool is_file_private_key, const char *private_key,
-                const char* password,
-                const char* trusted_ca_dir){
-
+static void
+fill_participant_qos(
+    DDS_Security_Qos *participant_qos,
+    bool is_file_certificate, const char *certificate,
+    bool is_file_ca, const char *ca,
+    bool is_file_private_key, const char *private_key_data,
+    const char *password,
+    const char *trusted_ca_dir,
+    bool is_file_crl, const char *crl_data)
+{
     char identity_cert_path[1024];
     char identity_CA_path[1024];
     char private_key_path[1024];
     char trusted_ca_dir_path[1024];
+    char crl_path[1024];
     unsigned size = 3;
+    unsigned offset = 0;
+    DDS_Security_Property_t *valbuf;
 
     password ? size++ : size;
     trusted_ca_dir ? size++ : size;
+    crl_data ? size++ : size;
 
     memset(participant_qos, 0, sizeof(*participant_qos));
     dds_security_property_init(&participant_qos->property.value, size);
 
-    participant_qos->property.value._buffer[0].name = ddsrt_strdup(PROPERTY_IDENTITY_CERT);
-    participant_qos->property.value._buffer[1].name = ddsrt_strdup(PROPERTY_IDENTITY_CA);
-    participant_qos->property.value._buffer[2].name = ddsrt_strdup(PROPERTY_PRIVATE_KEY);
-
-
-    if( is_file_certificate){
+    valbuf = &participant_qos->property.value._buffer[offset++];
+    valbuf->name = ddsrt_strdup(DDS_SEC_PROP_AUTH_IDENTITY_CERT);
+    if (is_file_certificate) {
 #ifdef WIN32
         snprintf(identity_cert_path, 1024, "file:%s\\validate_local_identity\\etc\\%s", CONFIG_ENV_TESTS_DIR, certificate);
 #else
         snprintf(identity_cert_path, 1024, "file:%s/validate_local_identity/etc/%s", CONFIG_ENV_TESTS_DIR, certificate);
 #endif
-        participant_qos->property.value._buffer[0].value = ddsrt_strdup(identity_cert_path);
-    }
-    else{
-        participant_qos->property.value._buffer[0].value = ddsrt_strdup(certificate);
-    }
-
-    if( is_file_ca){
-#ifdef WIN32
-        snprintf(identity_CA_path, 1024, "file:%s\\validate_local_identity\\etc\\%s", CONFIG_ENV_TESTS_DIR,ca);
-#else
-        snprintf(identity_CA_path, 1024, "file:%s/validate_local_identity/etc/%s", CONFIG_ENV_TESTS_DIR,ca);
-#endif
-        participant_qos->property.value._buffer[1].value = ddsrt_strdup(identity_CA_path);
+        valbuf->value = ddsrt_strdup(identity_cert_path);
     }
     else {
-        participant_qos->property.value._buffer[1].value = ddsrt_strdup(ca);
+        valbuf->value = ddsrt_strdup(certificate);
     }
 
-    if( is_file_private_key){
-      #ifdef WIN32
-        snprintf(private_key_path, 1024, "file:%s\\validate_local_identity\\etc\\%s", CONFIG_ENV_TESTS_DIR,private_key);
-      #else
-        snprintf(private_key_path, 1024, "file:%s/validate_local_identity/etc/%s", CONFIG_ENV_TESTS_DIR, private_key);
-      #endif
-        participant_qos->property.value._buffer[2].value = ddsrt_strdup(private_key_path);
+    valbuf = &participant_qos->property.value._buffer[offset++];
+    valbuf->name = ddsrt_strdup(DDS_SEC_PROP_AUTH_IDENTITY_CA);
+    if (is_file_ca) {
+#ifdef WIN32
+        snprintf(identity_CA_path, 1024, "file:%s\\validate_local_identity\\etc\\%s", CONFIG_ENV_TESTS_DIR, ca);
+#else
+        snprintf(identity_CA_path, 1024, "file:%s/validate_local_identity/etc/%s", CONFIG_ENV_TESTS_DIR, ca);
+#endif
+        valbuf->value = ddsrt_strdup(identity_CA_path);
     }
-    else{
-        participant_qos->property.value._buffer[2].value = ddsrt_strdup(private_key);
-    }
-
-    if( password ){
-        participant_qos->property.value._buffer[3].name = ddsrt_strdup(PROPERTY_PASSWORD);
-        participant_qos->property.value._buffer[3].value = ddsrt_strdup(password);
+    else {
+        valbuf->value = ddsrt_strdup(ca);
     }
 
-    if( trusted_ca_dir ){
-      #ifdef WIN32
-        snprintf(trusted_ca_dir_path, 1024, "%s\\validate_local_identity\\etc\\%s", CONFIG_ENV_TESTS_DIR,trusted_ca_dir);
-      #else
+    valbuf = &participant_qos->property.value._buffer[offset++];
+    valbuf->name = ddsrt_strdup(DDS_SEC_PROP_AUTH_PRIV_KEY);
+    if (is_file_private_key) {
+#ifdef WIN32
+        snprintf(private_key_path, 1024, "file:%s\\validate_local_identity\\etc\\%s", CONFIG_ENV_TESTS_DIR, private_key_data);
+#else
+        snprintf(private_key_path, 1024, "file:%s/validate_local_identity/etc/%s", CONFIG_ENV_TESTS_DIR, private_key_data);
+#endif
+        valbuf->value = ddsrt_strdup(private_key_path);
+    }
+    else {
+        valbuf->value = ddsrt_strdup(private_key_data);
+    }
+
+    if (password) {
+        valbuf = &participant_qos->property.value._buffer[offset++];
+        valbuf->name = ddsrt_strdup(DDS_SEC_PROP_AUTH_PASSWORD);
+        valbuf->value = ddsrt_strdup(password);
+    }
+
+    if (crl_data) {
+      valbuf = &participant_qos->property.value._buffer[offset++];
+      valbuf->name = ddsrt_strdup(ORG_ECLIPSE_CYCLONEDDS_SEC_AUTH_CRL);
+      if (is_file_crl) {
+#ifdef WIN32
+          snprintf(crl_path, 1024, "file:%s\\validate_local_identity\\etc\\%s", CONFIG_ENV_TESTS_DIR, crl_data);
+#else
+          snprintf(crl_path, 1024, "file:%s/validate_local_identity/etc/%s", CONFIG_ENV_TESTS_DIR, crl_data);
+#endif
+          valbuf->value = ddsrt_strdup(crl_path);
+      }
+      else {
+        valbuf->value = ddsrt_strdup(crl_data);
+      }
+    }
+
+    if (trusted_ca_dir) {
+        valbuf = &participant_qos->property.value._buffer[offset++];
+#ifdef WIN32
+        snprintf(trusted_ca_dir_path, 1024, "%s\\validate_local_identity\\etc\\%s", CONFIG_ENV_TESTS_DIR, trusted_ca_dir);
+#else
         snprintf(trusted_ca_dir_path, 1024, "%s/validate_local_identity/etc/%s", CONFIG_ENV_TESTS_DIR, trusted_ca_dir);
-      #endif
-        participant_qos->property.value._buffer[size-1].name = ddsrt_strdup(PROPERTY_TRUSTED_CA_DIR);
-        participant_qos->property.value._buffer[size-1].value = ddsrt_strdup(trusted_ca_dir_path);
+#endif
+        valbuf->name = ddsrt_strdup(DDS_SEC_PROP_ACCESS_TRUSTED_CA_DIR);
+        valbuf->value = ddsrt_strdup(trusted_ca_dir_path);
     }
-
-
 }
+
 
 CU_Test(ddssec_builtin_validate_local_identity,happy_day)
 {
@@ -581,9 +639,10 @@ CU_Test(ddssec_builtin_validate_local_identity,happy_day)
 
     fill_participant_qos(&participant_qos, false, identity_certificate,
                                            false, identity_ca,
-                                           false, private_key_pem,
+                                           false, private_key,
                                            NULL,
-                                           NULL);
+                                           NULL,
+                                           false, NULL);
     /* Now call the function. */
     result = auth->validate_local_identity(
                             auth,
@@ -622,10 +681,11 @@ CU_Test(ddssec_builtin_validate_local_identity,happy_day)
     memcpy(&candidate_participant_guid.entityId, &entityId, sizeof(entityId));
 
     fill_participant_qos(&participant_qos, true, identity_certificate_filename,
-                    true, identity_ca_filename,
-                    true, private_key_filename,
-                    NULL,
-                                           NULL);
+                                           true, identity_ca_filename,
+                                           true, private_key_filename,
+                                           NULL,
+                                           NULL,
+                                           false, NULL);
 
     /* Now call the function. */
     result = auth->validate_local_identity(
@@ -658,11 +718,8 @@ CU_Test(ddssec_builtin_validate_local_identity,happy_day)
         printf("return_identity_handle failed: %s\n", exception.message ? exception.message : "Error message missing");
     }
     reset_exception(&exception);
-
-
-
-
 }
+
 
 CU_Test(ddssec_builtin_validate_local_identity,invalid_certificate)
 {
@@ -688,9 +745,10 @@ CU_Test(ddssec_builtin_validate_local_identity,invalid_certificate)
 
     fill_participant_qos(&participant_qos, false, invalid_identity_certificate,
                                            false, identity_ca,
-                                           false, private_key_pem,
+                                           false, private_key,
                                            NULL,
-                                           NULL);
+                                           NULL,
+                                           false, NULL);
 
     /* Now call the function. */
     result = auth->validate_local_identity(
@@ -706,7 +764,7 @@ CU_Test(ddssec_builtin_validate_local_identity,invalid_certificate)
         printf("validate_local_identity_failed: %s\n", exception.message ? exception.message : "Error message missing");
     }
 
-    /* We expected the validation to have succeeded. */
+    /* We expected the validation to have failed. */
     CU_ASSERT (result != DDS_SECURITY_VALIDATION_OK);
     CU_ASSERT (exception.minor_code != 0);
     CU_ASSERT (exception.message != NULL);
@@ -722,9 +780,10 @@ CU_Test(ddssec_builtin_validate_local_identity,invalid_certificate)
 
     fill_participant_qos(&participant_qos, true, invalid_identity_certificate_filename,
                                            false, identity_ca,
-                                           false, private_key_pem,
+                                           false, private_key,
                                            NULL,
-                                           NULL);
+                                           NULL,
+                                           false, NULL);
 
     /* Now call the function. */
     result = auth->validate_local_identity(
@@ -740,7 +799,7 @@ CU_Test(ddssec_builtin_validate_local_identity,invalid_certificate)
         printf("validate_local_identity_failed: %s\n", exception.message ? exception.message : "Error message missing");
     }
 
-    /* We expected the validation to have succeeded. */
+    /* We expected the validation to have failed. */
     CU_ASSERT (result != DDS_SECURITY_VALIDATION_OK);
     CU_ASSERT (exception.minor_code != 0);
     CU_ASSERT (exception.message != NULL);
@@ -774,9 +833,10 @@ CU_Test(ddssec_builtin_validate_local_identity,invalid_root)
 
     fill_participant_qos(&participant_qos, false, identity_certificate,
                                            false, invalid_identity_ca,
-                                           false, private_key_pem,
+                                           false, private_key,
                                            NULL,
-                                           NULL);
+                                           NULL,
+                                           false, NULL);
     /* Now call the function. */
     result = auth->validate_local_identity(
                             auth,
@@ -791,7 +851,7 @@ CU_Test(ddssec_builtin_validate_local_identity,invalid_root)
         printf("validate_local_identity_failed: %s\n", exception.message ? exception.message : "Error message missing");
     }
 
-    /* We expected the validation to have succeeded. */
+    /* We expected the validation to have failed. */
     CU_ASSERT (result != DDS_SECURITY_VALIDATION_OK);
     CU_ASSERT (exception.minor_code != 0);
     CU_ASSERT (exception.message != NULL);
@@ -806,9 +866,10 @@ CU_Test(ddssec_builtin_validate_local_identity,invalid_root)
 
     fill_participant_qos(&participant_qos, false, identity_certificate,
                                            true, invalid_identity_ca_filename,
-                                           false, private_key_pem,
+                                           false, private_key,
                                            NULL,
-                                           NULL);
+                                           NULL,
+                                           false, NULL);
     /* Now call the function. */
     result = auth->validate_local_identity(
                             auth,
@@ -823,7 +884,7 @@ CU_Test(ddssec_builtin_validate_local_identity,invalid_root)
         printf("validate_local_identity_failed: %s\n", exception.message ? exception.message : "Error message missing");
     }
 
-    /* We expected the validation to have succeeded. */
+    /* We expected the validation to have failed. */
     CU_ASSERT (result != DDS_SECURITY_VALIDATION_OK);
     CU_ASSERT (exception.minor_code != 0);
     CU_ASSERT (exception.message != NULL);
@@ -831,6 +892,7 @@ CU_Test(ddssec_builtin_validate_local_identity,invalid_root)
     dds_security_property_deinit(&participant_qos.property.value);
     reset_exception(&exception);
 }
+
 
 CU_Test(ddssec_builtin_validate_local_identity,invalid_chain)
 {
@@ -856,9 +918,10 @@ CU_Test(ddssec_builtin_validate_local_identity,invalid_chain)
 
     fill_participant_qos(&participant_qos, false, identity_certificate,
                                            false, unrelated_identity_ca,
-                                           false, private_key_pem,
+                                           false, private_key,
                                            NULL,
-                                           NULL);
+                                           NULL,
+                                           false, NULL);
     /* Now call the function. */
     result = auth->validate_local_identity(
                             auth,
@@ -873,7 +936,7 @@ CU_Test(ddssec_builtin_validate_local_identity,invalid_chain)
         printf("validate_local_identity_failed: %s\n", exception.message ? exception.message : "Error message missing");
     }
 
-    /* We expected the validation to have succeeded. */
+    /* We expected the validation to have failed. */
     CU_ASSERT (result != DDS_SECURITY_VALIDATION_OK);
     CU_ASSERT (exception.minor_code != 0);
     CU_ASSERT (exception.message != NULL);
@@ -888,9 +951,10 @@ CU_Test(ddssec_builtin_validate_local_identity,invalid_chain)
 
     fill_participant_qos(&participant_qos, false, identity_certificate,
                                            true, unrelated_identity_ca_filename,
-                                           false, private_key_pem,
+                                           false, private_key,
                                            NULL,
-                                           NULL);
+                                           NULL,
+                                           false, NULL);
     /* Now call the function. */
     result = auth->validate_local_identity(
                             auth,
@@ -905,7 +969,7 @@ CU_Test(ddssec_builtin_validate_local_identity,invalid_chain)
         printf("validate_local_identity_failed: %s\n", exception.message ? exception.message : "Error message missing");
     }
 
-    /* We expected the validation to have succeeded. */
+    /* We expected the validation to have failed. */
     CU_ASSERT (result != DDS_SECURITY_VALIDATION_OK);
     CU_ASSERT (exception.minor_code != 0);
     CU_ASSERT (exception.message != NULL);
@@ -916,7 +980,7 @@ CU_Test(ddssec_builtin_validate_local_identity,invalid_chain)
 
 }
 
-CU_Test(ddssec_builtin_validate_local_identity,certificate_key_to_small)
+CU_Test(ddssec_builtin_validate_local_identity,certificate_key_too_small)
 {
     DDS_Security_ValidationResult_t result;
     DDS_Security_IdentityHandle local_identity_handle = DDS_SECURITY_HANDLE_NIL;
@@ -940,9 +1004,10 @@ CU_Test(ddssec_builtin_validate_local_identity,certificate_key_to_small)
 
     fill_participant_qos(&participant_qos, false, identity_certificate_1024key,
                                            false, identity_ca,
-                                           false, private_key_pem,
+                                           false, private_key,
                                            NULL,
-                                           NULL);
+                                           NULL,
+                                           false, NULL);
 
     /* Now call the function. */
     result = auth->validate_local_identity(
@@ -958,7 +1023,7 @@ CU_Test(ddssec_builtin_validate_local_identity,certificate_key_to_small)
         printf("validate_local_identity_failed: %s\n", exception.message ? exception.message : "Error message missing");
     }
 
-    /* We expected the validation to have succeeded. */
+    /* We expected the validation to have failed. */
     CU_ASSERT (result != DDS_SECURITY_VALIDATION_OK);
     CU_ASSERT (exception.minor_code != 0);
     CU_ASSERT (exception.message != NULL);
@@ -994,7 +1059,8 @@ CU_Test(ddssec_builtin_validate_local_identity,invalid_private_key)
                                            false, identity_ca,
                                            false, invalid_private_key,
                                            NULL,
-                                           NULL);
+                                           NULL,
+                                           false, NULL);
     /* Now call the function. */
     result = auth->validate_local_identity(
                             auth,
@@ -1009,7 +1075,7 @@ CU_Test(ddssec_builtin_validate_local_identity,invalid_private_key)
         printf("validate_local_identity_failed: %s\n", exception.message ? exception.message : "Error message missing");
     }
 
-    /* We expected the validation to have succeeded. */
+    /* We expected the validation to have failed. */
     CU_ASSERT (result != DDS_SECURITY_VALIDATION_OK);
     CU_ASSERT (exception.minor_code != 0);
     CU_ASSERT (exception.message != NULL);
@@ -1026,7 +1092,8 @@ CU_Test(ddssec_builtin_validate_local_identity,invalid_private_key)
                                            false, identity_ca,
                                            true, invalid_private_key_filename,
                                            NULL,
-                                           NULL);
+                                           NULL,
+                                           false, NULL);
     /* Now call the function. */
     result = auth->validate_local_identity(
                             auth,
@@ -1041,7 +1108,7 @@ CU_Test(ddssec_builtin_validate_local_identity,invalid_private_key)
         printf("validate_local_identity_failed: %s\n", exception.message ? exception.message : "Error message missing");
     }
 
-    /* We expected the validation to have succeeded. */
+    /* We expected the validation to have failed. */
     CU_ASSERT (result != DDS_SECURITY_VALIDATION_OK);
     CU_ASSERT (exception.minor_code != 0);
     CU_ASSERT (exception.message != NULL);
@@ -1051,7 +1118,7 @@ CU_Test(ddssec_builtin_validate_local_identity,invalid_private_key)
 }
 
 
-CU_Test(ddssec_builtin_validate_local_identity,private_key_to_small)
+CU_Test(ddssec_builtin_validate_local_identity,private_key_too_small)
 {
     DDS_Security_ValidationResult_t result;
     DDS_Security_IdentityHandle local_identity_handle = DDS_SECURITY_HANDLE_NIL;
@@ -1077,7 +1144,8 @@ CU_Test(ddssec_builtin_validate_local_identity,private_key_to_small)
                                            false, identity_ca,
                                            false, private_key_1024,
                                            NULL,
-                                           NULL);
+                                           NULL,
+                                           false, NULL);
     /* Now call the function. */
     result = auth->validate_local_identity(
                             auth,
@@ -1092,7 +1160,7 @@ CU_Test(ddssec_builtin_validate_local_identity,private_key_to_small)
         printf("validate_local_identity_failed: %s\n", exception.message ? exception.message : "Error message missing");
     }
 
-    /* We expected the validation to have succeeded. */
+    /* We expected the validation to have failed. */
     CU_ASSERT (result != DDS_SECURITY_VALIDATION_OK);
     CU_ASSERT (exception.minor_code != 0);
     CU_ASSERT (exception.message != NULL);
@@ -1126,11 +1194,11 @@ CU_Test(ddssec_builtin_validate_local_identity,missing_certificate_property)
 
     memset(&participant_qos, 0, sizeof(participant_qos));
     dds_security_property_init(&participant_qos.property.value, 3);
-    participant_qos.property.value._buffer[0].name = ddsrt_strdup("dds.sec.auth.identity_cert");
+    participant_qos.property.value._buffer[0].name = ddsrt_strdup(DDS_SEC_PROP_PREFIX "auth.identity_cert"); // deliberately *not* DDS_SEC_PROP_AUTH_IDENTITY_CERT
     participant_qos.property.value._buffer[0].value = ddsrt_strdup(identity_certificate);
-    participant_qos.property.value._buffer[1].name = ddsrt_strdup(PROPERTY_IDENTITY_CA);
+    participant_qos.property.value._buffer[1].name = ddsrt_strdup(DDS_SEC_PROP_AUTH_IDENTITY_CA);
     participant_qos.property.value._buffer[1].value = ddsrt_strdup(identity_ca);
-    participant_qos.property.value._buffer[2].name = ddsrt_strdup(PROPERTY_PRIVATE_KEY);
+    participant_qos.property.value._buffer[2].name = ddsrt_strdup(DDS_SEC_PROP_AUTH_PRIV_KEY);
     participant_qos.property.value._buffer[2].value = ddsrt_strdup(private_key_1024);
 
     /* Now call the function. */
@@ -1147,12 +1215,12 @@ CU_Test(ddssec_builtin_validate_local_identity,missing_certificate_property)
         printf("validate_local_identity_failed: %s\n", exception.message ? exception.message : "Error message missing");
     }
 
-    /* We expected the validation to have succeeded. */
+    /* We expected the validation to have failed. */
     CU_ASSERT (result != DDS_SECURITY_VALIDATION_OK);
     CU_ASSERT (exception.minor_code != 0);
     CU_ASSERT_FATAL (exception.message != NULL);
     assert(exception.message != NULL); // for Clang's static analyzer
-    CU_ASSERT(strcmp(exception.message, "validate_local_identity: missing property 'dds.sec.auth.identity_certificate'") == 0);
+    CU_ASSERT(strcmp(exception.message, "validate_local_identity: missing property '" DDS_SEC_PROP_AUTH_IDENTITY_CERT "'") == 0);
 
     dds_security_property_deinit(&participant_qos.property.value);
     reset_exception(&exception);
@@ -1185,11 +1253,11 @@ CU_Test(ddssec_builtin_validate_local_identity,missing_ca_property)
 
     memset(&participant_qos, 0, sizeof(participant_qos));
     dds_security_property_init(&participant_qos.property.value, 3);
-    participant_qos.property.value._buffer[0].name = ddsrt_strdup(PROPERTY_IDENTITY_CERT);
+    participant_qos.property.value._buffer[0].name = ddsrt_strdup(DDS_SEC_PROP_AUTH_IDENTITY_CERT);
     participant_qos.property.value._buffer[0].value = ddsrt_strdup(identity_certificate);
-    participant_qos.property.value._buffer[1].name = ddsrt_strdup("dds.sec.auth.identit_ca");
+    participant_qos.property.value._buffer[1].name = ddsrt_strdup(DDS_SEC_PROP_PREFIX "auth.identit_ca"); // deliberately *not* DDS_SEC_PROP_AUTH_IDENTITY_CA
     participant_qos.property.value._buffer[1].value = ddsrt_strdup(identity_ca);
-    participant_qos.property.value._buffer[2].name = ddsrt_strdup(PROPERTY_PRIVATE_KEY);
+    participant_qos.property.value._buffer[2].name = ddsrt_strdup(DDS_SEC_PROP_AUTH_PRIV_KEY);
     participant_qos.property.value._buffer[2].value = ddsrt_strdup(private_key_1024);
 
     /* Now call the function. */
@@ -1206,12 +1274,12 @@ CU_Test(ddssec_builtin_validate_local_identity,missing_ca_property)
         printf("validate_local_identity_failed: %s\n", exception.message ? exception.message : "Error message missing");
     }
 
-    /* We expected the validation to have succeeded. */
+    /* We expected the validation to have failed. */
     CU_ASSERT (result != DDS_SECURITY_VALIDATION_OK);
     CU_ASSERT (exception.minor_code != 0);
     CU_ASSERT_FATAL (exception.message != NULL);
     assert(exception.message != NULL); // for Clang's static analyzer
-    CU_ASSERT(strcmp(exception.message, "validate_local_identity: missing property 'dds.sec.auth.identity_ca'") == 0);
+    CU_ASSERT(strcmp(exception.message, "validate_local_identity: missing property '" DDS_SEC_PROP_AUTH_IDENTITY_CA "'") == 0);
 
     dds_security_property_deinit(&participant_qos.property.value);
     reset_exception(&exception);
@@ -1241,9 +1309,9 @@ CU_Test(ddssec_builtin_validate_local_identity,missing_private_key_property)
 
     memset(&participant_qos, 0, sizeof(participant_qos));
     dds_security_property_init(&participant_qos.property.value, 2);
-    participant_qos.property.value._buffer[0].name = ddsrt_strdup(PROPERTY_IDENTITY_CERT);
+    participant_qos.property.value._buffer[0].name = ddsrt_strdup(DDS_SEC_PROP_AUTH_IDENTITY_CERT);
     participant_qos.property.value._buffer[0].value = ddsrt_strdup(identity_certificate);
-    participant_qos.property.value._buffer[1].name = ddsrt_strdup(PROPERTY_IDENTITY_CA);
+    participant_qos.property.value._buffer[1].name = ddsrt_strdup(DDS_SEC_PROP_AUTH_IDENTITY_CA);
     participant_qos.property.value._buffer[1].value = ddsrt_strdup(identity_ca);
 
     /* Now call the function. */
@@ -1260,12 +1328,12 @@ CU_Test(ddssec_builtin_validate_local_identity,missing_private_key_property)
         printf("validate_local_identity_failed: %s\n", exception.message ? exception.message : "Error message missing");
     }
 
-    /* We expected the validation to have succeeded. */
+    /* We expected the validation to have failed. */
     CU_ASSERT (result != DDS_SECURITY_VALIDATION_OK);
     CU_ASSERT (exception.minor_code != 0);
     CU_ASSERT_FATAL (exception.message != NULL);
     assert(exception.message != NULL); // for Clang's static analyzer
-    CU_ASSERT(strcmp(exception.message, "validate_local_identity: missing property 'dds.sec.auth.private_key'") == 0);
+    CU_ASSERT(strcmp(exception.message, "validate_local_identity: missing property '" DDS_SEC_PROP_AUTH_PRIV_KEY "'") == 0);
 
     dds_security_property_deinit(&participant_qos.property.value);
     reset_exception(&exception);
@@ -1302,8 +1370,10 @@ CU_Test(ddssec_builtin_validate_local_identity,unsupported_certification_format)
 
     fill_participant_qos(&participant_qos, false, cert,
                                            false, identity_ca,
-                                           false, private_key_pem,
-                                           NULL, NULL);
+                                           false, private_key,
+                                           NULL,
+                                           NULL,
+                                           false, NULL);
     /* Now call the function. */
     result = auth->validate_local_identity(
                             auth,
@@ -1318,7 +1388,7 @@ CU_Test(ddssec_builtin_validate_local_identity,unsupported_certification_format)
         printf("validate_local_identity_failed: %s\n", exception.message ? exception.message : "Error message missing");
     }
 
-    /* We expected the validation to have succeeded. */
+    /* We expected the validation to have failed. */
     CU_ASSERT (result != DDS_SECURITY_VALIDATION_OK);
     CU_ASSERT (exception.minor_code != 0);
     CU_ASSERT (exception.message != NULL);
@@ -1354,7 +1424,9 @@ CU_Test(ddssec_builtin_validate_local_identity,encrypted_key)
     fill_participant_qos(&participant_qos, false, identity_certificate,
                                            false, identity_ca,
                                            false, private_key_w_password,
-                                           private_key_password, NULL);
+                                           private_key_password,
+                                           NULL,
+                                           false, NULL);
     /* Now call the function. */
     result = auth->validate_local_identity(
                             auth,
@@ -1387,7 +1459,9 @@ CU_Test(ddssec_builtin_validate_local_identity,encrypted_key)
     fill_participant_qos(&participant_qos, false, identity_certificate,
                                            false, identity_ca,
                                            true, private_key_w_password_filename,
-                                           private_key_password, NULL);
+                                           private_key_password,
+                                           NULL,
+                                           false, NULL);
     /* Now call the function. */
     result = auth->validate_local_identity(
                             auth,
@@ -1439,7 +1513,8 @@ CU_Test(ddssec_builtin_validate_local_identity,encrypted_key_no_password)
                                            false, identity_ca,
                                            false, private_key_w_password,
                                            NULL,
-                                           NULL);
+                                           NULL,
+                                           false, NULL);
     /* Now call the function. */
     result = auth->validate_local_identity(
                             auth,
@@ -1450,7 +1525,7 @@ CU_Test(ddssec_builtin_validate_local_identity,encrypted_key_no_password)
                             &candidate_participant_guid,
                             &exception);
 
-    /* We expected the validation to have succeeded. */
+    /* We expected the validation to have failed. */
     CU_ASSERT (result != DDS_SECURITY_VALIDATION_OK);
     CU_ASSERT (exception.minor_code != 0);
     CU_ASSERT (exception.message != NULL);
@@ -1467,7 +1542,8 @@ CU_Test(ddssec_builtin_validate_local_identity,encrypted_key_no_password)
                                            false, identity_ca,
                                            true, private_key_w_password_filename,
                                            NULL,
-                                           NULL);
+                                           NULL,
+                                           false, NULL);
     /* Now call the function. */
     result = auth->validate_local_identity(
                             auth,
@@ -1478,7 +1554,7 @@ CU_Test(ddssec_builtin_validate_local_identity,encrypted_key_no_password)
                             &candidate_participant_guid,
                             &exception);
 
-    /* We expected the validation to have succeeded. */
+    /* We expected the validation to have failed. */
     CU_ASSERT (result != DDS_SECURITY_VALIDATION_OK);
     CU_ASSERT (exception.minor_code != 0);
     CU_ASSERT (exception.message != NULL);
@@ -1513,7 +1589,8 @@ CU_Test(ddssec_builtin_validate_local_identity,encrypted_key_invalid_password)
                                            false, identity_ca,
                                            false, private_key_w_password,
                                            "invalid",
-                                           NULL);
+                                           NULL,
+                                           false, NULL);
 
     /* Now call the function. */
     result = auth->validate_local_identity(
@@ -1529,7 +1606,7 @@ CU_Test(ddssec_builtin_validate_local_identity,encrypted_key_invalid_password)
         printf("validate_local_identity_failed: %s\n", exception.message ? exception.message : "Error message missing");
     }
 
-    /* We expected the validation to have succeeded. */
+    /* We expected the validation to have failed. */
     CU_ASSERT (result != DDS_SECURITY_VALIDATION_OK);
     CU_ASSERT (exception.minor_code != 0);
     CU_ASSERT (exception.message != NULL);
@@ -1547,7 +1624,8 @@ CU_Test(ddssec_builtin_validate_local_identity,encrypted_key_invalid_password)
                                            false, identity_ca,
                                            true, private_key_w_password_filename,
                                            "invalid",
-                                           NULL);
+                                           NULL,
+                                           false, NULL);
 
     /* Now call the function. */
     result = auth->validate_local_identity(
@@ -1563,7 +1641,7 @@ CU_Test(ddssec_builtin_validate_local_identity,encrypted_key_invalid_password)
         printf("validate_local_identity_failed: %s\n", exception.message ? exception.message : "Error message missing");
     }
 
-    /* We expected the validation to have succeeded. */
+    /* We expected the validation to have failed. */
     CU_ASSERT (result != DDS_SECURITY_VALIDATION_OK);
     CU_ASSERT (exception.minor_code != 0);
     CU_ASSERT (exception.message != NULL);
@@ -1572,7 +1650,7 @@ CU_Test(ddssec_builtin_validate_local_identity,encrypted_key_invalid_password)
     reset_exception(&exception);
 }
 
-CU_Test(ddssec_builtin_validate_local_identity,happy_day_eliptic)
+CU_Test(ddssec_builtin_validate_local_identity,happy_day_elliptic)
 {
     DDS_Security_ValidationResult_t result;
     DDS_Security_IdentityHandle local_identity_handle = DDS_SECURITY_HANDLE_NIL;
@@ -1599,7 +1677,8 @@ CU_Test(ddssec_builtin_validate_local_identity,happy_day_eliptic)
                                            false, ec_identity_ca,
                                            false, ec_private_key,
                                            NULL,
-                                           NULL);
+                                           NULL,
+                                           false, NULL);
     /* Now call the function. */
     result = auth->validate_local_identity(
                             auth,
@@ -1641,7 +1720,8 @@ CU_Test(ddssec_builtin_validate_local_identity,happy_day_eliptic)
                                            true, ec_identity_ca_filename,
                                            true, ec_private_key_filename,
                                            NULL,
-                                           NULL);
+                                           NULL,
+                                           false, NULL);
     /* Now call the function. */
     result = auth->validate_local_identity(
                             auth,
@@ -1673,7 +1753,6 @@ CU_Test(ddssec_builtin_validate_local_identity,happy_day_eliptic)
         printf("return_identity_handle failed: %s\n", exception.message ? exception.message : "Error message missing");
     }
     reset_exception(&exception);
-
 }
 
 
@@ -1703,7 +1782,8 @@ CU_Test(ddssec_builtin_validate_local_identity,encrypted_ec_key)
                                            false, ec_identity_ca,
                                            false, ec_private_key_w_password,
                                            ec_password,
-                                           NULL);
+                                           NULL,
+                                           false, NULL);
     /* Now call the function. */
     result = auth->validate_local_identity(
                             auth,
@@ -1734,10 +1814,11 @@ CU_Test(ddssec_builtin_validate_local_identity,encrypted_ec_key)
     memcpy(&candidate_participant_guid.entityId, &entityId, sizeof(entityId));
 
     fill_participant_qos(&participant_qos, false, ec_identity_certificate,
-                    false, ec_identity_ca,
-                    true, ec_private_key_w_password_filename,
-                    ec_password,
-                    NULL);
+                                           false, ec_identity_ca,
+                                           true, ec_private_key_w_password_filename,
+                                           ec_password,
+                                           NULL,
+                                           false, NULL);
     /* Now call the function. */
     result = auth->validate_local_identity(
                             auth,
@@ -1784,14 +1865,12 @@ CU_Test(ddssec_builtin_validate_local_identity,elliptic_unsupported_certificate)
     memcpy(&candidate_participant_guid.prefix, &prefix, sizeof(prefix));
     memcpy(&candidate_participant_guid.entityId, &entityId, sizeof(entityId));
 
-    memset(&participant_qos, 0, sizeof(participant_qos));
-    dds_security_property_init(&participant_qos.property.value, 3);
-    participant_qos.property.value._buffer[0].name = ddsrt_strdup(PROPERTY_IDENTITY_CERT);
-    participant_qos.property.value._buffer[0].value = ddsrt_strdup(ec_identity_certificate_unsupported);
-    participant_qos.property.value._buffer[1].name = ddsrt_strdup(PROPERTY_IDENTITY_CA);
-    participant_qos.property.value._buffer[1].value = ddsrt_strdup(ec_identity_ca);
-    participant_qos.property.value._buffer[2].name = ddsrt_strdup(PROPERTY_PRIVATE_KEY);
-    participant_qos.property.value._buffer[2].value = ddsrt_strdup(ec_private_key);
+    fill_participant_qos(&participant_qos, false, ec_identity_certificate_unsupported,
+                                           false, ec_identity_ca,
+                                           false, ec_private_key,
+                                           NULL,
+                                           NULL,
+                                           false, NULL);
 
     /* Now call the function. */
     result = auth->validate_local_identity(
@@ -1807,7 +1886,7 @@ CU_Test(ddssec_builtin_validate_local_identity,elliptic_unsupported_certificate)
         printf("validate_local_identity_failed: %s\n", exception.message ? exception.message : "Error message missing");
     }
 
-    /* We expected the validation to have succeeded. */
+    /* We expected the validation to have failed. */
     CU_ASSERT (result != DDS_SECURITY_VALIDATION_OK);
     CU_ASSERT (exception.minor_code != 0);
     CU_ASSERT (exception.message != NULL);
@@ -1838,14 +1917,12 @@ CU_Test(ddssec_builtin_validate_local_identity,elliptic_unsupported_private_key)
     memcpy(&candidate_participant_guid.prefix, &prefix, sizeof(prefix));
     memcpy(&candidate_participant_guid.entityId, &entityId, sizeof(entityId));
 
-    memset(&participant_qos, 0, sizeof(participant_qos));
-    dds_security_property_init(&participant_qos.property.value, 3);
-    participant_qos.property.value._buffer[0].name = ddsrt_strdup(PROPERTY_IDENTITY_CERT);
-    participant_qos.property.value._buffer[0].value = ddsrt_strdup(ec_identity_certificate);
-    participant_qos.property.value._buffer[1].name = ddsrt_strdup(PROPERTY_IDENTITY_CA);
-    participant_qos.property.value._buffer[1].value = ddsrt_strdup(ec_identity_ca);
-    participant_qos.property.value._buffer[2].name = ddsrt_strdup(PROPERTY_PRIVATE_KEY);
-    participant_qos.property.value._buffer[2].value = ddsrt_strdup(ec_private_key_unsupported);
+    fill_participant_qos(&participant_qos, false, ec_identity_certificate,
+                                           false, ec_identity_ca,
+                                           false, ec_private_key_unsupported,
+                                           NULL,
+                                           NULL,
+                                           false, NULL);
 
     /* Now call the function. */
     result = auth->validate_local_identity(
@@ -1861,7 +1938,7 @@ CU_Test(ddssec_builtin_validate_local_identity,elliptic_unsupported_private_key)
         printf("validate_local_identity_failed: %s\n", exception.message ? exception.message : "Error message missing");
     }
 
-    /* We expected the validation to have succeeded. */
+    /* We expected the validation to have failed. */
     CU_ASSERT (result != DDS_SECURITY_VALIDATION_OK);
     CU_ASSERT (exception.minor_code != 0);
     CU_ASSERT (exception.message != NULL);
@@ -1893,14 +1970,12 @@ CU_Test(ddssec_builtin_validate_local_identity,return_freed_handle)
     memcpy(&candidate_participant_guid.prefix, &prefix, sizeof(prefix));
     memcpy(&candidate_participant_guid.entityId, &entityId, sizeof(entityId));
 
-    memset(&participant_qos, 0, sizeof(participant_qos));
-    dds_security_property_init(&participant_qos.property.value, 3);
-    participant_qos.property.value._buffer[0].name = ddsrt_strdup(PROPERTY_IDENTITY_CERT);
-    participant_qos.property.value._buffer[0].value = ddsrt_strdup(identity_certificate);
-    participant_qos.property.value._buffer[1].name = ddsrt_strdup(PROPERTY_IDENTITY_CA);
-    participant_qos.property.value._buffer[1].value = ddsrt_strdup(identity_ca);
-    participant_qos.property.value._buffer[2].name = ddsrt_strdup(PROPERTY_PRIVATE_KEY);
-    participant_qos.property.value._buffer[2].value = ddsrt_strdup(private_key_pem);
+    fill_participant_qos(&participant_qos, false, identity_certificate,
+                                           false, identity_ca,
+                                           false, private_key,
+                                           NULL,
+                                           NULL,
+                                           false, NULL);
 
     /* Now call the function. */
     result = auth->validate_local_identity(
@@ -1970,10 +2045,11 @@ CU_Test(ddssec_builtin_validate_local_identity,no_file)
     memcpy(&candidate_participant_guid.entityId, &entityId, sizeof(entityId));
 
     fill_participant_qos(&participant_qos, true, identity_certificate_filename,
-                    false, identity_ca,
-                    true, "invalid_filename",
-                    NULL,
-                                           NULL);
+                                           false, identity_ca,
+                                           true, "invalid_filename",
+                                           NULL,
+                                           NULL,
+                                           false, NULL);
 
     /* Now call the function. */
     result = auth->validate_local_identity(
@@ -1989,7 +2065,7 @@ CU_Test(ddssec_builtin_validate_local_identity,no_file)
         printf("validate_local_identity_failed: %s\n", exception.message ? exception.message : "Error message missing");
     }
 
-    /* We expected the validation to have succeeded. */
+    /* We expected the validation to have failed. */
     CU_ASSERT_FATAL (result != DDS_SECURITY_VALIDATION_OK);
     CU_ASSERT_FATAL (local_identity_handle == DDS_SECURITY_HANDLE_NIL);
 
@@ -2001,10 +2077,11 @@ CU_Test(ddssec_builtin_validate_local_identity,no_file)
     memcpy(&candidate_participant_guid.entityId, &entityId, sizeof(entityId));
 
     fill_participant_qos(&participant_qos, true, identity_certificate_filename,
-                    true, "invalid_filename",
-                    true, private_key_filename,
-                    NULL,
-                                           NULL);
+                                           true, "invalid_filename",
+                                           true, private_key_filename,
+                                           NULL,
+                                           NULL,
+                                           false, NULL);
 
     /* Now call the function. */
     result = auth->validate_local_identity(
@@ -2020,7 +2097,7 @@ CU_Test(ddssec_builtin_validate_local_identity,no_file)
         printf("validate_local_identity_failed: %s\n", exception.message ? exception.message : "Error message missing");
     }
 
-    /* We expected the validation to have succeeded. */
+    /* We expected the validation to have failed. */
     CU_ASSERT_FATAL (result != DDS_SECURITY_VALIDATION_OK);
     CU_ASSERT_FATAL (local_identity_handle == DDS_SECURITY_HANDLE_NIL);
 
@@ -2033,10 +2110,11 @@ CU_Test(ddssec_builtin_validate_local_identity,no_file)
     memcpy(&candidate_participant_guid.entityId, &entityId, sizeof(entityId));
 
     fill_participant_qos(&participant_qos, true, "invalid_filename",
-                    true, identity_ca_filename,
-                    false, private_key_pem,
-                    NULL,
-                                           NULL);
+                                           true, identity_ca_filename,
+                                           false, private_key,
+                                           NULL,
+                                           NULL,
+                                           false, NULL);
 
     /* Now call the function. */
     result = auth->validate_local_identity(
@@ -2052,18 +2130,16 @@ CU_Test(ddssec_builtin_validate_local_identity,no_file)
         printf("validate_local_identity_failed: %s\n", exception.message ? exception.message : "Error message missing");
     }
 
-    /* We expected the validation to have succeeded. */
+    /* We expected the validation to have failed. */
     CU_ASSERT_FATAL (result != DDS_SECURITY_VALIDATION_OK);
     CU_ASSERT_FATAL (local_identity_handle == DDS_SECURITY_HANDLE_NIL);
 
     dds_security_property_deinit(&participant_qos.property.value);
     reset_exception(&exception);
-
-
 }
 
 CU_Test(ddssec_builtin_validate_local_identity,with_extended_certificate_check)
-{ 
+{
     DDS_Security_ValidationResult_t result;
     DDS_Security_IdentityHandle local_identity_handle = DDS_SECURITY_HANDLE_NIL;
     DDS_Security_GUID_t adjusted_participant_guid;
@@ -2087,9 +2163,10 @@ CU_Test(ddssec_builtin_validate_local_identity,with_extended_certificate_check)
 
     fill_participant_qos(&participant_qos, false, identity_certificate,
                                            false, identity_ca,
-                                           false, private_key_pem,
+                                           false, private_key,
                                            NULL,
-                                           "trusted_ca_dir");
+                                           "trusted_ca_dir",
+                                           false, NULL);
     /* Now call the function. */
     result = auth->validate_local_identity(
                             auth,
@@ -2126,10 +2203,11 @@ CU_Test(ddssec_builtin_validate_local_identity,with_extended_certificate_check)
     memcpy(&candidate_participant_guid.entityId, &entityId, sizeof(entityId));
 
     fill_participant_qos(&participant_qos, true, identity_certificate_filename,
-                    true, identity_ca_filename,
-                    true, private_key_filename,
-                    NULL,
-                    "trusted_ca_dir_not_matching");
+                                           true, identity_ca_filename,
+                                           true, private_key_filename,
+                                           NULL,
+                                           "trusted_ca_dir_not_matching",
+                                           false, NULL);
 
     /* Now call the function. */
     result = auth->validate_local_identity(
@@ -2141,13 +2219,150 @@ CU_Test(ddssec_builtin_validate_local_identity,with_extended_certificate_check)
                             &candidate_participant_guid,
                             &exception);
 
-
-    /* We expected the validation to have succeeded. */
+    /* We expected the validation to have failed. */
     CU_ASSERT_FATAL (result != DDS_SECURITY_VALIDATION_OK);
     CU_ASSERT (local_identity_handle == DDS_SECURITY_HANDLE_NIL);
 
     dds_security_property_deinit(&participant_qos.property.value);
     reset_exception(&exception);
+}
 
 
+CU_Test(ddssec_builtin_validate_local_identity,crl)
+{
+    DDS_Security_ValidationResult_t result;
+    DDS_Security_IdentityHandle local_identity_handle = DDS_SECURITY_HANDLE_NIL;
+    DDS_Security_GUID_t adjusted_participant_guid;
+    DDS_Security_DomainId domain_id = 0;
+    DDS_Security_Qos participant_qos;
+    DDS_Security_GUID_t candidate_participant_guid;
+    DDS_Security_SecurityException exception = {NULL, 0, 0};
+    DDS_Security_GuidPrefix_t prefix = {0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa, 0xfb};
+    DDS_Security_EntityId_t entityId = {{0xa0,0xa1,0xa2},0x1};
+
+    /* Check if we actually have the validate_local_identity() function. */
+    CU_ASSERT_FATAL (auth != NULL);
+    assert (auth != NULL);
+    CU_ASSERT_FATAL (auth->validate_local_identity != NULL);
+    assert (auth->validate_local_identity != 0);
+
+    memset(&adjusted_participant_guid, 0, sizeof(adjusted_participant_guid));
+    memcpy(&candidate_participant_guid.prefix, &prefix, sizeof(prefix));
+    memcpy(&candidate_participant_guid.entityId, &entityId, sizeof(entityId));
+
+    fill_participant_qos(&participant_qos, false, revoked_identity_certificate,
+                                           false, identity_ca,
+                                           false, revoked_private_key,
+                                           NULL,
+                                           NULL,
+                                           false, crl);
+    /* Now call the function. */
+    result = auth->validate_local_identity(
+                            auth,
+                            &local_identity_handle,
+                            &adjusted_participant_guid,
+                            domain_id,
+                            &participant_qos,
+                            &candidate_participant_guid,
+                            &exception);
+
+    if (result != DDS_SECURITY_VALIDATION_OK) {
+        printf("validate_local_identity_failed: %s\n", exception.message ? exception.message : "Error message missing");
+    }
+
+    /* We expected the validation to have failed. */
+    CU_ASSERT_FATAL (result != DDS_SECURITY_VALIDATION_OK);
+    CU_ASSERT (exception.minor_code != 0);
+    CU_ASSERT (exception.message != NULL);
+
+    dds_security_property_deinit(&participant_qos.property.value);
+    reset_exception(&exception);
+
+    /* validate with file */
+    memset(&adjusted_participant_guid, 0, sizeof(adjusted_participant_guid));
+    memcpy(&candidate_participant_guid.prefix, &prefix, sizeof(prefix));
+    memcpy(&candidate_participant_guid.entityId, &entityId, sizeof(entityId));
+
+    fill_participant_qos(&participant_qos, true, revoked_identity_certificate_filename,
+                                           true, identity_ca_filename,
+                                           true, revoked_private_key_filename,
+                                           NULL,
+                                           NULL,
+                                           true, crl_filename);
+
+    /* Now call the function. */
+    result = auth->validate_local_identity(
+                            auth,
+                            &local_identity_handle,
+                            &adjusted_participant_guid,
+                            domain_id,
+                            &participant_qos,
+                            &candidate_participant_guid,
+                            &exception);
+
+    if (result != DDS_SECURITY_VALIDATION_OK) {
+        printf("validate_local_identity_failed: %s\n", exception.message ? exception.message : "Error message missing");
+    }
+
+    /* We expected the validation to have failed. */
+    CU_ASSERT_FATAL (result != DDS_SECURITY_VALIDATION_OK);
+    CU_ASSERT (exception.minor_code != 0);
+    CU_ASSERT (exception.message != NULL);
+
+    dds_security_property_deinit(&participant_qos.property.value);
+    reset_exception(&exception);
+}
+
+
+CU_Test(ddssec_builtin_validate_local_identity,trusted_ca_dir_and_crl)
+{
+    DDS_Security_ValidationResult_t result;
+    DDS_Security_IdentityHandle local_identity_handle = DDS_SECURITY_HANDLE_NIL;
+    DDS_Security_GUID_t adjusted_participant_guid;
+    DDS_Security_DomainId domain_id = 0;
+    DDS_Security_Qos participant_qos;
+    DDS_Security_GUID_t candidate_participant_guid;
+    DDS_Security_SecurityException exception = {NULL, 0, 0};
+    DDS_Security_GuidPrefix_t prefix = {0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa, 0xfb};
+    DDS_Security_EntityId_t entityId = {{0xa0,0xa1,0xa2},0x1};
+
+    /* Check if we actually have the validate_local_identity() function. */
+    CU_ASSERT_FATAL (auth != NULL);
+    assert (auth != NULL);
+    CU_ASSERT_FATAL (auth->validate_local_identity != NULL);
+    assert (auth->validate_local_identity != 0);
+
+    /* validate with file */
+    memset(&adjusted_participant_guid, 0, sizeof(adjusted_participant_guid));
+    memcpy(&candidate_participant_guid.prefix, &prefix, sizeof(prefix));
+    memcpy(&candidate_participant_guid.entityId, &entityId, sizeof(entityId));
+
+    fill_participant_qos(&participant_qos, true, revoked_identity_certificate_filename,
+                                           true, identity_ca_filename,
+                                           true, revoked_private_key_filename,
+                                           NULL,
+                                           "trusted_ca_dir",
+                                           true, crl_filename);
+
+    /* Now call the function. */
+    result = auth->validate_local_identity(
+                            auth,
+                            &local_identity_handle,
+                            &adjusted_participant_guid,
+                            domain_id,
+                            &participant_qos,
+                            &candidate_participant_guid,
+                            &exception);
+
+    if (result != DDS_SECURITY_VALIDATION_OK) {
+        printf("validate_local_identity_failed: %s\n", exception.message ? exception.message : "Error message missing");
+    }
+
+    /* We expected the validation to have failed. */
+    CU_ASSERT_FATAL (result != DDS_SECURITY_VALIDATION_OK);
+    CU_ASSERT (exception.minor_code != 0);
+    CU_ASSERT (exception.message != NULL);
+
+    dds_security_property_deinit(&participant_qos.property.value);
+    reset_exception(&exception);
 }

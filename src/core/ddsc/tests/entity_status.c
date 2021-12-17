@@ -601,12 +601,12 @@ CU_Test(ddsc_entity, all_data_available, .init=init_entity_status, .fini=fini_en
     /* Reset the publication and subscription matched status */
     ret = dds_get_publication_matched_status(wri, NULL);
     CU_ASSERT_EQUAL_FATAL(ret, DDS_RETCODE_OK);
-    ret = dds_take_status (rea, &sta, DDS_SUBSCRIPTION_MATCHED_STATUS);
+    ret = dds_take_status (rea, &sta, DDS_SUBSCRIPTION_MATCHED_STATUS | DDS_LIVELINESS_CHANGED_STATUS);
     CU_ASSERT_EQUAL_FATAL(ret, DDS_RETCODE_OK);
-    CU_ASSERT_EQUAL_FATAL(sta, DDS_SUBSCRIPTION_MATCHED_STATUS);
-    ret = dds_take_status (reader2, &sta, DDS_SUBSCRIPTION_MATCHED_STATUS);
+    CU_ASSERT_EQUAL_FATAL(sta, DDS_SUBSCRIPTION_MATCHED_STATUS | DDS_LIVELINESS_CHANGED_STATUS);
+    ret = dds_take_status (reader2, &sta, DDS_SUBSCRIPTION_MATCHED_STATUS | DDS_LIVELINESS_CHANGED_STATUS);
     CU_ASSERT_EQUAL_FATAL(ret, DDS_RETCODE_OK);
-    CU_ASSERT_EQUAL_FATAL(sta, DDS_SUBSCRIPTION_MATCHED_STATUS);
+    CU_ASSERT_EQUAL_FATAL(sta, DDS_SUBSCRIPTION_MATCHED_STATUS | DDS_LIVELINESS_CHANGED_STATUS);
 
     /* wait for data */
     ret = dds_waitset_wait(waitSetrd, wsresults2, wsresultsize2, waitTimeout);
@@ -621,6 +621,9 @@ CU_Test(ddsc_entity, all_data_available, .init=init_entity_status, .fini=fini_en
     CU_ASSERT_EQUAL_FATAL(ret, DDS_RETCODE_OK);
     ret = dds_delete(waitSetrd2);
     CU_ASSERT_EQUAL_FATAL(ret, DDS_RETCODE_OK);
+
+    /* Force materialized DATA_ON_READERS */
+    dds_waitset_attach(dds_create_waitset(participant), subscriber, 0);
 
     /* Get DATA_ON_READERS status*/
     ret = dds_get_status_changes (subscriber, &sta);

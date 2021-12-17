@@ -63,8 +63,8 @@ struct ddsi_sertopic; // deprecated, binary compatibility only
  *  is not included in ddsi_sertype. */
 #define DDS_HAS_DDSI_SERTYPE 1
 
-/* @defgroup builtintopic_constants Convenience constants for referring to builtin topics
- *
+/**
+ * \defgroup builtintopic_constants Convenience constants for referring to builtin topics
  * These constants can be used in place of an actual dds_topic_t, when creating
  * readers or writers for builtin-topics.
  *
@@ -477,16 +477,18 @@ dds_get_guid (dds_entity_t entity, dds_guid_t *guid);
  *
  * @param[in]  entity  Entity on which the status has to be read.
  * @param[out] status  Returns the status set on the entity, based on the enabled status.
- * @param[in]  mask    Filter the status condition to be read (can be NULL).
+ * @param[in]  mask    Filter the status condition to be read, 0 means all statuses
  *
  * @returns A dds_return_t indicating success or failure.
  *
  * @retval DDS_RETCODE_OK
  *             Success.
  * @retval DDS_RETCODE_BAD_PARAMETER
- *             The entity parameter is not a valid parameter.
+ *             The entity parameter is not a valid parameter, status is a null pointer or
+ *             mask has bits set outside the status range.
  * @retval DDS_RETCODE_ILLEGAL_OPERATION
- *             The operation is invoked on an inappropriate object.
+ *             The operation is invoked on an inappropriate object or mask has status
+ *             bits set that are undefined for the type of entity.
  * @retval DDS_RETCODE_ALREADY_DELETED
  *             The entity has already been deleted.
  */
@@ -501,16 +503,18 @@ dds_read_status(dds_entity_t entity, uint32_t *status, uint32_t mask);
  *
  * @param[in]  entity  Entity on which the status has to be read.
  * @param[out] status  Returns the status set on the entity, based on the enabled status.
- * @param[in]  mask    Filter the status condition to be read (can be NULL).
+ * @param[in]  mask    Filter the status condition to be read, 0 means all statuses
  *
  * @returns A dds_return_t indicating success or failure.
  *
  * @retval DDS_RETCODE_OK
  *             Success.
  * @retval DDS_RETCODE_BAD_PARAMETER
- *             The entity parameter is not a valid parameter.
+ *             The entity parameter is not a valid parameter, status is a null pointer or
+ *             mask has bits set outside the status range.
  * @retval DDS_RETCODE_ILLEGAL_OPERATION
- *             The operation is invoked on an inappropriate object.
+ *             The operation is invoked on an inappropriate object or mask has status
+ *             bits set that are undefined for the type of entity.
  * @retval DDS_RETCODE_ALREADY_DELETED
  *             The entity has already been deleted.
  */
@@ -1251,8 +1255,7 @@ dds_find_topic_scoped (dds_find_scope_t scope, dds_entity_t participant, const c
  *
  * @returns A dds_return_t indicating success or failure.
  *
- * @retval DDS_RETCODE_OK
- *             Success.
+ * @return Actual length of topic name (name is truncated if return value >= size) or error
  */
 DDS_EXPORT dds_return_t
 dds_get_name(dds_entity_t topic, char *name, size_t size);
@@ -1266,8 +1269,7 @@ dds_get_name(dds_entity_t topic, char *name, size_t size);
  *
  * @returns A dds_return_t indicating success or failure.
  *
- * @return DDS_RETCODE_OK
- *             Success.
+ * @return Actual length of type name (name is truncated if return value >= size) or error
  */
 DDS_EXPORT dds_return_t
 dds_get_type_name(dds_entity_t topic, char *name, size_t size);
@@ -3528,23 +3530,44 @@ dds_read_next_wl(
   dds_sample_info_t *si);
 
 /**
- * @brief Return loaned samples to data-reader or condition associated with a data-reader
+ * @brief Return loaned samples to a reader or writer
  *
- * Used to release sample buffers returned by a read/take operation. When the application
- * provides an empty buffer, memory is allocated and managed by DDS. By calling dds_return_loan,
- * the memory is released so that the buffer can be reused during a successive read/take operation.
- * When a condition is provided, the reader to which the condition belongs is looked up.
+ * Used to release sample buffers returned by a read/take operation (a reader-loan)
+ * or, in case shared memory is enabled, of the loan_sample operation (a writer-loan).
  *
- * @param[in] reader_or_condition Reader or condition that belongs to a reader.
- * @param[in] buf An array of (pointers to) samples.
+ * When the application provides an empty buffer to a reader-loan, memory is allocated and
+ * managed by DDS. By calling dds_return_loan, the reader-loan is released so that the buffer
+ * can be reused during a successive read/take operation. When a condition is provided, the
+ * reader to which the condition belongs is looked up.
+ *
+ * Writer-loans are normally released implicitly when writing a loaned sample, but you can
+ * cancel a writer-loan prematurely by invoking the return_loan operation. For writer loans, buf is
+ * overwritten with null pointers for all successfully returned entries. Any failure causes it to abort,
+ * possibly midway through buf.
+ *
+ * @param[in] entity The entity that the loan belongs to.
+ * @param[in,out] buf An array of (pointers to) samples, some or all of which will be set to null pointers.
  * @param[in] bufsz The number of (pointers to) samples stored in buf.
  *
  * @returns A dds_return_t indicating success or failure
+ * @retval DDS_RETCODE_OK
+ *             - the operation was successful; for a writer loan, all entries in buf are set to null
+ *             - this specifically includes cases where bufsz <= 0 while entity is valid
+ * @retval DDS_RETCODE_BAD_PARAMETER
+ *             - the entity parameter is not a valid parameter
+ *             - buf is null, or bufsz > 0 and buf[0] = null
+ *             - (for writer loans) buf[0 <= i < bufsz] is null; operation is aborted, all buf[j < i] = null on return
+ * @retval DDS_RETCODE_PRECONDITION_NOT_MET
+ *             - (for reader loans) buf was already returned (not guaranteed to be detected)
+ *             - (for writer loans) buf[0 <= i < bufsz] does not correspond to an outstanding loan, all buf[j < i] = null on return
+ * @retval DDS_RETCODE_UNSUPPORTED
+ *             - (for writer loans) invoked on a writer not supporting loans.
+ * @retval DDS_RETCODE_ILLEGAL_OPERATION
+ *             - the operation is invoked on an inappropriate object.
  */
-/* TODO: Add list of possible return codes */
 DDS_EXPORT dds_return_t
 dds_return_loan(
-  dds_entity_t reader_or_condition,
+  dds_entity_t entity,
   void **buf,
   int32_t bufsz);
 

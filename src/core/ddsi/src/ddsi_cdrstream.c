@@ -214,6 +214,7 @@ static uint32_t get_type_size (enum dds_stream_typecode type)
 static size_t dds_stream_check_optimize1 (const struct ddsi_sertype_default_desc * __restrict desc)
 {
   const uint32_t *ops = desc->ops.ops;
+  size_t off = 0, size;
   uint32_t insn;
   while ((insn = *ops) != DDS_OP_RTS)
   {
@@ -226,8 +227,12 @@ static size_t dds_stream_check_optimize1 (const struct ddsi_sertype_default_desc
       case DDS_OP_VAL_2BY:
       case DDS_OP_VAL_4BY:
       case DDS_OP_VAL_8BY:
-        if ((ops[1] % get_type_size (DDS_OP_TYPE (insn))) != 0)
+        size = get_type_size (DDS_OP_TYPE (insn));
+        if (off % size)
+          off += size - (off % size);
+        if (ops[1] != off)
           return 0;
+        off += size;
         ops += 2;
         break;
 
@@ -235,8 +240,12 @@ static size_t dds_stream_check_optimize1 (const struct ddsi_sertype_default_desc
         switch (DDS_OP_SUBTYPE (insn))
         {
           case DDS_OP_VAL_1BY: case DDS_OP_VAL_2BY: case DDS_OP_VAL_4BY: case DDS_OP_VAL_8BY:
-            if ((ops[1] % get_type_size (DDS_OP_SUBTYPE (insn))) != 0)
+            size = get_type_size (DDS_OP_SUBTYPE (insn));
+            if (off % size)
+              off += size - (off % size);
+            if (ops[1] != off)
               return 0;
+            off += size * ops[2];
             ops += 3;
             break;
           default:
@@ -249,7 +258,9 @@ static size_t dds_stream_check_optimize1 (const struct ddsi_sertype_default_desc
     }
   }
 
-  return desc->size;
+  // off < desc can occur if desc->size includes "trailing" padding
+  assert (off <= desc->size);
+  return off;
 }
 
 size_t dds_stream_check_optimize (const struct ddsi_sertype_default_desc * __restrict desc)
@@ -1415,7 +1426,12 @@ void dds_stream_read_sample (dds_istream_t * __restrict is, void * __restrict da
 {
   const struct ddsi_sertype_default_desc *desc = &type->type;
   if (type->opt_size)
-    dds_is_get_bytes (is, data, desc->size, 1);
+  {
+    /* Layout of struct & CDR is the same, but sizeof(struct) may include padding at
+       the end that is not present in CDR, so we must use type->opt_size to avoid a
+       potential out-of-bounds read */
+    dds_is_get_bytes (is, data, (uint32_t) type->opt_size, 1);
+  }
   else
   {
     if (desc->flagset & DDS_TOPIC_CONTAINS_UNION)
@@ -1437,7 +1453,7 @@ void dds_stream_write_sample (dds_ostream_t * __restrict os, const void * __rest
 {
   const struct ddsi_sertype_default_desc *desc = &type->type;
   if (type->opt_size && desc->align && (os->m_index % desc->align) == 0)
-    dds_os_put_bytes (os, data, desc->size);
+    dds_os_put_bytes (os, data, (uint32_t) type->opt_size);
   else
     dds_stream_write (os, data, desc->ops.ops);
 }
@@ -1604,7 +1620,6 @@ static void dds_stream_extract_key_from_key_prim_op (dds_istream_t * __restrict 
       void * const dst = os->m_buffer + os->m_index;
       dds_is_get_bytes (is, dst, num, align);
       os->m_index += num * align;
-      is->m_index += num * align;
       break;
     }
     case DDS_OP_VAL_SEQ: case DDS_OP_VAL_UNI: case DDS_OP_VAL_STU: {
@@ -1732,7 +1747,7 @@ static const uint32_t *dds_stream_extract_key_from_data_skip_array (dds_istream_
   assert (DDS_OP_TYPE (op) == DDS_OP_VAL_ARR);
   const uint32_t subtype = DDS_OP_SUBTYPE (op);
   const uint32_t num = ops[2];
-  if (subtype > DDS_OP_VAL_BST)
+  if (subtype >= DDS_OP_VAL_BST)
   {
     const uint32_t *jsr_ops = ops + DDS_OP_ADR_JSR (ops[3]);
     const uint32_t jmp = DDS_OP_ADR_JMP (ops[3]);
@@ -1749,12 +1764,23 @@ static const uint32_t *dds_stream_extract_key_from_data_skip_array (dds_istream_
 static const uint32_t *dds_stream_extract_key_from_data_skip_sequence (dds_istream_t * __restrict is, const uint32_t * __restrict ops)
 {
   const uint32_t op = *ops;
-  const enum dds_stream_typecode type = DDS_OP_TYPE (op);
-  assert (type == DDS_OP_VAL_SEQ);
+  assert (DDS_OP_TYPE (op) == DDS_OP_VAL_SEQ);
   const uint32_t subtype = DDS_OP_SUBTYPE (op);
   const uint32_t num = dds_is_get4 (is);
-  if (num == 0)
-    return ops + 2 + (type == DDS_OP_VAL_BST || type == DDS_OP_VAL_ARR);
+  if (num == 0) {
+    switch(subtype) {
+      case DDS_OP_VAL_BST:
+        return ops + 3;
+      break;
+      case DDS_OP_VAL_SEQ: case DDS_OP_VAL_ARR: case DDS_OP_VAL_UNI: case DDS_OP_VAL_STU: {
+        const uint32_t jmp = DDS_OP_ADR_JMP (ops[3]);
+        return ops + (jmp ? jmp : 4);/* FIXME: why would jmp be 0? */
+      }
+      break;
+      default:
+        return ops + 2;
+    }
+  }
   else if (subtype > DDS_OP_VAL_BST)
   {
     const uint32_t * jsr_ops = ops + DDS_OP_ADR_JSR (ops[3]);
@@ -1765,7 +1791,7 @@ static const uint32_t *dds_stream_extract_key_from_data_skip_sequence (dds_istre
   else
   {
     dds_stream_extract_key_from_data_skip_subtype (is, num, subtype, NULL);
-    return ops + 2 + (type == DDS_OP_VAL_BST || type == DDS_OP_VAL_ARR);
+    return ops + 2 + (subtype == DDS_OP_VAL_BST);
   }
 }
 
@@ -1955,7 +1981,7 @@ void dds_stream_extract_keyhash (dds_istream_t * __restrict is, dds_keyhash_t * 
 
 /* Returns true if buffer not yet exhausted, false otherwise */
 static bool prtf (char * __restrict *buf, size_t * __restrict bufsize, const char *fmt, ...)
-  ddsrt_attribute_format((printf, 3, 4));
+  ddsrt_attribute_format_printf(3, 4);
 
 static bool prtf (char * __restrict *buf, size_t * __restrict bufsize, const char *fmt, ...)
 {

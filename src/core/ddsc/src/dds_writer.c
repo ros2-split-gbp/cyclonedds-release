@@ -35,7 +35,7 @@
 #include "dds__data_allocator.h"
 #include "dds/ddsi/ddsi_statistics.h"
 
-DECL_ENTITY_LOCK_UNLOCK (extern inline, dds_writer)
+DECL_ENTITY_LOCK_UNLOCK (dds_writer)
 
 #define DDS_WRITER_STATUS_MASK                                   \
                         (DDS_LIVELINESS_LOST_STATUS              |\
@@ -48,7 +48,7 @@ static dds_return_t dds_writer_status_validate (uint32_t mask)
   return (mask & ~DDS_WRITER_STATUS_MASK) ? DDS_RETCODE_BAD_PARAMETER : DDS_RETCODE_OK;
 }
 
-static void update_offered_deadline_missed (struct dds_offered_deadline_missed_status * __restrict st, struct dds_offered_deadline_missed_status * __restrict lst, const status_cb_data_t *data)
+static void update_offered_deadline_missed (struct dds_offered_deadline_missed_status * __restrict st, const status_cb_data_t *data)
 {
   st->last_instance_handle = data->handle;
   st->total_count++;
@@ -58,38 +58,23 @@ static void update_offered_deadline_missed (struct dds_offered_deadline_missed_s
   //
   // (same line of reasoning for all of them)
   st->total_count_change++;
-  if (lst != NULL)
-  {
-    *lst = *st;
-    st->total_count_change = 0;
-  }
 }
 
-static void update_offered_incompatible_qos (struct dds_offered_incompatible_qos_status * __restrict st, struct dds_offered_incompatible_qos_status * __restrict lst, const status_cb_data_t *data)
+static void update_offered_incompatible_qos (struct dds_offered_incompatible_qos_status * __restrict st, const status_cb_data_t *data)
 {
   st->last_policy_id = data->extra;
   st->total_count++;
   st->total_count_change++;
-  if (lst != NULL)
-  {
-    *lst = *st;
-    st->total_count_change = 0;
-  }
 }
 
-static void update_liveliness_lost (struct dds_liveliness_lost_status * __restrict st, struct dds_liveliness_lost_status * __restrict lst, const status_cb_data_t *data)
+static void update_liveliness_lost (struct dds_liveliness_lost_status * __restrict st, const status_cb_data_t *data)
 {
   (void) data;
   st->total_count++;
   st->total_count_change++;
-  if (lst != NULL)
-  {
-    *lst = *st;
-    st->total_count_change = 0;
-  }
 }
 
-static void update_publication_matched (struct dds_publication_matched_status * __restrict st, struct dds_publication_matched_status * __restrict lst, const status_cb_data_t *data)
+static void update_publication_matched (struct dds_publication_matched_status * __restrict st, const status_cb_data_t *data)
 {
   st->last_subscription_handle = data->handle;
   if (data->add) {
@@ -101,18 +86,17 @@ static void update_publication_matched (struct dds_publication_matched_status * 
     st->current_count--;
     st->current_count_change--;
   }
-  if (lst != NULL)
-  {
-    *lst = *st;
-    st->total_count_change = 0;
-    st->current_count_change = 0;
-  }
 }
 
-STATUS_CB_IMPL (writer, offered_deadline_missed, OFFERED_DEADLINE_MISSED)
-STATUS_CB_IMPL (writer, offered_incompatible_qos, OFFERED_INCOMPATIBLE_QOS)
-STATUS_CB_IMPL (writer, liveliness_lost, LIVELINESS_LOST)
-STATUS_CB_IMPL (writer, publication_matched, PUBLICATION_MATCHED)
+DDS_GET_STATUS(writer, publication_matched, PUBLICATION_MATCHED, total_count_change, current_count_change)
+DDS_GET_STATUS(writer, liveliness_lost, LIVELINESS_LOST, total_count_change)
+DDS_GET_STATUS(writer, offered_deadline_missed, OFFERED_DEADLINE_MISSED, total_count_change)
+DDS_GET_STATUS(writer, offered_incompatible_qos, OFFERED_INCOMPATIBLE_QOS, total_count_change)
+
+STATUS_CB_IMPL(writer, publication_matched, PUBLICATION_MATCHED, total_count_change, current_count_change)
+STATUS_CB_IMPL(writer, liveliness_lost, LIVELINESS_LOST, total_count_change)
+STATUS_CB_IMPL(writer, offered_deadline_missed, OFFERED_DEADLINE_MISSED, total_count_change)
+STATUS_CB_IMPL(writer, offered_incompatible_qos, OFFERED_INCOMPATIBLE_QOS, total_count_change)
 
 void dds_writer_status_cb (void *entity, const struct status_cb_data *data)
 {
@@ -132,24 +116,25 @@ void dds_writer_status_cb (void *entity, const struct status_cb_data *data)
 
   /* FIXME: why wait if no listener is set? */
   ddsrt_mutex_lock (&wr->m_entity.m_observers_lock);
+  wr->m_entity.m_cb_pending_count++;
   while (wr->m_entity.m_cb_count > 0)
     ddsrt_cond_wait (&wr->m_entity.m_observers_cond, &wr->m_entity.m_observers_lock);
+  wr->m_entity.m_cb_count++;
 
   const enum dds_status_id status_id = (enum dds_status_id) data->raw_status_id;
-  const bool enabled = (ddsrt_atomic_ld32 (&wr->m_entity.m_status.m_status_and_mask) & ((1u << status_id) << SAM_ENABLED_SHIFT)) != 0;
   switch (status_id)
   {
     case DDS_OFFERED_DEADLINE_MISSED_STATUS_ID:
-      status_cb_offered_deadline_missed (wr, data, enabled);
+      status_cb_offered_deadline_missed (wr, data);
       break;
     case DDS_LIVELINESS_LOST_STATUS_ID:
-      status_cb_liveliness_lost (wr, data, enabled);
+      status_cb_liveliness_lost (wr, data);
       break;
     case DDS_OFFERED_INCOMPATIBLE_QOS_STATUS_ID:
-      status_cb_offered_incompatible_qos (wr, data, enabled);
+      status_cb_offered_incompatible_qos (wr, data);
       break;
     case DDS_PUBLICATION_MATCHED_STATUS_ID:
-      status_cb_publication_matched (wr, data, enabled);
+      status_cb_publication_matched (wr, data);
       break;
     case DDS_DATA_AVAILABLE_STATUS_ID:
     case DDS_INCONSISTENT_TOPIC_STATUS_ID:
@@ -163,6 +148,8 @@ void dds_writer_status_cb (void *entity, const struct status_cb_data *data)
       assert (0);
   }
 
+  wr->m_entity.m_cb_count--;
+  wr->m_entity.m_cb_pending_count--;
   ddsrt_cond_broadcast (&wr->m_entity.m_observers_cond);
   ddsrt_mutex_unlock (&wr->m_entity.m_observers_lock);
 }
@@ -379,7 +366,7 @@ dds_entity_t dds_create_writer (dds_entity_t participant_or_publisher, dds_entit
     ddsi_xqos_mergein_missing (wqos, pub->m_entity.m_qos, ~(uint64_t)0);
   if (tp->m_ktopic->qos)
     ddsi_xqos_mergein_missing (wqos, tp->m_ktopic->qos, ~(uint64_t)0);
-  ddsi_xqos_mergein_missing (wqos, &gv->default_xqos_wr, ~(uint64_t)0);
+  ddsi_xqos_mergein_missing (wqos, &ddsi_default_qos_writer, ~(uint64_t)0);
 
   if ((rc = ddsi_xqos_valid (&gv->logconfig, wqos)) < 0 || (rc = validate_writer_qos(wqos)) != DDS_RETCODE_OK)
     goto err_bad_qos;
@@ -410,7 +397,7 @@ dds_entity_t dds_create_writer (dds_entity_t participant_or_publisher, dds_entit
 
   /* Create writer */
   struct dds_writer * const wr = dds_alloc (sizeof (*wr));
-  const dds_entity_t writer = dds_entity_init (&wr->m_entity, &pub->m_entity, DDS_KIND_WRITER, false, wqos, listener, DDS_WRITER_STATUS_MASK);
+  const dds_entity_t writer = dds_entity_init (&wr->m_entity, &pub->m_entity, DDS_KIND_WRITER, false, true, wqos, listener, DDS_WRITER_STATUS_MASK);
   wr->m_topic = tp;
   dds_entity_add_ref_locked (&tp->m_entity);
   wr->m_xp = nn_xpack_new (gv, get_bandwidth_limit (wqos->transport_priority), async_mode);
@@ -432,23 +419,11 @@ dds_entity_t dds_create_writer (dds_entity_t participant_or_publisher, dds_entit
 #ifdef DDS_HAS_SHM
   if (0x0 == (wqos->ignore_locator_type & NN_LOCATOR_KIND_SHEM))
   {
-    size_t name_size, type_name_size;
-    rc = dds_get_name_size (topic, &name_size);
-    assert(rc == DDS_RETCODE_OK);
-    rc = dds_get_type_name_size (topic, &type_name_size);
-    assert (rc == DDS_RETCODE_OK);
-    char topic_name[name_size+1];
-    char type_name[type_name_size+1];
-    rc = dds_get_name (topic, topic_name, name_size+1);
-    assert(rc == DDS_RETCODE_OK);
-    rc = dds_get_type_name (topic, type_name, type_name_size+1);
-    assert (rc == DDS_RETCODE_OK);
-    DDS_CLOG (DDS_LC_SHM, &wr->m_entity.m_domain->gv.logconfig, "Writer's topic name will be DDS:Cyclone:%s\n", topic_name);
-    // SHM_TODO: We should do error handling if there is duplicate publish topic. iceoryx doesn't support multiple pub now.
+    DDS_CLOG (DDS_LC_SHM, &wr->m_entity.m_domain->gv.logconfig, "Writer's topic name will be DDS:Cyclone:%s\n", wr->m_topic->m_name);
     iox_pub_options_t opts;
     iox_pub_options_init(&opts);
     opts.historyCapacity = wr->m_entity.m_domain->gv.config.pub_history_capacity;
-    wr->m_iox_pub = iox_pub_init(&wr->m_iox_pub_stor, gv->config.iceoryx_service, type_name, topic_name, &opts);
+    wr->m_iox_pub = iox_pub_init(&wr->m_iox_pub_stor, gv->config.iceoryx_service, wr->m_topic->m_stype->type_name, wr->m_topic->m_name, &opts);
     memset(wr->m_iox_pub_loans, 0, sizeof(wr->m_iox_pub_loans));
     dds_sleepfor(DDS_MSECS(10));
   }
@@ -551,8 +526,3 @@ dds_return_t dds__writer_wait_for_acks (struct dds_writer *wr, ddsi_guid_t *rdgu
   else
     return writer_wait_for_acks (wr->m_wr, rdguid, abstimeout);
 }
-
-DDS_GET_STATUS(writer, publication_matched, PUBLICATION_MATCHED, total_count_change, current_count_change)
-DDS_GET_STATUS(writer, liveliness_lost, LIVELINESS_LOST, total_count_change)
-DDS_GET_STATUS(writer, offered_deadline_missed, OFFERED_DEADLINE_MISSED, total_count_change)
-DDS_GET_STATUS(writer, offered_incompatible_qos, OFFERED_INCOMPATIBLE_QOS, total_count_change)
