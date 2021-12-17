@@ -20,7 +20,22 @@ else()
 
   configure_file(src/config.h.in config.h)
 
-  add_executable(idlc src/idlc.c src/plugin.c src/options.c src/generator.c src/descriptor.c src/types.c)
+  set(headers
+    src/descriptor.h
+    src/generator.h
+    src/options.h
+    src/plugin.h
+    include/idlc/generator.h
+    ${CMAKE_CURRENT_BINARY_DIR}/config.h)
+  set(sources
+    src/idlc.c
+    src/plugin.c
+    src/options.c
+    src/generator.c
+    src/descriptor.c
+    src/types.c)
+  add_executable(idlc ${sources} ${headers})
+
   if(MSVC)
     # ignore warnings C6255 and 6263 about _alloca
     target_compile_options(idlc PRIVATE /wd6255 /wd6263)
@@ -32,7 +47,7 @@ else()
       ${CMAKE_CURRENT_BINARY_DIR}
       $<BUILD_INTERFACE:$<TARGET_PROPERTY:ddsc,INTERFACE_INCLUDE_DIRECTORIES>>)
 
-  if(NOT HAVE_GETOPT_H)
+  if(WIN32 OR NOT HAVE_GETOPT_H)
     # use getopt.h from ddsrt
     file(READ "${CMAKE_SOURCE_DIR}/src/ddsrt/include/getopt.h.in" getopt_h)
     # remove occurrences of DDS_EXPORT

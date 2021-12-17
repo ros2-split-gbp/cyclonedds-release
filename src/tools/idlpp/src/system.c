@@ -458,8 +458,12 @@ void    do_options(
     set_cplus_dir = TRUE;
 
     /* Get current directory for -I option and #pragma once */
+#if SYS_FAMILY == SYS_WIN
     assert( cwd_sz < INT_MAX);
-    cwd = getcwd( cur_work_dir, cwd_sz - 1);
+    cwd = getcwd( cur_work_dir, (int)(cwd_sz - 1u));
+#else
+    cwd = getcwd( cur_work_dir, cwd_sz - 1u);
+#endif
     assert( cwd && cwd == cur_work_dir);
 #if SYS_FAMILY == SYS_WIN
     bsl2sl( cwd);
@@ -508,7 +512,7 @@ plus:
 #if COMPILER == GNUC
         case '-':
             assert( mcpp_optarg != NULL);
-            if (memcmp( mcpp_optarg, "sysroot", 7) == 0) {
+            if (strncmp( mcpp_optarg, "sysroot", 7) == 0) {
                 if (mcpp_optarg[ 7] == '=')             /* --sysroot=DIR    */
                     sysroot = mcpp_optarg + 8;
                 else if (mcpp_optarg[ 7] == EOS)        /* --sysroot DIR    */
@@ -585,7 +589,7 @@ plus:
 #elif   COMPILER == MSC
         case 'a':
             assert( mcpp_optarg != NULL);
-            if (memcmp( mcpp_optarg, "rch", 3) == 0) {
+            if (strncmp( mcpp_optarg, "rch", 3) == 0) {
                 if (str_eq( mcpp_optarg + 3, ":SSE")        /* -arch:SSE    */
                         || str_eq( mcpp_optarg + 3, ":sse"))
                     sse = 1;
@@ -870,7 +874,7 @@ plus:
 #if COMPILER == GNUC
         case 'l':
             assert( mcpp_optarg != NULL);
-            if (memcmp( mcpp_optarg, "ang-", 4) != 0) {
+            if (strncmp( mcpp_optarg, "ang-", 4) != 0) {
                 usage( opt);
             } else if (str_eq( mcpp_optarg + 4, "c")) {     /* -lang-c  */
                 ;                           /* Ignore this option   */
@@ -1777,6 +1781,7 @@ static void def_a_macro(
     *cp = EOS;
     if (str_eq( definition, "__STDC__")) {
         defp = look_id( definition);
+        assert (defp);
         defp->nargs = DEF_NOARGS_STANDARD;
                                 /* Restore Standard-predefinedness  */
     }
@@ -1918,15 +1923,16 @@ static void init_cpu_macro (
         return;
     }
     macro = cpu_macro[ index];
+    assert(macro);
     while (*macro)
         look_and_install( *macro++, DEF_NOARGS_PREDEF, null, "1");
 #if SYS_FAMILY == SYS_WIN
     if (index == 0) {
         char    val[] = "600";
         if (gval)
-            val[ 0] = gval;
+            val[ 0] = (char)(unsigned char)gval;
         look_and_install( "_M_IX86", DEF_NOARGS_PREDEF, null, val);
-        val[ 0] = '0' + sse;
+        val[ 0] = (char)('0' + (char)(unsigned char)sse);
         val[ 1] = '\0';
         look_and_install( "_M_IX86_FP", DEF_NOARGS_PREDEF, null, val);
     }
@@ -2531,12 +2537,20 @@ static char *   norm_path(
     inf = inf && (mcpp_debug & PATH);       /* Output information   */
 
     len = strlcpy( slbuf1, dir, sizeof(slbuf1));    /* Include directory    */
+    if (len >= sizeof (slbuf1)) { /* Truncated, not fit for use */
+        return NULL;
+    }
     if (fname) {
-        if (len && len < sizeof(slbuf1) && slbuf1[ len - 1] != PATH_DELIM) {
+        if (len && slbuf1[ len - 1] != PATH_DELIM) {
+            if (len >= sizeof (slbuf1) - 1) {
+                return NULL; /* Won't fit; not fit for use */
+            }
             slbuf1[ len] = PATH_DELIM;      /* Append PATH_DELIM    */
             slbuf1[ ++len] = EOS;
         }
-        strlcat( slbuf1, fname, sizeof(slbuf1));
+        if (strlcat( slbuf1, fname, sizeof(slbuf1)) >= sizeof (slbuf1)) {
+            return NULL; /* Truncated, not fit for use */
+        }
     } else {
         if (len && slbuf1[ len - 1] == PATH_DELIM) {
             /* stat() of some systems do not like trailing '/'  */
@@ -2564,6 +2578,9 @@ static char *   norm_path(
     (void)hmap;
 #endif
     if (! fname) {
+        if (len >= sizeof (slbuf1) - 1) {
+            return NULL; /* Won't fit; not fit for use */
+        }
         slbuf1[ len] = PATH_DELIM;          /* Append PATH_DELIM    */
         slbuf1[ ++len] = EOS;
     }
@@ -2583,12 +2600,14 @@ static char *   norm_path(
         if ((rllen = readlink( slbuf1, slbuf2, PATHMAX)) > 0) {
             /* Dereference symbolic linked file (not directory) */
             slbuf2[ rllen] = EOS;
+            cp1 = slbuf1;
             if (slbuf2[ 0] != PATH_DELIM) {     /* Relative path    */
-                cp1 = strrchr( slbuf1, PATH_DELIM);
-                if (cp1)        /* Append to the source directory   */
-                    cp1[1] = '\0';
+                cp2 = strrchr( slbuf1, PATH_DELIM);
+                if (cp2)        /* Append to the source directory   */
+                    cp1 = cp2 + 1;
             }
-            (void)strlcat( slbuf1, slbuf2, sizeof(slbuf1));
+            assert( slbuf1 <= cp1 && slbuf1 + sizeof(slbuf1) > cp1);
+            (void)strlcpy( cp1, slbuf2, sizeof(slbuf1) - (size_t)(slbuf1 - cp1));
         }
     }
     if (inf) {
@@ -3467,12 +3486,6 @@ static int  open_file(
  */
 {
     char        dir_fname[ PATHMAX] = { EOS, };
-#if HOST_COMPILER == BORLANDC
-    /* Borland's fopen() does not set errno.    */
-    static int  max_open = FOPEN_MAX - 5;
-#else
-    static int  max_open;
-#endif
     size_t      len;
     FILEINFO *  file = infile;
     FILE *      fp;
@@ -3520,38 +3533,14 @@ search:
     if (standard && included( fullname))        /* Once included    */
         goto  true;
 
-    if ((max_open != 0 && max_open <= include_nest)
-                            /* Exceed the known limit of open files */
-            || ((fp = fopen( fullname, "r")) == NULL && errno == EMFILE)) {
-                            /* Reached the limit for the first time */
-        if (mcpp_debug & PATH) {
-#if HOST_COMPILER == BORLANDC
-            if (include_nest == FOPEN_MAX - 5)
-#else
-            if (max_open == 0)
-#endif
-                mcpp_fprintf( DBG,
+    if ((fp = fopen( fullname, "r")) == NULL) {
+        if (errno == EMFILE) {
+            mcpp_fprintf( DBG,
     "#include nest reached at the maximum of system: %d, returned errno: %d\n"
-                    , include_nest, errno);
+                        , include_nest, errno);
         }
-        /*
-         * Table of open files is full.
-         * Remember the file position and close the includer.
-         * The state will be restored by get_line() on end of the included.
-         */
-        file->pos = ftell( file->fp);
-        assert( file->pos >= 0);
-        fclose( file->fp);
-        /* In case of failure, re-open the includer */
-        if ((fp = fopen( fullname, "r")) == NULL) {
-            file->fp = fopen( cur_fullname, "r");
-            fseek( file->fp, file->pos, SEEK_SET);
-            goto  false;
-        }
-        if (max_open == 0)      /* Remember the limit of the system */
-            max_open = include_nest;
-    } else if (fp == NULL)                  /* No read permission   */
         goto  false;
+    }
     /* Truncate buffer of the includer to save memory   */
     len = (size_t)(file->bptr - file->buffer);
     if (len) {
@@ -3978,9 +3967,9 @@ void    sharp(
     if (keep_comments)
         mcpp_fputc( '\n', OUT);         /* Ensure to be on line top */
     if (std_line_prefix)
-        mcpp_fprintf( OUT, "#line %lu", line);
+        mcpp_fprintf( OUT, "#line %zu", line);
     else
-        mcpp_fprintf( OUT, "%s%lu", LINE_PREFIX, line);
+        mcpp_fprintf( OUT, "%s%zu", LINE_PREFIX, line);
     cur_file( file, sharp_file, flag);
     mcpp_fputc( '\n', OUT);
 sharp_exit:
@@ -4020,14 +4009,22 @@ static void cur_file(
         sharp_filename = save_string( name);
     }
     mcpp_fprintf( OUT, " \"%s\"", name);
-#if COMPILER == GNUC
+#if COMPILER == GNUC || COMPILER == IDLC
     if (! std_line_prefix) {
-        if (flag) {
-            mcpp_fputc( ' ', OUT);
-            mcpp_fputc( '0' + flag, OUT);
-        }
+#if COMPILER == IDLC
+        if ((flag & 1) && ! sharp_file) /* Signal non-relative file */
+            flag = (strlen(*(file->dirp)) != 0) ? 3 : 1;
+#endif
+        if (flag)
+            mcpp_fprintf( OUT, " %d", flag);
+#if COMPILER == GNUC
         if (file->sys_header)
             mcpp_fputs( " 3", OUT);
+#endif
+#if COMPILER == IDLC
+        if ((flag & 1))                 /* Output original filename */
+            mcpp_fprintf( OUT, " \"%s\"", cur_fname);
+#endif
     }
 #else
     (void)flag;

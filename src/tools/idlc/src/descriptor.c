@@ -12,6 +12,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
@@ -465,7 +466,10 @@ stash_constant(
 
     switch (idl_type(const_expr)) {
       case IDL_CHAR:
-        cnt = idl_asprintf(strp, "'%c'", literal->value.chr);
+        if (isprint ((unsigned char) literal->value.chr))
+          cnt = idl_asprintf(strp, "'%c'", literal->value.chr);
+        else
+          cnt = idl_asprintf(strp, "'\\%03o'", literal->value.chr);
         break;
       case IDL_BOOL:
         cnt = idl_asprintf(strp, "%s", literal->value.bln ? "true" : "false");
@@ -688,6 +692,8 @@ emit_switch_type_spec(
 
   type_spec = idl_unalias(idl_type_spec(node), 0u);
   assert(!idl_is_typedef(type_spec) && !idl_is_array(type_spec));
+  const idl_union_t *union_spec = idl_parent(node);
+  assert(idl_is_union(union_spec));
 
   if ((ret = push_field(descriptor, node, &field)))
     return ret;
@@ -695,6 +701,8 @@ emit_switch_type_spec(
   opcode = DDS_OP_ADR | DDS_OP_TYPE_UNI | typecode(type_spec, SUBTYPE);
   if ((order = idl_is_topic_key(descriptor->topic, (pstate->flags & IDL_FLAG_KEYLIST) != 0, path)))
     opcode |= DDS_OP_FLAG_KEY;
+  if (idl_is_default_case(idl_parent(union_spec->default_case)) && !idl_is_implicit_default_case(idl_parent(union_spec->default_case)))
+    opcode |= DDS_OP_FLAG_DEF;
   if ((ret = stash_opcode(descriptor, nop, opcode, order)))
     return ret;
   if ((ret = stash_offset(descriptor, nop, field)))
@@ -1191,7 +1199,7 @@ static int print_keys(FILE *fp, struct descriptor *descriptor, bool keylist)
 {
   char *type = NULL;
   const char *fmt, *sep="";
-  uint32_t fixed = 0;
+  uint32_t fixed = 0, align = 0;
   struct { const char *member; uint32_t index; } *keys = NULL;
 
   if (descriptor->keys == 0)
@@ -1224,11 +1232,17 @@ static int print_keys(FILE *fp, struct descriptor *descriptor, bool keylist)
     }
 
     switch (code & 0xffu) {
-      case DDS_OP_VAL_1BY: size = 1; break;
-      case DDS_OP_VAL_2BY: size = 2; break;
-      case DDS_OP_VAL_4BY: size = 4; break;
-      case DDS_OP_VAL_8BY: size = 8; break;
-      /* FIXME: handle bounded strings by size too? */
+      case DDS_OP_VAL_1BY: size = align = 1; break;
+      case DDS_OP_VAL_2BY: size = align = 2; break;
+      case DDS_OP_VAL_4BY: size = align = 4; break;
+      case DDS_OP_VAL_8BY: size = align = 8; break;
+      case DDS_OP_VAL_BST: {
+        assert(i+2 < descriptor->instructions.count);
+        assert(descriptor->instructions.table[i+2].type == SINGLE);
+        align = 4;
+        size = 5 + descriptor->instructions.table[i+2].data.single;
+      }
+      break;
       default:
         fixed = MAX_SIZE+1;
         break;
@@ -1237,7 +1251,11 @@ static int print_keys(FILE *fp, struct descriptor *descriptor, bool keylist)
     if (size > MAX_SIZE || dims > MAX_SIZE || (size*dims)+fixed > MAX_SIZE)
       fixed = MAX_SIZE+1;
     else
+    {
+      if ((fixed % align) != 0)
+        fixed += align - (fixed % align);
       fixed += size*dims;
+    }
 
     inst = &descriptor->instructions.table[i+1];
     assert(inst->type == OFFSET);

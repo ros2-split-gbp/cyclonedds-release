@@ -183,11 +183,9 @@ struct ddsi_domaingv {
   /* number of selected interfaces. */
   int n_interfaces;
   struct nn_interface interfaces[MAX_XMIT_CONNS];
-#if DDSRT_HAVE_IPV6
-  /* whether we're using an IPv6 link-local address (and therefore
+  /* whether we're using a link-local address (and therefore
      only listening to multicasts on that interface) */
-  int ipv6_link_local;
-#endif
+  int using_link_local_intf;
 
   /* Addressing: actual own (preferred) IP address, IP address
      advertised in discovery messages (so that an external IP address on
@@ -195,9 +193,6 @@ struct ddsi_domaingv {
   enum recvips_mode recvips_mode;
   struct config_in_addr_node *recvips;
   ddsi_locator_t extmask;
-
-  // extloc: if not UNSPEC, overrides advertised address
-  ddsi_locator_t extloc;
 
   /* Locators */
 
@@ -247,14 +242,7 @@ struct ddsi_domaingv {
      supplying values for missing QoS settings in incoming discovery
      packets); plus the actual QoSs needed for the builtin
      endpoints. */
-  ddsi_plist_t default_plist_pp;
   ddsi_plist_t default_local_plist_pp;
-  dds_qos_t default_xqos_rd;
-  dds_qos_t default_xqos_wr;
-  dds_qos_t default_xqos_wr_nad;
-  dds_qos_t default_xqos_tp;
-  dds_qos_t default_xqos_sub;
-  dds_qos_t default_xqos_pub;
   dds_qos_t spdp_endpoint_xqos;
   dds_qos_t builtin_endpoint_xqos_rd;
   dds_qos_t builtin_endpoint_xqos_wr;

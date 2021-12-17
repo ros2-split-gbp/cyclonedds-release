@@ -47,7 +47,7 @@
 #include "dds/ddsi/shm_sync.h"
 #endif
 
-DECL_ENTITY_LOCK_UNLOCK (extern inline, dds_reader)
+DECL_ENTITY_LOCK_UNLOCK (dds_reader)
 
 #define DDS_READER_STATUS_MASK                                   \
                         (DDS_SAMPLE_REJECTED_STATUS              |\
@@ -150,6 +150,71 @@ static dds_return_t dds_reader_status_validate (uint32_t mask)
   return (mask & ~DDS_READER_STATUS_MASK) ? DDS_RETCODE_BAD_PARAMETER : DDS_RETCODE_OK;
 }
 
+static void data_avail_cb_enter_listener_exclusive_access (dds_entity *e)
+{
+  // assumes e->m_observers_lock held on entry
+  // possibly unlocks and relocks e->m_observers_lock
+  // afterward e->m_listener is stable
+  e->m_cb_pending_count++;
+  while (e->m_cb_count > 0)
+    ddsrt_cond_wait (&e->m_observers_cond, &e->m_observers_lock);
+  e->m_cb_count++;
+}
+
+static void data_avail_cb_leave_listener_exclusive_access (dds_entity *e)
+{
+  // assumes e->m_observers_lock held on entry
+  e->m_cb_count--;
+  e->m_cb_pending_count--;
+  ddsrt_cond_broadcast (&e->m_observers_cond);
+}
+
+static void data_avail_cb_invoke_dor (dds_entity *sub, const struct dds_listener *lst)
+{
+  // assumes sub->m_observers_lock held on entry
+  // unlocks and relocks sub->m_observers_lock
+  data_avail_cb_enter_listener_exclusive_access (sub);
+  ddsrt_mutex_unlock (&sub->m_observers_lock);
+  lst->on_data_on_readers (sub->m_hdllink.hdl, lst->on_data_on_readers_arg);
+  ddsrt_mutex_lock (&sub->m_observers_lock);
+  data_avail_cb_leave_listener_exclusive_access (sub);
+}
+
+static uint32_t data_avail_cb_set_status (dds_entity *rd, uint32_t status_and_mask)
+{
+  uint32_t ret = 0;
+  if (dds_entity_status_set (rd, DDS_DATA_AVAILABLE_STATUS))
+    ret |= DDS_DATA_AVAILABLE_STATUS;
+  if (status_and_mask & (DDS_DATA_ON_READERS_STATUS << SAM_ENABLED_SHIFT))
+  {
+    if (dds_entity_status_set (rd->m_parent, DDS_DATA_ON_READERS_STATUS))
+      ret |= DDS_DATA_ON_READERS_STATUS;
+  }
+  return ret;
+}
+
+static void data_avail_cb_trigger_waitsets (dds_entity *rd, uint32_t signal)
+{
+  if (signal == 0)
+    return;
+
+  if (signal & DDS_DATA_ON_READERS_STATUS)
+  {
+    dds_entity * const sub = rd->m_parent;
+    ddsrt_mutex_lock (&sub->m_observers_lock);
+    const uint32_t sm = ddsrt_atomic_ld32 (&sub->m_status.m_status_and_mask);
+    if ((sm & (sm >> SAM_ENABLED_SHIFT)) & DDS_DATA_ON_READERS_STATUS)
+      dds_entity_observers_signal (sub, DDS_DATA_ON_READERS_STATUS);
+    ddsrt_mutex_unlock (&sub->m_observers_lock);
+  }
+  if (signal & DDS_DATA_AVAILABLE_STATUS)
+  {
+    const uint32_t sm = ddsrt_atomic_ld32 (&rd->m_status.m_status_and_mask);
+    if ((sm & (sm >> SAM_ENABLED_SHIFT)) & DDS_DATA_AVAILABLE_STATUS)
+      dds_entity_observers_signal (rd, DDS_DATA_AVAILABLE_STATUS);
+  }
+}
+
 void dds_reader_data_available_cb (struct dds_reader *rd)
 {
   /* DATA_AVAILABLE is special in two ways: firstly, it should first try
@@ -157,66 +222,44 @@ void dds_reader_data_available_cb (struct dds_reader *rd)
      status on the subscriber; secondly it is the only one for which
      overhead really matters.  Otherwise, it is pretty much like
      dds_reader_status_cb. */
-
-  const uint32_t data_av_enabled = (ddsrt_atomic_ld32 (&rd->m_entity.m_status.m_status_and_mask) & (DDS_DATA_AVAILABLE_STATUS << SAM_ENABLED_SHIFT));
-  if (data_av_enabled == 0)
-    return;
+  struct dds_listener const * const lst = &rd->m_entity.m_listener;
+  uint32_t signal = 0;
 
   ddsrt_mutex_lock (&rd->m_entity.m_observers_lock);
-  rd->m_entity.m_cb_pending_count++;
-
-  /* FIXME: why wait if no listener is set? */
-  while (rd->m_entity.m_cb_count > 0)
-    ddsrt_cond_wait (&rd->m_entity.m_observers_cond, &rd->m_entity.m_observers_lock);
-  rd->m_entity.m_cb_count++;
-
-  struct dds_listener const * const lst = &rd->m_entity.m_listener;
-  dds_entity * const sub = rd->m_entity.m_parent;
-  if (lst->on_data_on_readers)
-  {
-    ddsrt_mutex_unlock (&rd->m_entity.m_observers_lock);
-    ddsrt_mutex_lock (&sub->m_observers_lock);
-    const uint32_t data_on_rds_enabled = (ddsrt_atomic_ld32 (&sub->m_status.m_status_and_mask) & (DDS_DATA_ON_READERS_STATUS << SAM_ENABLED_SHIFT));
-    if (data_on_rds_enabled)
-    {
-      sub->m_cb_pending_count++;
-      while (sub->m_cb_count > 0)
-        ddsrt_cond_wait (&sub->m_observers_cond, &sub->m_observers_lock);
-      sub->m_cb_count++;
-      ddsrt_mutex_unlock (&sub->m_observers_lock);
-
-      lst->on_data_on_readers (sub->m_hdllink.hdl, lst->on_data_on_readers_arg);
-
-      ddsrt_mutex_lock (&sub->m_observers_lock);
-      sub->m_cb_count--;
-      sub->m_cb_pending_count--;
-      ddsrt_cond_broadcast (&sub->m_observers_cond);
-    }
-    ddsrt_mutex_unlock (&sub->m_observers_lock);
-    ddsrt_mutex_lock (&rd->m_entity.m_observers_lock);
-  }
-  else if (rd->m_entity.m_listener.on_data_available)
-  {
-    ddsrt_mutex_unlock (&rd->m_entity.m_observers_lock);
-    lst->on_data_available (rd->m_entity.m_hdllink.hdl, lst->on_data_available_arg);
-    ddsrt_mutex_lock (&rd->m_entity.m_observers_lock);
-  }
+  const uint32_t status_and_mask = ddsrt_atomic_ld32 (&rd->m_entity.m_status.m_status_and_mask);
+  if (lst->on_data_on_readers == 0 && lst->on_data_available == 0)
+    signal = data_avail_cb_set_status (&rd->m_entity, status_and_mask);
   else
   {
-    dds_entity_status_set (&rd->m_entity, DDS_DATA_AVAILABLE_STATUS);
-    ddsrt_mutex_lock (&sub->m_observers_lock);
-    dds_entity_status_set (sub, DDS_DATA_ON_READERS_STATUS);
-    ddsrt_mutex_unlock (&sub->m_observers_lock);
+    // "lock" listener object so we can look at "lst" without holding m_observers_lock
+    data_avail_cb_enter_listener_exclusive_access (&rd->m_entity);
+    if (lst->on_data_on_readers)
+    {
+      dds_entity * const sub = rd->m_entity.m_parent;
+      ddsrt_mutex_unlock (&rd->m_entity.m_observers_lock);
+      ddsrt_mutex_lock (&sub->m_observers_lock);
+      if (!(lst->reset_on_invoke & DDS_DATA_ON_READERS_STATUS))
+        signal = data_avail_cb_set_status (&rd->m_entity, status_and_mask);
+      data_avail_cb_invoke_dor (sub, lst);
+      ddsrt_mutex_unlock (&sub->m_observers_lock);
+      ddsrt_mutex_lock (&rd->m_entity.m_observers_lock);
+    }
+    else
+    {
+      assert (rd->m_entity.m_listener.on_data_available);
+      if (!(lst->reset_on_invoke & DDS_DATA_AVAILABLE_STATUS))
+        signal = data_avail_cb_set_status (&rd->m_entity, status_and_mask);
+      ddsrt_mutex_unlock (&rd->m_entity.m_observers_lock);
+      lst->on_data_available (rd->m_entity.m_hdllink.hdl, lst->on_data_available_arg);
+      ddsrt_mutex_lock (&rd->m_entity.m_observers_lock);
+    }
+    data_avail_cb_leave_listener_exclusive_access (&rd->m_entity);
   }
-
-  rd->m_entity.m_cb_count--;
-  rd->m_entity.m_cb_pending_count--;
-
-  ddsrt_cond_broadcast (&rd->m_entity.m_observers_cond);
+  data_avail_cb_trigger_waitsets (&rd->m_entity, signal);
   ddsrt_mutex_unlock (&rd->m_entity.m_observers_lock);
 }
 
-static void update_requested_deadline_missed (struct dds_requested_deadline_missed_status * __restrict st, struct dds_requested_deadline_missed_status * __restrict lst, const status_cb_data_t *data)
+static void update_requested_deadline_missed (struct dds_requested_deadline_missed_status * __restrict st, const status_cb_data_t *data)
 {
   st->last_instance_handle = data->handle;
   st->total_count++;
@@ -226,51 +269,31 @@ static void update_requested_deadline_missed (struct dds_requested_deadline_miss
   //
   // (same line of reasoning for all of them)
   st->total_count_change++;
-  if (lst != NULL)
-  {
-    *lst = *st;
-    st->total_count_change = 0;
-  }
 }
 
-static void update_requested_incompatible_qos (struct dds_requested_incompatible_qos_status * __restrict st, struct dds_requested_incompatible_qos_status * __restrict lst, const status_cb_data_t *data)
+static void update_requested_incompatible_qos (struct dds_requested_incompatible_qos_status * __restrict st, const status_cb_data_t *data)
 {
   st->last_policy_id = data->extra;
   st->total_count++;
   st->total_count_change++;
-  if (lst != NULL)
-  {
-    *lst = *st;
-    st->total_count_change = 0;
-  }
 }
 
-static void update_sample_lost (struct dds_sample_lost_status * __restrict st, struct dds_sample_lost_status * __restrict lst, const status_cb_data_t *data)
+static void update_sample_lost (struct dds_sample_lost_status * __restrict st, const status_cb_data_t *data)
 {
   (void) data;
   st->total_count++;
   st->total_count_change++;
-  if (lst != NULL)
-  {
-    *lst = *st;
-    st->total_count_change = 0;
-  }
 }
 
-static void update_sample_rejected (struct dds_sample_rejected_status * __restrict st, struct dds_sample_rejected_status * __restrict lst, const status_cb_data_t *data)
+static void update_sample_rejected (struct dds_sample_rejected_status * __restrict st, const status_cb_data_t *data)
 {
   st->last_reason = data->extra;
   st->last_instance_handle = data->handle;
   st->total_count++;
   st->total_count_change++;
-  if (lst != NULL)
-  {
-    *lst = *st;
-    st->total_count_change = 0;
-  }
 }
 
-static void update_liveliness_changed (struct dds_liveliness_changed_status * __restrict st, struct dds_liveliness_changed_status * __restrict lst, const status_cb_data_t *data)
+static void update_liveliness_changed (struct dds_liveliness_changed_status * __restrict st, const status_cb_data_t *data)
 {
   DDSRT_STATIC_ASSERT ((uint32_t) LIVELINESS_CHANGED_ADD_ALIVE == 0 &&
                        LIVELINESS_CHANGED_ADD_ALIVE < LIVELINESS_CHANGED_ADD_NOT_ALIVE &&
@@ -312,15 +335,9 @@ static void update_liveliness_changed (struct dds_liveliness_changed_status * __
       st->alive_count_change++;
       break;
   }
-  if (lst != NULL)
-  {
-    *lst = *st;
-    st->alive_count_change = 0;
-    st->not_alive_count_change = 0;
-  }
 }
 
-static void update_subscription_matched (struct dds_subscription_matched_status * __restrict st, struct dds_subscription_matched_status * __restrict lst, const status_cb_data_t *data)
+static void update_subscription_matched (struct dds_subscription_matched_status * __restrict st, const status_cb_data_t *data)
 {
   st->last_publication_handle = data->handle;
   if (data->add) {
@@ -332,20 +349,24 @@ static void update_subscription_matched (struct dds_subscription_matched_status 
     st->current_count--;
     st->current_count_change--;
   }
-  if (lst != NULL)
-  {
-    *lst = *st;
-    st->total_count_change = 0;
-    st->current_count_change = 0;
-  }
 }
 
-STATUS_CB_IMPL (reader, requested_deadline_missed, REQUESTED_DEADLINE_MISSED)
-STATUS_CB_IMPL (reader, requested_incompatible_qos, REQUESTED_INCOMPATIBLE_QOS)
-STATUS_CB_IMPL (reader, sample_lost, SAMPLE_LOST)
-STATUS_CB_IMPL (reader, sample_rejected, SAMPLE_REJECTED)
-STATUS_CB_IMPL (reader, liveliness_changed, LIVELINESS_CHANGED)
-STATUS_CB_IMPL (reader, subscription_matched, SUBSCRIPTION_MATCHED)
+/* Reset sets everything (type) 0, including the reason field, verify that 0 is correct */
+DDSRT_STATIC_ASSERT ((int) DDS_NOT_REJECTED == 0);
+
+DDS_GET_STATUS (reader, subscription_matched,       SUBSCRIPTION_MATCHED,       total_count_change, current_count_change)
+DDS_GET_STATUS (reader, liveliness_changed,         LIVELINESS_CHANGED,         alive_count_change, not_alive_count_change)
+DDS_GET_STATUS (reader, sample_rejected,            SAMPLE_REJECTED,            total_count_change)
+DDS_GET_STATUS (reader, sample_lost,                SAMPLE_LOST,                total_count_change)
+DDS_GET_STATUS (reader, requested_deadline_missed,  REQUESTED_DEADLINE_MISSED,  total_count_change)
+DDS_GET_STATUS (reader, requested_incompatible_qos, REQUESTED_INCOMPATIBLE_QOS, total_count_change)
+
+STATUS_CB_IMPL (reader, subscription_matched,       SUBSCRIPTION_MATCHED,       total_count_change, current_count_change)
+STATUS_CB_IMPL (reader, liveliness_changed,         LIVELINESS_CHANGED,         alive_count_change, not_alive_count_change)
+STATUS_CB_IMPL (reader, sample_rejected,            SAMPLE_REJECTED,            total_count_change)
+STATUS_CB_IMPL (reader, sample_lost,                SAMPLE_LOST,                total_count_change)
+STATUS_CB_IMPL (reader, requested_deadline_missed,  REQUESTED_DEADLINE_MISSED,  total_count_change)
+STATUS_CB_IMPL (reader, requested_incompatible_qos, REQUESTED_INCOMPATIBLE_QOS, total_count_change)
 
 void dds_reader_status_cb (void *ventity, const status_cb_data_t *data)
 {
@@ -373,30 +394,31 @@ void dds_reader_status_cb (void *ventity, const status_cb_data_t *data)
      are stable */
   /* FIXME: why do this if no listener is set? */
   ddsrt_mutex_lock (&rd->m_entity.m_observers_lock);
+  rd->m_entity.m_cb_pending_count++;
   while (rd->m_entity.m_cb_count > 0)
     ddsrt_cond_wait (&rd->m_entity.m_observers_cond, &rd->m_entity.m_observers_lock);
+  rd->m_entity.m_cb_count++;
 
   const enum dds_status_id status_id = (enum dds_status_id) data->raw_status_id;
-  const bool enabled = (ddsrt_atomic_ld32 (&rd->m_entity.m_status.m_status_and_mask) & ((1u << status_id) << SAM_ENABLED_SHIFT)) != 0;
   switch (status_id)
   {
     case DDS_REQUESTED_DEADLINE_MISSED_STATUS_ID:
-      status_cb_requested_deadline_missed (rd, data, enabled);
+      status_cb_requested_deadline_missed (rd, data);
       break;
     case DDS_REQUESTED_INCOMPATIBLE_QOS_STATUS_ID:
-      status_cb_requested_incompatible_qos (rd, data, enabled);
+      status_cb_requested_incompatible_qos (rd, data);
       break;
     case DDS_SAMPLE_LOST_STATUS_ID:
-      status_cb_sample_lost (rd, data, enabled);
+      status_cb_sample_lost (rd, data);
       break;
     case DDS_SAMPLE_REJECTED_STATUS_ID:
-      status_cb_sample_rejected (rd, data, enabled);
+      status_cb_sample_rejected (rd, data);
       break;
     case DDS_LIVELINESS_CHANGED_STATUS_ID:
-      status_cb_liveliness_changed (rd, data, enabled);
+      status_cb_liveliness_changed (rd, data);
       break;
     case DDS_SUBSCRIPTION_MATCHED_STATUS_ID:
-      status_cb_subscription_matched (rd, data, enabled);
+      status_cb_subscription_matched (rd, data);
       break;
     case DDS_DATA_ON_READERS_STATUS_ID:
     case DDS_DATA_AVAILABLE_STATUS_ID:
@@ -408,6 +430,8 @@ void dds_reader_status_cb (void *ventity, const status_cb_data_t *data)
       assert (0);
   }
 
+  rd->m_entity.m_cb_count--;
+  rd->m_entity.m_cb_pending_count--;
   ddsrt_cond_broadcast (&rd->m_entity.m_observers_cond);
   ddsrt_mutex_unlock (&rd->m_entity.m_observers_lock);
 }
@@ -519,7 +543,9 @@ static dds_entity_t dds_create_reader_int (dds_entity_t participant_or_subscribe
     }
   }
 
-  if ((rc = dds_topic_pin (topic, &tp)) < 0)
+  /* If pseudo_topic != 0, topic didn't didn't originate from the application and we allow pinning
+     it despite it being marked as NO_USER_ACCESS */
+  if ((rc = dds_topic_pin_with_origin (topic, pseudo_topic ? false : true, &tp)) < 0)
     goto err_pin_topic;
   assert (tp->m_stype);
   if (dds_entity_participant (&sub->m_entity) != dds_entity_participant (&tp->m_entity))
@@ -548,7 +574,7 @@ static dds_entity_t dds_create_reader_int (dds_entity_t participant_or_subscribe
     ddsi_xqos_mergein_missing (rqos, sub->m_entity.m_qos, ~(uint64_t)0);
   if (tp->m_ktopic->qos)
     ddsi_xqos_mergein_missing (rqos, tp->m_ktopic->qos, ~(uint64_t)0);
-  ddsi_xqos_mergein_missing (rqos, &gv->default_xqos_rd, ~(uint64_t)0);
+  ddsi_xqos_mergein_missing (rqos, &ddsi_default_qos_reader, ~(uint64_t)0);
 
   if ((rc = ddsi_xqos_valid (&gv->logconfig, rqos)) < 0 || (rc = validate_reader_qos(rqos)) != DDS_RETCODE_OK)
     goto err_bad_qos;
@@ -586,7 +612,12 @@ static dds_entity_t dds_create_reader_int (dds_entity_t participant_or_subscribe
 
   /* Create reader and associated read cache (if not provided by caller) */
   struct dds_reader * const rd = dds_alloc (sizeof (*rd));
-  const dds_entity_t reader = dds_entity_init (&rd->m_entity, &sub->m_entity, DDS_KIND_READER, false, rqos, listener, DDS_READER_STATUS_MASK);
+  const dds_entity_t reader = dds_entity_init (&rd->m_entity, &sub->m_entity, DDS_KIND_READER, false, true, rqos, listener, DDS_READER_STATUS_MASK);
+  // assume DATA_ON_READERS is materialized in the subscriber:
+  // - changes to it won't be propagated to this reader until after it has been added to the subscriber's children
+  // - data can arrive once `new_reader` is called, requiring raising DATA_ON_READERS if materialized
+  // - setting DATA_ON_READERS on subscriber if it is not actually materialized is no problem
+  ddsrt_atomic_or32 (&rd->m_entity.m_status.m_status_and_mask, DDS_DATA_ON_READERS_STATUS << SAM_ENABLED_SHIFT);
   rd->m_sample_rejected_status.last_reason = DDS_NOT_REJECTED;
   rd->m_topic = tp;
   rd->m_wrapped_sertopic = (tp->m_stype->wrapped_sertopic != NULL) ? 1 : 0;
@@ -616,18 +647,7 @@ static dds_entity_t dds_create_reader_int (dds_entity_t participant_or_subscribe
 #ifdef DDS_HAS_SHM
   if (0x0 == (rqos->ignore_locator_type & NN_LOCATOR_KIND_SHEM))
   {
-    size_t name_size, type_name_size;
-    rc = dds_get_name_size(topic, &name_size);
-    assert(rc == DDS_RETCODE_OK);
-    rc = dds_get_type_name_size(topic, &type_name_size);
-    assert(rc == DDS_RETCODE_OK);
-    char topic_name[name_size + 1];
-    char type_name[type_name_size + 1];
-    rc = dds_get_name(topic, topic_name, name_size + 1);
-    assert(rc == DDS_RETCODE_OK);
-    rc = dds_get_type_name(topic, type_name, type_name_size + 1);
-    assert(rc == DDS_RETCODE_OK);
-    DDS_CLOG (DDS_LC_SHM, &rd->m_entity.m_domain->gv.logconfig, "Reader's topic name will be DDS:Cyclone:%s\n", topic_name);
+    DDS_CLOG (DDS_LC_SHM, &rd->m_entity.m_domain->gv.logconfig, "Reader's topic name will be DDS:Cyclone:%s\n", rd->m_topic->m_name);
 
     iox_sub_options_t opts;
     iox_sub_options_init(&opts);
@@ -638,7 +658,7 @@ static dds_entity_t dds_create_reader_int (dds_entity_t participant_or_subscribe
     assert (rqos->durability.kind == DDS_DURABILITY_VOLATILE);
     opts.queueCapacity = rd->m_entity.m_domain->gv.config.sub_queue_capacity;
     opts.historyRequest = 0;
-    rd->m_iox_sub = iox_sub_init(&rd->m_iox_sub_stor.storage, gv->config.iceoryx_service, type_name, topic_name, &opts);
+    rd->m_iox_sub = iox_sub_init(&rd->m_iox_sub_stor.storage, gv->config.iceoryx_service, rd->m_topic->m_stype->type_name, rd->m_topic->m_name, &opts);
     shm_monitor_attach_reader(&rd->m_entity.m_domain->m_shm_monitor, rd);
 
     // those are set once and never changed
@@ -650,6 +670,17 @@ static dds_entity_t dds_create_reader_int (dds_entity_t participant_or_subscribe
 
   rd->m_entity.m_iid = get_entity_instance_id (&rd->m_entity.m_domain->gv, &rd->m_entity.m_guid);
   dds_entity_register_child (&sub->m_entity, &rd->m_entity);
+
+  // After including the reader amongst the subscriber's children, the subscriber will start
+  // propagating whether data_on_readers is materialised or not.  That doesn't cater for the cases
+  // where pessimistically set it to materialized here, nor for the race where the it actually was
+  // materialized but no longer so prior to `dds_entity_register_child`.
+  ddsrt_mutex_lock (&rd->m_entity.m_observers_lock);
+  ddsrt_mutex_lock (&sub->m_entity.m_observers_lock);
+  if (sub->materialize_data_on_readers == 0)
+    ddsrt_atomic_and32 (&rd->m_entity.m_status.m_status_and_mask, ~(uint32_t)(DDS_DATA_ON_READERS_STATUS << SAM_ENABLED_SHIFT));
+  ddsrt_mutex_unlock (&sub->m_entity.m_observers_lock);
+  ddsrt_mutex_unlock (&rd->m_entity.m_observers_lock);
 
   dds_topic_allow_set_qos (tp);
   dds_topic_unpin (tp);
@@ -829,14 +860,3 @@ dds_return_t dds__reader_data_allocator_fini (const dds_reader *rd, dds_data_all
   (void) rd;
   return DDS_RETCODE_OK;
 }
-
-/* Reset sets everything (type) 0, including the reason field, verify that 0 is correct */
-DDSRT_STATIC_ASSERT ((int) DDS_NOT_REJECTED == 0);
-
-DDS_GET_STATUS (reader, subscription_matched,       SUBSCRIPTION_MATCHED,       total_count_change, current_count_change)
-DDS_GET_STATUS (reader, liveliness_changed,         LIVELINESS_CHANGED,         alive_count_change, not_alive_count_change)
-DDS_GET_STATUS (reader, sample_rejected,            SAMPLE_REJECTED,            total_count_change)
-DDS_GET_STATUS (reader, sample_lost,                SAMPLE_LOST,                total_count_change)
-DDS_GET_STATUS (reader, requested_deadline_missed,  REQUESTED_DEADLINE_MISSED,  total_count_change)
-DDS_GET_STATUS (reader, requested_incompatible_qos, REQUESTED_INCOMPATIBLE_QOS, total_count_change)
-
