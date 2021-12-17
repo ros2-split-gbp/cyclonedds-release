@@ -1,3 +1,26 @@
+## cyclonedds (galactic) - 0.8.0-6
+
+The packages in the `cyclonedds` repository were released into the `galactic` distro by running `/home/steven/osrf/bloom/.direnv/python-3.10.1/bin/bloom-release -r galactic cyclonedds -e --override-release-repository-push-url git@github.com:ros2-gbp/cyclonedds-release` on `Fri, 17 Dec 2021 20:23:07 -0000`
+
+The `cyclonedds` package was released.
+
+Version of package(s) in repository `cyclonedds`:
+
+- upstream repository: https://github.com/eclipse-cyclonedds/cyclonedds.git
+- release repository: https://github.com/ros2-gbp/cyclonedds-release.git
+- rosdistro version: `0.8.0-5`
+- old version: `0.8.0-5`
+- new version: `0.8.0-6`
+
+Versions of tools used:
+
+- bloom version: `0.10.7`
+- catkin_pkg version: `0.4.24`
+- rosdep version: `0.21.0`
+- rosdistro version: `0.8.3`
+- vcstools version: `0.1.42`
+
+
 ## cyclonedds (rolling) - 0.8.0-7
 
 The packages in the `cyclonedds` repository were released into the `rolling` distro by running `/home/steven/osrf/bloom/.direnv/python-3.10.1/bin/bloom-release -r rolling cyclonedds -e --override-release-repository-push-url git@github.com:ros2-gbp/cyclonedds-release` on `Fri, 17 Dec 2021 20:20:17 -0000`
