@@ -22,7 +22,7 @@
 #include "dds/ddsi/ddsi_domaingv.h"
 #include "dds/version.h"
 
-DECL_ENTITY_LOCK_UNLOCK (extern inline, dds_publisher)
+DECL_ENTITY_LOCK_UNLOCK (dds_publisher)
 
 #define DDS_PUBLISHER_STATUS_MASK   (0u)
 
@@ -58,15 +58,15 @@ dds_entity_t dds__create_publisher_l (dds_participant *par, bool implicit, const
   new_qos = dds_create_qos ();
   if (qos)
     ddsi_xqos_mergein_missing (new_qos, qos, DDS_PUBLISHER_QOS_MASK);
-  ddsi_xqos_mergein_missing (new_qos, &par->m_entity.m_domain->gv.default_xqos_pub, ~(uint64_t)0);
+  ddsi_xqos_mergein_missing (new_qos, &ddsi_default_qos_publisher_subscriber, ~(uint64_t)0);
   if ((ret = ddsi_xqos_valid (&par->m_entity.m_domain->gv.logconfig, new_qos)) != DDS_RETCODE_OK)
   {
-    dds_participant_unlock (par);
+    dds_delete_qos (new_qos);
     return ret;
   }
 
   pub = dds_alloc (sizeof (*pub));
-  hdl = dds_entity_init (&pub->m_entity, &par->m_entity, DDS_KIND_PUBLISHER, implicit, new_qos, listener, DDS_PUBLISHER_STATUS_MASK);
+  hdl = dds_entity_init (&pub->m_entity, &par->m_entity, DDS_KIND_PUBLISHER, implicit, true, new_qos, listener, DDS_PUBLISHER_STATUS_MASK);
   pub->m_entity.m_iid = ddsi_iid_gen ();
   dds_entity_register_child (&par->m_entity, &pub->m_entity);
   dds_entity_init_complete (&pub->m_entity);

@@ -19,8 +19,17 @@ set(sources
   src/crypto_transform.c
   src/crypto_utils.c
   src/cryptography.c)
+set(private_headers
+  src/crypto_cipher.h
+  src/crypto_key_exchange.h
+  src/crypto_key_factory.h
+  src/crypto_objects.h
+  src/crypto_transform.h
+  src/crypto_utils.h
+  src/cryptography.h
+  ../include/crypto_tokens.h)
 
-add_library(dds_security_crypto SHARED ${sources})
+add_library(dds_security_crypto SHARED ${sources} ${private_headers})
 
 generate_export_header(
     dds_security_crypto
@@ -42,6 +51,7 @@ target_include_directories(dds_security_crypto
         "$<BUILD_INTERFACE:$<TARGET_PROPERTY:security_openssl,INTERFACE_INCLUDE_DIRECTORIES>>"
         "$<BUILD_INTERFACE:$<TARGET_PROPERTY:ddsrt,INTERFACE_INCLUDE_DIRECTORIES>>"
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>"
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/../include>"
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/../../../core/ddsi/include>"
 )
 

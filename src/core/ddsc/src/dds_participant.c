@@ -27,7 +27,7 @@
 #include "dds__builtin.h"
 #include "dds__qos.h"
 
-DECL_ENTITY_LOCK_UNLOCK (extern inline, dds_participant)
+DECL_ENTITY_LOCK_UNLOCK (dds_participant)
 
 #define DDS_PARTICIPANT_STATUS_MASK    (0u)
 
@@ -131,7 +131,7 @@ dds_entity_t dds_create_participant (const dds_domainid_t domain, const dds_qos_
   }
 
   pp = dds_alloc (sizeof (*pp));
-  if ((ret = dds_entity_init (&pp->m_entity, &dom->m_entity, DDS_KIND_PARTICIPANT, false, new_qos, listener, DDS_PARTICIPANT_STATUS_MASK)) < 0)
+  if ((ret = dds_entity_init (&pp->m_entity, &dom->m_entity, DDS_KIND_PARTICIPANT, false, true, new_qos, listener, DDS_PARTICIPANT_STATUS_MASK)) < 0)
     goto err_entity_init;
 
   pp->m_entity.m_guid = guid;

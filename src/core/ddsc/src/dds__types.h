@@ -69,6 +69,7 @@ typedef bool (*dds_querycondition_filter_with_ctx_fn) (const void * sample, cons
 
 struct dds_listener {
   uint32_t inherited;
+  uint32_t reset_on_invoke;
   dds_on_inconsistent_topic_fn on_inconsistent_topic;
   void *on_inconsistent_topic_arg;
   dds_on_liveliness_lost_fn on_liveliness_lost;
@@ -155,7 +156,7 @@ typedef struct dds_entity {
   ddsrt_cond_t m_cond;
 
   union {
-    status_and_enabled_t m_status_and_mask; /* for most entities */
+    status_and_enabled_t m_status_and_mask; /* for most entities; readers use DATA_ON_READERS in mask in a weird way */
     ddsrt_atomic_uint32_t m_trigger;        /* for conditions & waitsets */
   } m_status;
 
@@ -191,31 +192,31 @@ dds_return_t dds_entity_deriver_dummy_validate_status (uint32_t mask);
 struct dds_statistics *dds_entity_deriver_dummy_create_statistics (const struct dds_entity *e);
 void dds_entity_deriver_dummy_refresh_statistics (const struct dds_entity *e, struct dds_statistics *s);
 
-inline void dds_entity_deriver_interrupt (struct dds_entity *e) {
+DDS_INLINE_EXPORT inline void dds_entity_deriver_interrupt (struct dds_entity *e) {
   (dds_entity_deriver_table[e->m_kind]->interrupt) (e);
 }
-inline void dds_entity_deriver_close (struct dds_entity *e) {
+DDS_INLINE_EXPORT inline void dds_entity_deriver_close (struct dds_entity *e) {
   (dds_entity_deriver_table[e->m_kind]->close) (e);
 }
-inline dds_return_t dds_entity_deriver_delete (struct dds_entity *e) {
+DDS_INLINE_EXPORT inline dds_return_t dds_entity_deriver_delete (struct dds_entity *e) {
   return dds_entity_deriver_table[e->m_kind]->delete (e);
 }
-inline dds_return_t dds_entity_deriver_set_qos (struct dds_entity *e, const dds_qos_t *qos, bool enabled) {
+DDS_INLINE_EXPORT inline dds_return_t dds_entity_deriver_set_qos (struct dds_entity *e, const dds_qos_t *qos, bool enabled) {
   return dds_entity_deriver_table[e->m_kind]->set_qos (e, qos, enabled);
 }
-inline dds_return_t dds_entity_deriver_validate_status (struct dds_entity *e, uint32_t mask) {
+DDS_INLINE_EXPORT inline dds_return_t dds_entity_deriver_validate_status (struct dds_entity *e, uint32_t mask) {
   return dds_entity_deriver_table[e->m_kind]->validate_status (mask);
 }
-inline bool dds_entity_supports_set_qos (struct dds_entity *e) {
+DDS_INLINE_EXPORT inline bool dds_entity_supports_set_qos (struct dds_entity *e) {
   return dds_entity_deriver_table[e->m_kind]->set_qos != dds_entity_deriver_dummy_set_qos;
 }
-inline bool dds_entity_supports_validate_status (struct dds_entity *e) {
+DDS_INLINE_EXPORT inline bool dds_entity_supports_validate_status (struct dds_entity *e) {
   return dds_entity_deriver_table[e->m_kind]->validate_status != dds_entity_deriver_dummy_validate_status;
 }
-inline struct dds_statistics *dds_entity_deriver_create_statistics (const struct dds_entity *e) {
+DDS_INLINE_EXPORT inline struct dds_statistics *dds_entity_deriver_create_statistics (const struct dds_entity *e) {
   return dds_entity_deriver_table[e->m_kind]->create_statistics (e);
 }
-inline void dds_entity_deriver_refresh_statistics (const struct dds_entity *e, struct dds_statistics *s) {
+DDS_INLINE_EXPORT inline void dds_entity_deriver_refresh_statistics (const struct dds_entity *e, struct dds_statistics *s) {
   dds_entity_deriver_table[e->m_kind]->refresh_statistics (e, s);
 }
 
@@ -261,7 +262,27 @@ typedef struct dds_domain {
 
 typedef struct dds_subscriber {
   struct dds_entity m_entity;
+
+  /* materialize_data_on_readers:
+     - a counter in the least significant 31 bits (MASK)
+     - a flag in the most significant bit (FLAG)
+
+     The counter tracks whether the subscriber's DATA_ON_READERS status needs to be
+     materialized.  The flag is set iff it materialized and all readers have the
+     DATA_ON_READERS bit set in the their status mask.
+
+     The DATA_ON_READERS bit in the readers' status masks signals that they must
+     account for a possible materialized DATA_ON_READERS flag.
+
+     It is an error to have FLAG set in the subscriber while some of its readers do
+     not have DATA_ON_READERS set in their status mask.
+
+     Protected by m_entity.m_observers_lock. */
+  uint32_t materialize_data_on_readers;
 } dds_subscriber;
+
+#define DDS_SUB_MATERIALIZE_DATA_ON_READERS_MASK 0x7fffffffu
+#define DDS_SUB_MATERIALIZE_DATA_ON_READERS_FLAG 0x80000000u
 
 typedef struct dds_publisher {
   struct dds_entity m_entity;
@@ -308,7 +329,6 @@ typedef struct dds_reader {
   struct dds_topic *m_topic; /* refc'd, constant, lock(rd) -> lock(tp) allowed */
   struct dds_rhc *m_rhc; /* aliases m_rd->rhc with a wider interface, FIXME: but m_rd owns it for resource management */
   struct reader *m_rd;
-  bool m_data_on_readers;
   bool m_loan_out;
   void *m_loan;
   uint32_t m_loan_size;

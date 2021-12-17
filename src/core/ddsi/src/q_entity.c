@@ -157,14 +157,14 @@ DDSI_LIST_GENERIC_PTR_DECL(inline, proxy_topic_list, struct proxy_topic *, ddsrt
 DDSI_LIST_GENERIC_PTR_CODE(inline, proxy_topic_list, struct proxy_topic *, proxy_topic_equal)
 #endif /* DDS_HAS_TOPIC_DISCOVERY */
 
-extern inline bool builtintopic_is_visible (const struct ddsi_builtin_topic_interface *btif, const struct ddsi_guid *guid, nn_vendorid_t vendorid);
-extern inline bool builtintopic_is_builtintopic (const struct ddsi_builtin_topic_interface *btif, const struct ddsi_sertype *type);
-extern inline struct ddsi_tkmap_instance *builtintopic_get_tkmap_entry (const struct ddsi_builtin_topic_interface *btif, const struct ddsi_guid *guid);
-extern inline void builtintopic_write_endpoint (const struct ddsi_builtin_topic_interface *btif, const struct entity_common *e, ddsrt_wctime_t timestamp, bool alive);
-extern inline void builtintopic_write_topic (const struct ddsi_builtin_topic_interface *btif, const struct ddsi_topic_definition *tpd, ddsrt_wctime_t timestamp, bool alive);
+DDS_EXPORT extern inline bool builtintopic_is_visible (const struct ddsi_builtin_topic_interface *btif, const struct ddsi_guid *guid, nn_vendorid_t vendorid);
+DDS_EXPORT extern inline bool builtintopic_is_builtintopic (const struct ddsi_builtin_topic_interface *btif, const struct ddsi_sertype *type);
+DDS_EXPORT extern inline struct ddsi_tkmap_instance *builtintopic_get_tkmap_entry (const struct ddsi_builtin_topic_interface *btif, const struct ddsi_guid *guid);
+DDS_EXPORT extern inline void builtintopic_write_endpoint (const struct ddsi_builtin_topic_interface *btif, const struct entity_common *e, ddsrt_wctime_t timestamp, bool alive);
+DDS_EXPORT extern inline void builtintopic_write_topic (const struct ddsi_builtin_topic_interface *btif, const struct ddsi_topic_definition *tpd, ddsrt_wctime_t timestamp, bool alive);
 
-extern inline seqno_t writer_read_seq_xmit (const struct writer *wr);
-extern inline void writer_update_seq_xmit (struct writer *wr, seqno_t nv);
+DDS_EXPORT extern inline seqno_t writer_read_seq_xmit (const struct writer *wr);
+DDS_EXPORT extern inline void writer_update_seq_xmit (struct writer *wr, seqno_t nv);
 
 static int compare_guid (const void *va, const void *vb)
 {
@@ -902,13 +902,20 @@ static void participant_remove_wr_lease_locked (struct participant * pp, struct 
 #ifdef DDS_HAS_SECURITY
 static dds_return_t check_and_load_security_config (struct ddsi_domaingv * const gv, const ddsi_guid_t *ppguid, dds_qos_t *qos)
 {
-  /* If some security properties (name starts with dds.sec. conform DDS Security spec 7.2.4.1)
-     are present in the QoS, all must be and they will be used.  If none are, take the settings
-     from the configuration if it has them.  When no security configuration exists anywhere,
-     create an unsecured participant.
+  /* If some security properties (name starts with "dds.sec." conform DDS Security spec 7.2.4.1,
+     or starts with "org.eclipse.cyclonedds.sec." which we use for Cyclone-specific extensions)
+     are present in the QoS, all required properties must be present and they will be used.
+
+     If none are, take the settings from the configuration if it has them.  When no security
+     configuration exists anywhere, create an unsecured participant.
+
+     The CRL is a special case: it is optional, but it seems strange to allow an XML file
+     specifying a CRL when the QoS properties don't specify one if the CA is the same. It doesn't
+     seem like a good idea to compare CAs here, so instead just require a CRL property if the
+     XML configuration configures a CRL.
 
      This may modify "qos" */
-  if (ddsi_xqos_has_prop_prefix (qos, "dds.sec."))
+  if (ddsi_xqos_has_prop_prefix (qos, DDS_SEC_PROP_PREFIX) || ddsi_xqos_has_prop_prefix (qos, ORG_ECLIPSE_CYCLONEDDS_SEC_PREFIX))
   {
     char const * const req[] = {
       DDS_SEC_PROP_AUTH_IDENTITY_CA,
@@ -941,6 +948,19 @@ static dds_return_t check_and_load_security_config (struct ddsi_domaingv * const
         ret = DDS_RETCODE_PRECONDITION_NOT_MET;
       }
     }
+
+    /* deal with CRL: if configured in XML, require the property but allow an explicit empty configuration
+       to handle cases where the CA is different and to make it at least possible to override it.  The
+       goal is to avoid accidental unsecured participants, not to make things completely impossible. */
+    if (gv->config.omg_security_configuration &&
+        gv->config.omg_security_configuration->cfg.authentication_properties.crl &&
+        *gv->config.omg_security_configuration->cfg.authentication_properties.crl &&
+        !ddsi_xqos_find_prop (qos, ORG_ECLIPSE_CYCLONEDDS_SEC_AUTH_CRL, NULL))
+    {
+      GVERROR ("new_participant("PGUIDFMT"): CRL security property " ORG_ECLIPSE_CYCLONEDDS_SEC_AUTH_CRL " absent in Property QoS but specified in XML configuration\n", PGUID (*ppguid));
+      ret = DDS_RETCODE_PRECONDITION_NOT_MET;
+    }
+
     if (ret != DDS_RETCODE_OK)
       return ret;
   }
@@ -3289,6 +3309,32 @@ static void new_reader_writer_common (const struct ddsrt_log_cfg *logcfg, const 
             type_name);
 }
 
+static bool is_onlylocal_endpoint (struct participant *pp, const char *topic_name, const struct ddsi_sertype *type, const struct dds_qos *xqos)
+{
+  if (builtintopic_is_builtintopic (pp->e.gv->builtin_topic_interface, type))
+    return true;
+
+#ifdef DDS_HAS_NETWORK_PARTITIONS
+  char *ps_def = "";
+  char **ps;
+  uint32_t nps;
+  if ((xqos->present & QP_PARTITION) && xqos->partition.n > 0) {
+    ps = xqos->partition.strs;
+    nps = xqos->partition.n;
+  } else {
+    ps = &ps_def;
+    nps = 1;
+  }
+  for (uint32_t i = 0; i < nps; i++)
+  {
+    if (is_ignored_partition (&pp->e.gv->config, ps[i], topic_name))
+      return true;
+  }
+#endif
+
+  return false;
+}
+
 static void endpoint_common_init (struct entity_common *e, struct endpoint_common *c, struct ddsi_domaingv *gv, enum entity_kind kind, const struct ddsi_guid *guid, const struct ddsi_guid *group_guid, struct participant *pp, bool onlylocal, const struct ddsi_sertype *type)
 {
 #ifndef DDS_HAS_TYPE_DISCOVERY
@@ -3668,7 +3714,7 @@ static void new_writer_guid_common_init (struct writer *wr, const char *topic_na
 
   wr->xqos = ddsrt_malloc (sizeof (*wr->xqos));
   ddsi_xqos_copy (wr->xqos, xqos);
-  ddsi_xqos_mergein_missing (wr->xqos, &wr->e.gv->default_xqos_wr, ~(uint64_t)0);
+  ddsi_xqos_mergein_missing (wr->xqos, &ddsi_default_qos_writer, ~(uint64_t)0);
   assert (wr->xqos->aliased == 0);
   set_topic_type_name (wr->xqos, topic_name, type->type_name);
 
@@ -3836,7 +3882,7 @@ static dds_return_t new_writer_guid (struct writer **wr_out, const struct ddsi_g
    delete_participant won't interfere with our ability to address
    the participant */
 
-  const bool onlylocal = builtintopic_is_builtintopic (pp->e.gv->builtin_topic_interface, type);
+  const bool onlylocal = is_onlylocal_endpoint (pp, topic_name, type, xqos);
   endpoint_common_init (&wr->e, &wr->c, pp->e.gv, EK_WRITER, guid, group_guid, pp, onlylocal, type);
   new_writer_guid_common_init(wr, topic_name, type, xqos, whc, status_cb, status_entity);
 
@@ -4301,13 +4347,13 @@ static dds_return_t new_reader_guid
   if (rd_out)
     *rd_out = rd;
 
-  const bool onlylocal = builtintopic_is_builtintopic (pp->e.gv->builtin_topic_interface, type);
+  const bool onlylocal = is_onlylocal_endpoint (pp, topic_name, type, xqos);
   endpoint_common_init (&rd->e, &rd->c, pp->e.gv, EK_READER, guid, group_guid, pp, onlylocal, type);
 
   /* Copy QoS, merging in defaults */
   rd->xqos = ddsrt_malloc (sizeof (*rd->xqos));
   ddsi_xqos_copy (rd->xqos, xqos);
-  ddsi_xqos_mergein_missing (rd->xqos, &pp->e.gv->default_xqos_rd, ~(uint64_t)0);
+  ddsi_xqos_mergein_missing (rd->xqos, &ddsi_default_qos_reader, ~(uint64_t)0);
   assert (rd->xqos->aliased == 0);
   set_topic_type_name (rd->xqos, topic_name, type->type_name);
 
@@ -4557,7 +4603,7 @@ dds_return_t ddsi_new_topic
   /* Copy QoS, merging in defaults */
   struct dds_qos *tp_qos = ddsrt_malloc (sizeof (*tp_qos));
   ddsi_xqos_copy (tp_qos, xqos);
-  ddsi_xqos_mergein_missing (tp_qos, &gv->default_xqos_tp, ~(uint64_t)0);
+  ddsi_xqos_mergein_missing (tp_qos, &ddsi_default_qos_topic, ~(uint64_t)0);
   assert (tp_qos->aliased == 0);
 
   /* Set topic name, type name and type id in qos */
@@ -5195,7 +5241,7 @@ bool new_proxy_participant (struct ddsi_domaingv *gv, const struct ddsi_guid *pp
   proxy_topic_list_init (&proxypp->topics);
 #endif
   proxypp->plist = ddsi_plist_dup (plist);
-  ddsi_xqos_mergein_missing (&proxypp->plist->qos, &gv->default_plist_pp.qos, ~(uint64_t)0);
+  ddsi_xqos_mergein_missing (&proxypp->plist->qos, &ddsi_default_plist_participant.qos, ~(uint64_t)0);
   ddsrt_avl_init (&proxypp_groups_treedef, &proxypp->groups);
 
 #ifdef DDS_HAS_SECURITY
@@ -5244,13 +5290,12 @@ int update_proxy_participant_plist_locked (struct proxy_participant *proxypp, se
   {
     proxypp->seq = seq;
 
-    struct ddsi_domaingv * const gv = proxypp->e.gv;
     const uint64_t pmask = PP_ENTITY_NAME;
     const uint64_t qmask = QP_USER_DATA;
     ddsi_plist_t *new_plist = ddsrt_malloc (sizeof (*new_plist));
     ddsi_plist_init_empty (new_plist);
     ddsi_plist_mergein_missing (new_plist, datap, pmask, qmask);
-    ddsi_plist_mergein_missing (new_plist, &gv->default_plist_pp, ~(uint64_t)0, ~(uint64_t)0);
+    ddsi_plist_mergein_missing (new_plist, &ddsi_default_plist_participant, ~(uint64_t)0, ~(uint64_t)0);
     (void) update_qos_locked (&proxypp->e, &proxypp->plist->qos, &new_plist->qos, timestamp);
     ddsi_plist_fini (new_plist);
     ddsrt_free (new_plist);
