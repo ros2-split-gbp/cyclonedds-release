@@ -24,11 +24,11 @@
 typedef enum idl_operator idl_operator_t;
 enum idl_operator {
   IDL_NOP = 0,
-#define IDL_UNARY_OPERATOR (1ull<<20)
+#define IDL_UNARY_OPERATOR (1ull<<21)
   IDL_MINUS = (IDL_UNARY_OPERATOR|1u),
   IDL_PLUS,
   IDL_NOT,
-#define IDL_BINARY_OPERATOR (1ull<<19)
+#define IDL_BINARY_OPERATOR (1ull<<20)
   IDL_OR = (IDL_BINARY_OPERATOR|1u),
   IDL_XOR,
   IDL_AND,
@@ -54,8 +54,9 @@ struct idl_intval {
 
 idl_intval_t idl_intval(const idl_const_expr_t *const_expr);
 
-
 typedef long double idl_floatval_t;
+
+idl_floatval_t idl_floatval(const idl_const_expr_t *const_expr);
 
 IDL_EXPORT idl_retcode_t
 idl_evaluate(

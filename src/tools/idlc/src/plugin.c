@@ -38,6 +38,7 @@ static const char ext[] = "so";
 
 #include "plugin.h"
 #include "idl/string.h"
+#include "idlc/generator.h"
 
 static size_t extlen = sizeof(ext) - 1;
 
@@ -147,7 +148,8 @@ static int run_library_locator(const char *command, char **out_output) {
 }
 
 
-extern int idlc_generate(const idl_pstate_t *pstate);
+extern const idlc_option_t** idlc_generator_options(void);
+extern int idlc_generate(const idl_pstate_t *pstate, const idlc_generator_config_t *config);
 
 int32_t
 idlc_load_generator(idlc_generator_plugin_t *plugin, const char *lang)
@@ -161,7 +163,7 @@ idlc_load_generator(idlc_generator_plugin_t *plugin, const char *lang)
   /* short-circuit on builtin generator */
   if (idl_strcasecmp(lang, "C") == 0) {
     plugin->handle = NULL;
-    plugin->generator_options = 0;
+    plugin->generator_options = &idlc_generator_options;
     plugin->generator_annotations = 0;
     plugin->generate = &idlc_generate;
     return 0;
@@ -205,7 +207,8 @@ idlc_load_generator(idlc_generator_plugin_t *plugin, const char *lang)
   }
 
   /* open the library */
-  if ((handle = openlib(path)) || (lang != path && (handle = openlib(lang)))) {
+  handle = openlib(path);
+  if (handle) {
     generate = loadsym(handle, "generate");
     if (generate) {
       plugin->handle = handle;
@@ -213,14 +216,14 @@ idlc_load_generator(idlc_generator_plugin_t *plugin, const char *lang)
       plugin->generator_options = loadsym(handle, "generator_options");
       plugin->generator_annotations = loadsym(handle, "generator_annotations");
     } else {
-      fprintf(stderr, "Symbol 'generate' not found in %s\n", lang != path ? lang : path);
+      fprintf(stderr, "Symbol 'generate' not found in %s\n", path);
       closelib(handle);
     }
   }
   else {
     char errmsg[300];
     liberror(errmsg, sizeof(errmsg));
-    fprintf(stderr, "Cannot load generator %s: %s\n", lang != path ? lang : path, errmsg);
+    fprintf(stderr, "Cannot load generator %s: %s\n", path, errmsg);
   }
 
   if (file) {

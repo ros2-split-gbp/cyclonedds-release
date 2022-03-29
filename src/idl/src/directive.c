@@ -18,6 +18,7 @@
 
 #include "idl/processor.h"
 #include "idl/string.h"
+#include "idl/misc.h"
 
 #include "file.h"
 #include "symbol.h"
@@ -251,7 +252,7 @@ parse_line(idl_pstate_t *pstate, idl_token_t *tok)
           pstate->scanner.state = IDL_SCAN_FILE;
       } else {
 extra_tokens:
-        idl_warning(pstate, &tok->location, "Extra tokens at end of %s", type);
+        idl_warning(pstate, IDL_WARN_EXTRA_TOKEN_DIRECTIVE, &tok->location, "Extra tokens at end of %s", type);
         pstate->scanner.state = IDL_SCAN_EXTRA_TOKENS;
       }
       break;
@@ -297,7 +298,8 @@ push_keylist(idl_pstate_t *pstate, struct keylist *dir)
 {
   idl_retcode_t ret;
   idl_scope_t *scope;
-  idl_struct_t *node;
+  idl_type_spec_t *type_spec;
+  idl_struct_t *_struct;
   idl_keylist_t *keylist = NULL;
   const idl_declaration_t *declaration;
 
@@ -307,13 +309,20 @@ push_keylist(idl_pstate_t *pstate, struct keylist *dir)
       "Unknown data-type '%s' in keylist directive", dir->data_type->identifier);
     return IDL_RETCODE_SEMANTIC_ERROR;
   }
-  node = (idl_struct_t *)declaration->node;
-  scope = (idl_scope_t *)declaration->scope;
-  if (!idl_is_struct(node)) {
+  /* can be an alias, forward declaration or a combination thereof */
+  type_spec = idl_strip(declaration->node, IDL_STRIP_ALIASES|IDL_STRIP_FORWARD);
+  if (!type_spec) {
+    idl_error(pstate, idl_location(dir->data_type),
+      "Incomplete data-type '%s' in keylist directive", dir->data_type->identifier);
+    return IDL_RETCODE_SEMANTIC_ERROR;
+  }
+  if (!idl_is_struct(type_spec)) {
     idl_error(pstate, idl_location(dir->data_type),
       "Invalid data-type '%s' in keylist directive", dir->data_type->identifier);
     return IDL_RETCODE_SEMANTIC_ERROR;
-  } else if (node->keylist) {
+  }
+  _struct = type_spec;
+  if (_struct->keylist) {
     idl_error(pstate, idl_location(dir->data_type),
       "Redefinition of keylist for data-type '%s'", dir->data_type->identifier);
     return IDL_RETCODE_SEMANTIC_ERROR;
@@ -342,46 +351,56 @@ push_keylist(idl_pstate_t *pstate, struct keylist *dir)
 
   if ((ret = idl_create_keylist(pstate, idl_location(dir->data_type), &keylist)))
     return ret;
-  keylist->node.parent = (idl_node_t *)node;
-  node->keylist = keylist;
+  keylist->node.parent = (idl_node_t *)_struct;
+  _struct->keylist = keylist;
+
+  declaration = ((idl_node_t *)_struct)->declaration;
+  assert(declaration);
+  scope = declaration->scope;
 
   for (size_t i=0; dir->keys && dir->keys[i]; i++) {
     idl_key_t *key = NULL;
     idl_mask_t mask = IDL_BASE_TYPE | IDL_ENUM | IDL_STRING;
     const idl_declarator_t *declarator;
-    const idl_type_spec_t *type_spec;
+    const idl_type_spec_t *ts;
 
     if (!(declaration = idl_find_field_name(pstate, scope, dir->keys[i], 0u))) {
       idl_error(pstate, idl_location(dir->keys[i]),
         "Unknown key '%s' in keylist directive", dir->keys[i]->identifier);
-      return IDL_RETCODE_SEMANTIC_ERROR;
+      ret = IDL_RETCODE_SEMANTIC_ERROR;
+      goto err_find_decl;
     }
     declarator = (const idl_declarator_t *)declaration->node;
     assert(idl_is_declarator(declarator));
-    type_spec = idl_type_spec(declarator);
+    ts = idl_type_spec(declarator);
     /* until DDS-XTypes is fully implemented, base types, enums, arrays of the
        aforementioned and strings are allowed to be used in keys */
-    type_spec = idl_unalias(type_spec, 0u);
-    if (idl_is_array(type_spec))
+    ts = idl_strip(ts, IDL_STRIP_ALIASES);
+    if (idl_is_array(ts))
       mask &= (idl_mask_t)~IDL_STRING;
-    type_spec = idl_unalias(type_spec, IDL_UNALIAS_IGNORE_ARRAY);
-    if (!(idl_mask(type_spec) & mask)) {
+    ts = idl_strip(ts, IDL_STRIP_ALIASES|IDL_STRIP_ALIASES_ARRAY);
+    if (!(idl_mask(ts) & mask)) {
       idl_error(pstate, idl_location(dir->keys[i]),
         "Invalid key '%s' in keylist directive", dir->keys[i]->identifier);
-      return IDL_RETCODE_SEMANTIC_ERROR;
+      ret = IDL_RETCODE_SEMANTIC_ERROR;
+      goto err_invalid_key;
     }
 
     if ((ret = idl_create_key(pstate, idl_location(dir->keys[i]), &key)))
-      return ret;
+      goto err_create_key;
     key->node.parent = (idl_node_t *)keylist;
     key->field_name = dir->keys[i];
     keylist->keys = idl_push_node(keylist->keys, key);
     dir->keys[i] = NULL; /* do not free */
   }
+  ret = IDL_RETCODE_OK;
 
+err_find_decl:
+err_invalid_key:
+err_create_key:
   delete_keylist(dir);
   pstate->directive = NULL;
-  return IDL_RETCODE_OK;
+  return ret;
 }
 
 static int stash_name(idl_pstate_t *pstate, idl_location_t *loc, char *str)

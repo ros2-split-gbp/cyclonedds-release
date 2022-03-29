@@ -23,10 +23,10 @@
 #include "dds__handles.h"
 
 #ifdef DDS_HAS_SHM
-#include "iceoryx_binding_c/subscriber.h"
+#include "dds/ddsi/ddsi_shm_transport.h"
 #include "iceoryx_binding_c/publisher.h"
+#include "iceoryx_binding_c/subscriber.h"
 #include "shm__monitor.h"
-#include "dds/ddsi/shm_sync.h"
 #define MAX_PUB_LOANS 8
 #endif
 
@@ -290,9 +290,9 @@ typedef struct dds_publisher {
 
 
 #ifdef DDS_HAS_TOPIC_DISCOVERY
-/* type_id -> <topic guid, ddsi topic> mapping for ktopics */
+/* complete type_id -> <topic guid, ddsi topic> mapping for ktopics */
 struct ktopic_type_guid {
-  type_identifier_t *type_id;
+  ddsi_typeid_t *type_id;
   uint32_t refc;
   ddsi_guid_t guid;
   struct topic *tp;
@@ -334,7 +334,7 @@ typedef struct dds_reader {
   uint32_t m_loan_size;
   unsigned m_wrapped_sertopic : 1; /* set iff reader's topic is a wrapped ddsi_sertopic for backwards compatibility */
 #ifdef DDS_HAS_SHM
-  iox_sub_storage_extension_t m_iox_sub_stor;
+  iox_sub_context_t m_iox_sub_context;
   iox_sub_t m_iox_sub;
 #endif
 
@@ -356,7 +356,6 @@ typedef struct dds_writer {
   struct whc *m_whc; /* FIXME: ownership still with underlying DDSI writer (cos of DDSI built-in writers )*/
   bool whc_batch; /* FIXME: channels + latency budget */
 #ifdef DDS_HAS_SHM
-  iox_pub_storage_t m_iox_pub_stor;
   iox_pub_t m_iox_pub;
   void *m_iox_pub_loans[MAX_PUB_LOANS];
 #endif

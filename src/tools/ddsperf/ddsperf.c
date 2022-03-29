@@ -21,13 +21,12 @@
 #include <assert.h>
 #include <limits.h>
 #include <math.h>
-#if _WIN32
 #include <getopt.h>
-#endif
 
 #include "dds/dds.h"
 #include "dds/ddsc/dds_statistics.h"
 #include "ddsperf_types.h"
+#include "async_listener.h"
 
 #include "dds/ddsrt/process.h"
 #include "dds/ddsrt/string.h"
@@ -52,12 +51,16 @@
 #define PINGPONG_RAWSIZE 20000
 
 enum topicsel {
-  KS,   /* KeyedSeq type: seq#, key, sequence-of-octet */
-  K32,  /* Keyed32  type: seq#, key, array-of-24-octet (sizeof = 32) */
-  K256, /* Keyed256 type: seq#, key, array-of-248-octet (sizeof = 256) */
-  OU,   /* OneULong type: seq# */
-  UK16, /* Unkeyed16, type: seq#, array-of-12-octet (sizeof = 16) */
-  UK1024/* Unkeyed1024, type: seq#, array-of-1020-octet (sizeof = 1024) */
+  KS,    /* KeyedSeq type: seq#, key, sequence-of-octet */
+  K32,   /* Keyed32  type: seq#, key, array-of-24-octet (sizeof = 32) */
+  K256,  /* Keyed256 type: seq#, key, array-of-248-octet (sizeof = 256) */
+  OU,    /* OneULong type: seq# */
+  UK16,  /* Unkeyed16, type: seq#, array-of-12-octet (sizeof = 16) */
+  UK1024,/* Unkeyed1024, type: seq#, array-of-1020-octet (sizeof = 1024) */
+  S16,   /* Keyed, 16 octets, int64 junk, seq#, key */
+  S256,  /* Keyed, 16 * S16, int64 junk, seq#, key */
+  S4k,   /* Keyed, 16 * S256, int64 junk, seq#, key */
+  S32k   /* Keyed, 4 * S4k, int64 junk, seq#, key */
 };
 
 enum submode {
@@ -176,6 +179,12 @@ static uint64_t min_roundtrips = 0;
 
 /* Whether to gather/show latency information in "sub" mode */
 static bool sublatency = false;
+
+/* Event queue for processing discovery events (data available on
+   DCPSParticipant, subscription & publication matched)
+   asynchronously to avoid deadlocking on creating a reader from
+   within a subscription_matched event. */
+struct async_listener *async_listener;
 
 static ddsrt_mutex_t disc_lock;
 
@@ -360,6 +369,10 @@ union data {
   OneULong ou;
   Unkeyed16 uk16;
   Unkeyed1024 uk1024;
+  Struct16 s16;
+  Struct256 s256;
+  Struct4k s4k;
+  Struct32k s32k;
 };
 
 static void verrorx (int exitcode, const char *fmt, va_list ap)
@@ -553,38 +566,53 @@ static void *make_baggage (dds_sequence_octet *b, uint32_t cnt)
   return b->_buffer;
 }
 
+static uint32_t *getseqptr (union data *data)
+{
+  switch (topicsel)
+  {
+    case KS:     return &data->ks.seq;
+    case K32:    return &data->k32.seq;
+    case K256:   return &data->k256.seq;
+    case OU:     return &data->ou.seq;
+    case UK16:   return &data->uk16.seq;
+    case UK1024: return &data->uk1024.seq;
+    case S16:    return &data->s16.seq;
+    case S256:   return &data->s256.seq;
+    case S4k:    return &data->s4k.seq;
+    case S32k:   return &data->s32k.seq;
+  }
+  return 0;
+}
+
+static uint32_t *getkeyvalptr (union data *data)
+{
+  switch (topicsel)
+  {
+    case KS:     return &data->ks.keyval;
+    case K32:    return &data->k32.keyval;
+    case K256:   return &data->k256.keyval;
+    case OU:     return NULL;
+    case UK16:   return NULL;
+    case UK1024: return NULL;
+    case S16:    return &data->s16.keyval;
+    case S256:   return &data->s256.keyval;
+    case S4k:    return &data->s4k.keyval;
+    case S32k:   return &data->s32k.keyval;
+  }
+  return 0;
+}
+
 static void *init_sample (union data *data, uint32_t seq)
 {
   void *baggage = NULL;
-  switch (topicsel)
-  {
-    case KS:
-      data->ks.seq = seq;
-      data->ks.keyval = 0;
-      baggage = make_baggage (&data->ks.baggage, baggagesize);
-      break;
-    case K32:
-      data->k32.seq = seq;
-      data->k32.keyval = 0;
-      memset (data->k32.baggage, 0xee, sizeof (data->k32.baggage));
-      break;
-    case K256:
-      data->k256.seq = seq;
-      data->k256.keyval = 0;
-      memset (data->k256.baggage, 0xee, sizeof (data->k256.baggage));
-      break;
-    case OU:
-      data->ou.seq = seq;
-      break;
-    case UK16:
-      data->uk16.seq = seq;
-      memset (data->uk16.baggage, 0xee, sizeof (data->uk16.baggage));
-      break;
-    case UK1024:
-      data->uk1024.seq = seq;
-      memset (data->uk1024.baggage, 0xee, sizeof (data->uk1024.baggage));
-      break;
-  }
+  memset (data, 0xee, sizeof (*data));
+  if (topicsel == KS)
+    baggage = make_baggage (&data->ks.baggage, baggagesize);
+  uint32_t * const seqptr = getseqptr (data);
+  uint32_t * const keyvalptr = getkeyvalptr (data);
+  *seqptr = seq;
+  if (keyvalptr)
+    *keyvalptr = 0;
   return baggage;
 }
 
@@ -603,6 +631,8 @@ static uint32_t pubthread (void *varg)
   assert (topicsel != OU || nkeyvals == 1);
 
   baggage = init_sample (&data, 0);
+  uint32_t * const seqptr = getseqptr (&data);
+  uint32_t * const keyvalptr = getkeyvalptr (&data);
   ihs = malloc (nkeyvals * sizeof (dds_instance_handle_t));
   assert(ihs);
   if (!register_instances)
@@ -614,7 +644,8 @@ static uint32_t pubthread (void *varg)
   {
     for (unsigned k = 0; k < nkeyvals; k++)
     {
-      data.seq_keyval.keyval = (int32_t) k;
+      if (keyvalptr)
+        *keyvalptr = k;
       if ((result = dds_register_instance (wr_data, &ihs[k], &data)) != DDS_RETCODE_OK)
       {
         printf ("dds_register_instance failed: %d\n", result);
@@ -624,15 +655,18 @@ static uint32_t pubthread (void *varg)
     }
   }
 
-  data.seq_keyval.keyval = 0;
+  uint32_t time_interval = 1; // call dds_time() once for this many samples
+  uint32_t time_counter = time_interval; // how many more samples on current time stamp
+  uint32_t batch_counter = 0; // number of samples in current batch
+  if (keyvalptr)
+    *keyvalptr = 0;
   tfirst = dds_time();
-  uint32_t bi = 0;
+  dds_time_t t_write = tfirst;
   while (!ddsrt_atomic_ld32 (&termflag))
   {
     /* lsb of timestamp is abused to signal whether the sample is a ping requiring a response or not */
     bool reqresp = (ping_frac == 0) ? 0 : (ping_frac == UINT32_MAX) ? 1 : (ddsrt_random () <= ping_frac);
-    const dds_time_t t_write = (dds_time () & ~1) | reqresp;
-    if ((result = dds_write_ts (wr_data, &data, t_write)) != DDS_RETCODE_OK)
+    if ((result = dds_write_ts (wr_data, &data, (t_write & ~1) | reqresp)) != DDS_RETCODE_OK)
     {
       printf ("write error: %d\n", result);
       fflush (stdout);
@@ -640,7 +674,9 @@ static uint32_t pubthread (void *varg)
         exit (2);
       timeouts++;
       /* retry with original timestamp, it really is just a way of reporting
-         blocking for an exceedingly long time */
+         blocking for an exceedingly long time, but do force a fresh time stamp
+         for the next sample */
+      time_counter = time_interval = 1;
       continue;
     }
     if (reqresp)
@@ -648,29 +684,48 @@ static uint32_t pubthread (void *varg)
       dds_write_flush (wr_data);
     }
 
-    const dds_time_t t_post_write = dds_time ();
-    dds_time_t t = t_post_write;
+    const dds_time_t t_post_write = (time_counter == 1) ? dds_time () : t_write;
+    const dds_duration_t dt = t_post_write - t_write;
+    if (--time_counter == 0)
+    {
+      // try to read out the clock only every now and then
+      // - keeping it between once per 1us and once per 5us
+      // - also at least every 10th sample (not likely to go over 5MHz anyway)
+      // - if the interval is longish, reset it immediately to read the
+      //   clock every time (low-rate, scheduling mishaps)
+      // that should work to keep the cost of reading the clock inside ddsperf
+      // to a reasonably low fraction of the time without significantly distorting
+      // the results
+      if (dt < DDS_USECS (5) && time_interval < 10)
+        time_interval++;
+      else if (dt > DDS_USECS (1) && time_interval > 1)
+        time_interval = (dt > DDS_USECS (10)) ? 1 : time_interval - 1;
+      time_counter = time_interval;
+    }
     ddsrt_mutex_lock (&pubstat_lock);
-    hist_record (pubstat_hist, (uint64_t) ((t_post_write - t_write) / 1), 1);
+    hist_record (pubstat_hist, (uint64_t) dt, 1);
     ntot++;
     ddsrt_mutex_unlock (&pubstat_lock);
 
-    data.seq_keyval.keyval = (data.seq_keyval.keyval + 1) % (int32_t) nkeyvals;
-    data.seq++;
+    (*seqptr)++;
+    if (keyvalptr)
+      *keyvalptr = (*keyvalptr + 1) % nkeyvals;
 
+    t_write = t_post_write;
     if (pub_rate < HUGE_VAL)
     {
-      if (++bi == burstsize)
+      if (++batch_counter == burstsize)
       {
         /* FIXME: should average rate over a short-ish period, rather than over the entire run */
-        while (((double) (ntot / burstsize) / ((double) (t - tfirst) / 1e9 + 5e-3)) > pub_rate && !ddsrt_atomic_ld32 (&termflag))
+        while (((double) (ntot / burstsize) / ((double) (t_write - tfirst) / 1e9 + 5e-3)) > pub_rate && !ddsrt_atomic_ld32 (&termflag))
         {
           /* FIXME: flushing manually because batching is not yet implemented properly */
           dds_write_flush (wr_data);
           dds_sleepfor (DDS_MSECS (1));
-          t = dds_time ();
+          t_write = dds_time ();
+          time_counter = time_interval = 1;
         }
-        bi = 0;
+        batch_counter = 0;
       }
     }
   }
@@ -691,6 +746,10 @@ static uint32_t topic_payload_size (enum topicsel tp, uint32_t bgsize)
     case OU:     size = 4; break;
     case UK16:   size = 16; break;
     case UK1024: size = 1024; break;
+    case S16:    size = (uint32_t) sizeof (Struct16); break;
+    case S256:   size = (uint32_t) sizeof (Struct256); break;
+    case S4k:    size = (uint32_t) sizeof (Struct4k); break;
+    case S32k:   size = (uint32_t) sizeof (Struct32k); break;
   }
   return size;
 }
@@ -968,7 +1027,9 @@ static bool process_data (dds_entity_t rd, struct subthread_arg *arg)
   {
     if (iseq[i].valid_data)
     {
-      const int64_t tdelta = dds_time () - iseq[i].source_timestamp;
+      // time stamp is only used when tracking latency, and reading the clock a couple of
+      // times every microsecond is rather costly
+      const int64_t tdelta = sublatency ? dds_time () - iseq[i].source_timestamp : 0;
       uint32_t seq = 0, keyval = 0, size = 0;
       switch (topicsel)
       {
@@ -981,6 +1042,10 @@ static bool process_data (dds_entity_t rd, struct subthread_arg *arg)
         case OU:     { OneULong *d    = mseq[i]; keyval = 0;         seq = d->seq; size = topic_payload_size (topicsel, 0); } break;
         case UK16:   { Unkeyed16 *d   = mseq[i]; keyval = 0;         seq = d->seq; size = topic_payload_size (topicsel, 0); } break;
         case UK1024: { Unkeyed1024 *d = mseq[i]; keyval = 0;         seq = d->seq; size = topic_payload_size (topicsel, 0); } break;
+        case S16:    { Struct16 *d    = mseq[i]; keyval = d->keyval; seq = d->seq; size = topic_payload_size (topicsel, 0); } break;
+        case S256:   { Struct256 *d   = mseq[i]; keyval = d->keyval; seq = d->seq; size = topic_payload_size (topicsel, 0); } break;
+        case S4k:    { Struct4k *d    = mseq[i]; keyval = d->keyval; seq = d->seq; size = topic_payload_size (topicsel, 0); } break;
+        case S32k:   { Struct32k *d   = mseq[i]; keyval = d->keyval; seq = d->seq; size = topic_payload_size (topicsel, 0); } break;
       }
       (void) check_eseq (&eseq_admin, seq, keyval, size, iseq[i].publication_handle, tdelta);
       if (iseq[i].source_timestamp & 1)
@@ -1265,7 +1330,7 @@ static void free_ppant (void *vpp)
   free (pp);
 }
 
-static void participant_data_listener (dds_entity_t rd, void *arg)
+static void async_participant_data_listener (dds_entity_t rd, void *arg)
 {
   dds_sample_info_t info;
   void *msg = NULL;
@@ -1373,14 +1438,14 @@ static void participant_data_listener (dds_entity_t rd, void *arg)
   }
 }
 
-static void endpoint_matched_listener (uint32_t match_mask, dds_entity_t rd_epinfo, dds_instance_handle_t remote_endpoint)
+static void async_endpoint_matched_listener (uint32_t match_mask, dds_entity_t rd_epinfo, dds_instance_handle_t remote_endpoint)
 {
   dds_sample_info_t info;
   void *msg = NULL;
   int32_t n;
 
   /* update participant data so this remote endpoint's participant will be known */
-  participant_data_listener (rd_participants, NULL);
+  async_participant_data_listener (rd_participants, NULL);
 
   /* FIXME: implement the get_matched_... interfaces so there's no need for keeping a reader
      (and having to GC it, which I'm skipping here ...) */
@@ -1438,7 +1503,7 @@ static char *match_mask_to_string (char *buf, size_t size, uint32_t mask)
   return buf;
 }
 
-static void subscription_matched_listener (dds_entity_t rd, const dds_subscription_matched_status_t status, void *arg)
+static void async_subscription_matched_listener (dds_entity_t rd, const dds_subscription_matched_status_t status, void *arg)
 {
   /* this only works because the listener is called for every match; but I don't think that is something the
      spec guarantees, and I don't think Cyclone should guarantee that either -- and if it isn't guaranteed
@@ -1448,11 +1513,11 @@ static void subscription_matched_listener (dds_entity_t rd, const dds_subscripti
   {
     uint32_t mask = (uint32_t) (uintptr_t) arg;
     //printf ("[%"PRIdPID"] subscription match: %s\n", ddsrt_getpid (), match_mask1_to_string (mask));
-    endpoint_matched_listener (mask, rd_publications, status.last_publication_handle);
+    async_endpoint_matched_listener (mask, rd_publications, status.last_publication_handle);
   }
 }
 
-static void publication_matched_listener (dds_entity_t wr, const dds_publication_matched_status_t status, void *arg)
+static void async_publication_matched_listener (dds_entity_t wr, const dds_publication_matched_status_t status, void *arg)
 {
   /* this only works because the listener is called for every match; but I don't think that is something the
      spec guarantees, and I don't think Cyclone should guarantee that either -- and if it isn't guaranteed
@@ -1462,24 +1527,33 @@ static void publication_matched_listener (dds_entity_t wr, const dds_publication
   {
     uint32_t mask = (uint32_t) (uintptr_t) arg;
     //printf ("[%"PRIdPID"] publication match: %s\n", ddsrt_getpid (), match_mask1_to_string (mask));
-    endpoint_matched_listener (mask, rd_subscriptions, status.last_subscription_handle);
+    async_endpoint_matched_listener (mask, rd_subscriptions, status.last_subscription_handle);
   }
+}
+
+static void participant_data_listener (dds_entity_t rd, void *arg)
+{
+  async_listener_enqueue_data_available (async_listener, async_participant_data_listener, rd, arg);
+}
+
+static void subscription_matched_listener (dds_entity_t rd, const dds_subscription_matched_status_t status, void *arg)
+{
+  async_listener_enqueue_subscription_matched (async_listener, async_subscription_matched_listener, rd, status, arg);
+}
+
+static void publication_matched_listener (dds_entity_t wr, const dds_publication_matched_status_t status, void *arg)
+{
+  async_listener_enqueue_publication_matched (async_listener, async_publication_matched_listener, wr, status, arg);
 }
 
 static void set_data_available_listener (dds_entity_t rd, const char *rd_name, dds_on_data_available_fn fn, void *arg)
 {
-  /* This convoluted code is so that we leave all listeners unchanged, except the
-     data_available one.  There is no real need for these complications, but it is
-     a nice exercise. */
+  /* Update data available listener leaving the others untouched. */
   dds_listener_t *listener = dds_create_listener (arg);
   dds_return_t rc;
-  dds_lset_data_available (listener, fn);
-  dds_listener_t *tmplistener = dds_create_listener (NULL);
-  if ((rc = dds_get_listener (rd, tmplistener)) < 0)
+  if ((rc = dds_get_listener (rd, listener)) < 0)
     error2 ("dds_get_listener(%s) failed: %d\n", rd_name, (int) rc);
-  dds_merge_listener (listener, tmplistener);
-  dds_delete_listener (tmplistener);
-
+  dds_lset_data_available_arg (listener, fn, arg, true);
   if ((rc = dds_set_listener (rd, listener)) < 0)
     error2 ("dds_set_listener(%s) failed: %d\n", rd_name, (int) rc);
   dds_delete_listener (listener);
@@ -1713,6 +1787,10 @@ OPTIONS:\n\
                         K32  seq num, key value, array of 24 octets\n\
                         K256 seq num, key value, array of 248 octets\n\
                         OU   seq num\n\
+     S16|S256|S4k|S32k  S16  keyed, 16 octets, int64 junk, seq#, key\n\
+                        S256 keyed, 16 * S16, int64 junk, seq#, key\n\
+                        S4k  keyed, 16 * S256, int64 junk, seq#, key\n\
+                        S32k keyed, 4 * S4k, int64 junk, seq#, key\n\
   -n N                number of key values to use for data (only for\n\
                       topics with a key value)\n\
   -u                  best-effort instead of reliable\n\
@@ -2088,6 +2166,10 @@ int main (int argc, char *argv[])
         else if (strcmp (optarg, "OU") == 0) topicsel = OU;
         else if (strcmp (optarg, "UK16") == 0) topicsel = UK16;
         else if (strcmp (optarg, "UK1024") == 0) topicsel = UK1024;
+        else if (strcmp (optarg, "S16") == 0) topicsel = S16;
+        else if (strcmp (optarg, "S256") == 0) topicsel = S256;
+        else if (strcmp (optarg, "S4k") == 0) topicsel = S4k;
+        else if (strcmp (optarg, "S32k") == 0) topicsel = S32k;
         else error3 ("-T %s: unknown topic\n", optarg);
         break;
       case 'Q': {
@@ -2161,6 +2243,9 @@ int main (int argc, char *argv[])
 
   pubstat_hist = hist_new (30, 1000, 0);
 
+  if ((async_listener = async_listener_new ()) == NULL || !async_listener_start (async_listener))
+    error2 ("failed to start asynchronous listener thread\n");
+
   qos = dds_create_qos ();
   /* set user data: magic cookie, whether we have a reader for the Data topic
      (all other endpoints always exist), pid and hostname */
@@ -2205,6 +2290,10 @@ int main (int argc, char *argv[])
       case OU:     tp_suf = "OU";     tp_desc = &OneULong_desc; break;
       case UK16:   tp_suf = "UK16";   tp_desc = &Unkeyed16_desc; break;
       case UK1024: tp_suf = "UK1024"; tp_desc = &Unkeyed1024_desc; break;
+      case S16:    tp_suf = "S16";    tp_desc = &Struct16_desc; break;
+      case S256:   tp_suf = "S256";   tp_desc = &Struct256_desc; break;
+      case S4k:    tp_suf = "S4k";    tp_desc = &Struct4k_desc; break;
+      case S32k:   tp_suf = "S32k";   tp_desc = &Struct32k_desc; break;
     }
     snprintf (tpname_data, sizeof (tpname_data), "DDSPerf%cData%s", reliable ? 'R' : 'U', tp_suf);
     snprintf (tpname_ping, sizeof (tpname_ping), "DDSPerf%cPing%s", reliable ? 'R' : 'U', tp_suf);
@@ -2239,8 +2328,9 @@ int main (int argc, char *argv[])
   dds_set_listener (rd_participants, listener);
   dds_delete_listener (listener);
   /* then there is the matter of data arriving prior to setting the listener ... this state
-     of affairs is undoubtedly a bug */
-  participant_data_listener (rd_participants, NULL);
+     of affairs is undoubtedly a bug; call the "asynchronous" one synchronously (this is an
+     application thread anyway) */
+  async_participant_data_listener (rd_participants, NULL);
 
   /* stats writer always exists, reader only when we were requested to collect & print stats */
   qos = dds_create_qos ();
@@ -2297,20 +2387,12 @@ int main (int argc, char *argv[])
      it and futhermore eagerly creating the pong writers means we can do more
      checking.  */
   {
-    /* participant listener should have already been called for "dp", so we
-       can simply look up the details on ourself to get at the GUID of the
-       participant */
+    dds_guid_t ppguid;
+    if ((rc = dds_get_guid (dp, &ppguid)) < 0)
+      error2 ("dds_get_guid(participant) failed: %d\n", (int) rc);
     struct guidstr guidstr;
-    struct ppant *pp;
+    make_guidstr (&guidstr, &ppguid);
     dds_entity_t sub_pong;
-    ddsrt_mutex_lock (&disc_lock);
-    if ((pp = ddsrt_avl_lookup (&ppants_td, &ppants, &dp_handle)) == NULL)
-    {
-      printf ("participant %"PRIx64" (self) not found\n", dp_handle);
-      exit (2);
-    }
-    make_guidstr (&guidstr, &pp->guid);
-    ddsrt_mutex_unlock (&disc_lock);
     dds_qos_t *subqos = dds_create_qos ();
     dds_qset_partition1 (subqos, guidstr.str);
     if ((sub_pong = dds_create_subscriber (dp, subqos, NULL)) < 0)
@@ -2442,9 +2524,15 @@ int main (int argc, char *argv[])
   signal (SIGINT, signal_handler);
 #elif !DDSRT_WITH_FREERTOS
   sigemptyset (&sigset);
+#ifdef __APPLE__
+  DDSRT_WARNING_GNUC_OFF(sign-conversion)
+#endif
   sigaddset (&sigset, SIGHUP);
   sigaddset (&sigset, SIGINT);
   sigaddset (&sigset, SIGTERM);
+#ifdef __APPLE__
+  DDSRT_WARNING_GNUC_ON(sign-conversion)
+#endif
   sigprocmask (SIG_BLOCK, &sigset, &osigset);
   ddsrt_thread_create (&sigtid, "sigthread", &attr, sigthread, &sigset);
 #if defined __APPLE__ || defined __linux
@@ -2622,6 +2710,13 @@ err_minmatch_wait:
   subthread_arg_fini (&subarg_ping);
   subthread_arg_fini (&subarg_pong);
   dds_delete (dp);
+
+  // only shutdown async listener once the participant is gone: that's
+  // how we get rid of the dynamically created pong writers, and those
+  // have a publication_matched listener.
+  async_listener_stop (async_listener);
+  async_listener_free (async_listener);
+
   ddsrt_mutex_destroy (&disc_lock);
   ddsrt_mutex_destroy (&pongwr_lock);
   ddsrt_mutex_destroy (&pongstat_lock);
