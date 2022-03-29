@@ -15,15 +15,15 @@
 #include "dds/features.h"
 
 #include "dds/ddsc/dds_public_qosdefs.h"
-/*XXX*/
 #include "dds/ddsi/q_protocol.h"
 #include "dds/ddsi/q_rtps.h"
-/*XXX*/
 #include "dds/ddsi/q_log.h"
 
 #if defined (__cplusplus)
 extern "C" {
 #endif
+
+struct ddsi_typeinfo;
 
 typedef struct ddsi_octetseq {
   uint32_t length;
@@ -230,6 +230,15 @@ typedef struct dds_type_consistency_enforcement_qospolicy {
 
 typedef uint32_t dds_locator_mask_t;
 
+typedef struct dds_data_representation_id_seq {
+  uint32_t n;
+  dds_data_representation_id_t *ids;
+} dds_data_representation_id_seq_t;
+
+typedef struct dds_data_representation_qospolicy {
+  dds_data_representation_id_seq_t value;
+} dds_data_representation_qospolicy_t;
+
 /***/
 
 /* Qos Present bit indices */
@@ -262,14 +271,15 @@ typedef uint32_t dds_locator_mask_t;
 #define QP_CYCLONE_IGNORELOCAL               ((uint64_t)1 << 30)
 #define QP_PROPERTY_LIST                     ((uint64_t)1 << 31)
 #define QP_TYPE_CONSISTENCY_ENFORCEMENT      ((uint64_t)1 << 32)
-#define QP_CYCLONE_TYPE_INFORMATION          ((uint64_t)1 << 33)
+#define QP_TYPE_INFORMATION                  ((uint64_t)1 << 33)
 #define QP_LOCATOR_MASK                      ((uint64_t)1 << 34)
+#define QP_DATA_REPRESENTATION               ((uint64_t)1 << 35)
 
 /* Partition QoS is not RxO according to the specification (DDS 1.2,
    section 7.1.3), but communication will not take place unless it
    matches. Same for topic and type.  Relaxed qos matching is a bit of
    a weird one, but it affects matching, so ... */
-#define QP_RXO_MASK (QP_DURABILITY | QP_PRESENTATION | QP_DEADLINE | QP_LATENCY_BUDGET | QP_OWNERSHIP | QP_LIVELINESS | QP_RELIABILITY | QP_DESTINATION_ORDER)
+#define QP_RXO_MASK (QP_DURABILITY | QP_PRESENTATION | QP_DEADLINE | QP_LATENCY_BUDGET | QP_OWNERSHIP | QP_LIVELINESS | QP_RELIABILITY | QP_DESTINATION_ORDER | QP_DATA_REPRESENTATION)
 #define QP_CHANGEABLE_MASK (QP_USER_DATA | QP_TOPIC_DATA | QP_GROUP_DATA | QP_DEADLINE | QP_LATENCY_BUDGET | QP_OWNERSHIP_STRENGTH | QP_TIME_BASED_FILTER | QP_PARTITION | QP_TRANSPORT_PRIORITY | QP_LIFESPAN | QP_ADLINK_ENTITY_FACTORY | QP_ADLINK_WRITER_DATA_LIFECYCLE | QP_ADLINK_READER_DATA_LIFECYCLE)
 #define QP_UNRECOGNIZED_INCOMPATIBLE_MASK ((uint64_t) 0)
 
@@ -288,7 +298,7 @@ struct dds_qos {
   /* xx */char *topic_name;
   /* xx */char *type_name;
 #ifdef DDS_HAS_TYPE_DISCOVERY
-  /* xx */ddsi_octetseq_t type_information;
+  /* xx */struct ddsi_typeinfo *type_information;
 #endif
   /*      PublisherQos, SubscriberQos: */
   /*xxx */dds_presentation_qospolicy_t presentation;
@@ -321,6 +331,7 @@ struct dds_qos {
   /*xxx */dds_property_qospolicy_t property;
   /*xxxR*/dds_type_consistency_enforcement_qospolicy_t type_consistency;
   /*xxxX*/dds_locator_mask_t ignore_locator_type;
+  /*xxx */dds_data_representation_qospolicy_t data_representation;
 };
 
 struct nn_xmsg;

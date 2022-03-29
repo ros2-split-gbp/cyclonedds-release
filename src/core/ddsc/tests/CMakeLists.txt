@@ -1,4 +1,5 @@
 #
+# Copyright(c) 2022 ZettaScale Technology
 # Copyright(c) 2006 to 2018 ADLINK Technology Limited and others
 #
 # This program and the accompanying materials are made available under the
@@ -12,12 +13,19 @@
 include(CUnit)
 
 idlc_generate(TARGET RoundTrip FILES RoundTrip.idl)
-idlc_generate(TARGET Space FILES Space.idl)
-idlc_generate(TARGET TypesArrayKey FILES TypesArrayKey.idl)
-idlc_generate(TARGET WriteTypes FILES WriteTypes.idl)
-idlc_generate(TARGET InstanceHandleTypes FILES InstanceHandleTypes.idl)
-idlc_generate(TARGET RWData FILES RWData.idl)
-idlc_generate(TARGET CreateWriter FILES CreateWriter.idl)
+idlc_generate(TARGET Space FILES Space.idl WARNINGS no-implicit-extensibility)
+idlc_generate(TARGET TypesArrayKey FILES TypesArrayKey.idl WARNINGS no-implicit-extensibility)
+idlc_generate(TARGET WriteTypes FILES WriteTypes.idl WARNINGS no-implicit-extensibility)
+idlc_generate(TARGET InstanceHandleTypes FILES InstanceHandleTypes.idl WARNINGS no-implicit-extensibility)
+idlc_generate(TARGET RWData FILES RWData.idl WARNINGS no-implicit-extensibility)
+idlc_generate(TARGET CreateWriter FILES CreateWriter.idl WARNINGS no-implicit-extensibility)
+idlc_generate(TARGET DataRepresentationTypes FILES DataRepresentationTypes.idl WARNINGS no-implicit-extensibility)
+idlc_generate(TARGET MinXcdrVersion FILES MinXcdrVersion.idl)
+idlc_generate(TARGET CdrStreamOptimize FILES CdrStreamOptimize.idl WARNINGS no-implicit-extensibility)
+if(ENABLE_TYPE_DISCOVERY)
+  idlc_generate(TARGET XSpace FILES XSpace.idl XSpaceEnum.idl XSpaceMustUnderstand.idl XSpaceTypeConsistencyEnforcement.idl WARNINGS no-implicit-extensibility no-inherit-appendable)
+  idlc_generate(TARGET XSpaceNoTypeInfo FILES XSpaceNoTypeInfo.idl NO_TYPE_INFO WARNINGS no-implicit-extensibility)
+endif()
 
 set(ddsc_test_sources
     "basic.c"
@@ -41,6 +49,7 @@ set(ddsc_test_sources
     "loan.c"
     "multi_sertopic.c"
     "participant.c"
+    "pp_lease_dur.c"
     "publisher.c"
     "qos.c"
     "qosmatch.c"
@@ -72,7 +81,8 @@ set(ddsc_test_sources
     "test_common.h"
     "test_common.c"
     "test_oneliner.c"
-    "test_oneliner.h")
+    "test_oneliner.h"
+    "cdrstream.c")
 
 if(ENABLE_LIFESPAN)
   list(APPEND ddsc_test_sources "lifespan.c")
@@ -83,7 +93,10 @@ if(ENABLE_DEADLINE_MISSED)
 endif()
 
 if(ENABLE_TYPE_DISCOVERY)
-  list(APPEND ddsc_test_sources "typelookup.c")
+  list(APPEND ddsc_test_sources
+    "typelookup.c"
+    "xtypes.c"
+    "data_representation.c")
 endif()
 
 if(ENABLE_TOPIC_DISCOVERY)
@@ -98,13 +111,19 @@ target_include_directories(
   "$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/src/include/>"
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../ddsc/src>"
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../ddsi/include>")
-if(iceoryx_binding_c_FOUND)
+if(ENABLE_SHM)
   target_include_directories(
     cunit_ddsc PRIVATE
     "$<BUILD_INTERFACE:$<TARGET_PROPERTY:iceoryx_binding_c::iceoryx_binding_c,INTERFACE_INCLUDE_DIRECTORIES>>")
 endif()
+
 target_link_libraries(cunit_ddsc PRIVATE
-  RoundTrip Space TypesArrayKey WriteTypes InstanceHandleTypes RWData CreateWriter ddsc)
+  RoundTrip Space TypesArrayKey WriteTypes InstanceHandleTypes RWData CreateWriter DataRepresentationTypes MinXcdrVersion CdrStreamOptimize ddsc)
+
+if(ENABLE_TYPE_DISCOVERY)
+  target_link_libraries(cunit_ddsc PRIVATE
+  XSpace XSpaceNoTypeInfo)
+endif()
 
 # Setup environment for config-tests
 get_test_property(CUnit_ddsc_config_simple_udp ENVIRONMENT CUnit_ddsc_config_simple_udp_env)
@@ -132,7 +151,7 @@ target_include_directories(
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../ddsc/src>"
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../ddsi/include>")
 
-if(iceoryx_binding_c_FOUND)
+if(ENABLE_SHM)
   target_include_directories(
     oneliner PRIVATE
     "$<BUILD_INTERFACE:$<TARGET_PROPERTY:iceoryx_binding_c::iceoryx_binding_c,INTERFACE_INCLUDE_DIRECTORIES>>")
@@ -143,8 +162,9 @@ target_link_libraries(oneliner PRIVATE RoundTrip Space ddsc)
 # Iceoryx itself isn't really supported yet on Windows, so it
 # better not be part of the tests.  That also saves us from
 # having to figure out now how to start/stop RouDi on Windows.
-if(iceoryx_binding_c_FOUND AND NOT WIN32)
-  idlc_generate(TARGET Array100 FILES Array100.idl)
+if(ENABLE_SHM AND NOT DEFINED ENV{COLCON})
+  idlc_generate(TARGET Array100 FILES Array100.idl WARNINGS no-implicit-extensibility)
+  idlc_generate(TARGET DynamicData FILES DynamicData.idl WARNINGS no-implicit-extensibility)
 
   add_cunit_executable(cunit_ddsc_iox
     "iceoryx.c"
@@ -157,7 +177,20 @@ if(iceoryx_binding_c_FOUND AND NOT WIN32)
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../ddsi/include>"
     "$<BUILD_INTERFACE:$<TARGET_PROPERTY:iceoryx_binding_c::iceoryx_binding_c,INTERFACE_INCLUDE_DIRECTORIES>>")
 
-  target_link_libraries(cunit_ddsc_iox PRIVATE RoundTrip Space Array100 ddsc)
+  target_link_libraries(cunit_ddsc_iox PRIVATE RoundTrip Space Array100 DynamicData ddsc)
+
+  add_cunit_executable(cunit_ddsc_shm_serialization
+    "test_shm_serialization.c"
+    "test_util.c"
+    "test_util.h")
+  target_include_directories(
+    cunit_ddsc_shm_serialization PRIVATE
+    "$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/src/include/>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../ddsc/src>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../ddsi/include>"
+    "$<BUILD_INTERFACE:$<TARGET_PROPERTY:iceoryx_binding_c::iceoryx_binding_c,INTERFACE_INCLUDE_DIRECTORIES>>")
+
+  target_link_libraries(cunit_ddsc_shm_serialization PRIVATE RoundTrip Space DynamicData ddsc)
 
   # We need to start RouDi, so we need to find it
   find_program(ICEORYX_ROUDI iox-roudi REQUIRED)
@@ -196,14 +229,18 @@ kill -0 `cat ctest_fixture_iox_roudi.pid`")
   # SIGTERM should suffice for stopping RouDi
   add_test(NAME stop_roudi COMMAND bash -c "kill `cat ctest_fixture_iox_roudi.pid` ; cat ctest_fixture_iox_roudi.output")
 
-  set_tests_properties(CUnit_ddsc_iceoryx_one_writer PROPERTIES FIXTURES_REQUIRED iox)
-  set_tests_properties(CUnit_ddsc_iceoryx_return_loan PROPERTIES FIXTURES_REQUIRED iox)
   set_tests_properties(start_roudi PROPERTIES FIXTURES_SETUP iox)
   set_tests_properties(stop_roudi PROPERTIES FIXTURES_CLEANUP iox)
-  set_tests_properties(
-    CUnit_ddsc_iceoryx_one_writer
-    CUnit_ddsc_iceoryx_return_loan
-    start_roudi
-    stop_roudi
-    PROPERTIES RESOURCE_LOCK iox_lock)
+  set_tests_properties(start_roudi stop_roudi PROPERTIES RESOURCE_LOCK iox_lock)
+
+  foreach(t
+      iceoryx_one_writer
+      iceoryx_one_writer_dynsize
+      iceoryx_return_loan
+      shm_serialization_get_serialized_size
+      shm_serialization_serialize_into
+      shm_serialization_transmit_dynamic_type)
+    set_tests_properties(CUnit_ddsc_${t} PROPERTIES FIXTURES_REQUIRED iox)
+    set_tests_properties(CUnit_ddsc_${t} PROPERTIES RESOURCE_LOCK iox_lock)
+  endforeach()
 endif()

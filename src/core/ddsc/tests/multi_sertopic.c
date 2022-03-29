@@ -81,7 +81,7 @@ static const dds_topic_descriptor_t type_seq_desc =
 {
   .m_size = sizeof (struct type_seq),
   .m_align = sizeof (void *),
-  .m_flagset = DDS_TOPIC_NO_OPTIMIZE | DDS_TOPIC_DISABLE_TYPECHECK,
+  .m_flagset = DDS_TOPIC_NO_OPTIMIZE,
   .m_nkeys = 0,
   .m_typename = "multi_sertype_type",
   .m_keys = NULL,
@@ -97,7 +97,7 @@ static const dds_topic_descriptor_t type_ary_desc =
 {
   .m_size = sizeof (struct type_ary),
   .m_align = 4u,
-  .m_flagset = DDS_TOPIC_NO_OPTIMIZE | DDS_TOPIC_DISABLE_TYPECHECK,
+  .m_flagset = DDS_TOPIC_NO_OPTIMIZE,
   .m_nkeys = 0,
   .m_typename = "multi_sertype_type",
   .m_keys = NULL,
@@ -113,7 +113,7 @@ static const dds_topic_descriptor_t type_uni_desc =
 {
   .m_size = sizeof (struct type_uni),
   .m_align = sizeof (void *),
-  .m_flagset = DDS_TOPIC_NO_OPTIMIZE | DDS_TOPIC_CONTAINS_UNION | DDS_TOPIC_DISABLE_TYPECHECK,
+  .m_flagset = DDS_TOPIC_NO_OPTIMIZE | DDS_TOPIC_CONTAINS_UNION,
   .m_nkeys = 0,
   .m_typename = "multi_sertype_type",
   .m_keys = NULL,
@@ -144,7 +144,7 @@ static const dds_topic_descriptor_t type_ary1_desc =
 {
   .m_size = sizeof (struct type_ary),
   .m_align = 1u,
-  .m_flagset = DDS_TOPIC_NO_OPTIMIZE | DDS_TOPIC_DISABLE_TYPECHECK,
+  .m_flagset = DDS_TOPIC_NO_OPTIMIZE,
   .m_nkeys = 0,
   .m_typename = "multi_sertype_type",
   .m_keys = NULL,
@@ -160,7 +160,7 @@ static const dds_topic_descriptor_t type_ary2_desc =
 {
   .m_size = sizeof (struct type_ary),
   .m_align = 2u,
-  .m_flagset = DDS_TOPIC_NO_OPTIMIZE | DDS_TOPIC_DISABLE_TYPECHECK,
+  .m_flagset = DDS_TOPIC_NO_OPTIMIZE,
   .m_nkeys = 0,
   .m_typename = "multi_sertype_type",
   .m_keys = NULL,
@@ -309,13 +309,13 @@ static void waitfor_or_reset_fastpath (dds_entity_t rdhandle, bool fastpath, siz
   CU_ASSERT_FATAL (wrcount == nwr);
 }
 
-static struct ddsi_sertype *get_sertype_from_reader (dds_entity_t reader)
+static const struct ddsi_sertype *get_sertype_from_reader (dds_entity_t reader)
 {
   /* not refcounting the sertopic: so this presumes it is kept alive for other reasons */
   dds_return_t rc;
   struct dds_entity *x;
   struct dds_reader *rd;
-  struct ddsi_sertype *sertype;
+  const struct ddsi_sertype *sertype;
   rc = dds_entity_pin (reader, &x);
   CU_ASSERT_FATAL (rc == DDS_RETCODE_OK);
   CU_ASSERT_FATAL (dds_entity_kind (x) == DDS_KIND_READER);

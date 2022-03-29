@@ -10,7 +10,7 @@
 # SPDX-License-Identifier: EPL-2.0 OR BSD-3-Clause
 #
 project(helloword LANGUAGES C)
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.10)
 
 if(NOT TARGET CycloneDDS::ddsc)
   # Find the CycloneDDS package.
@@ -21,7 +21,7 @@ endif()
 # that will supply a library target related the the given idl file.
 # In short, it takes the idl file, generates the source files with
 # the proper data types and compiles them into a library.
-idlc_generate(TARGET HelloWorldData_lib FILES "HelloWorldData.idl")
+idlc_generate(TARGET HelloWorldData_lib FILES "HelloWorldData.idl" WARNINGS no-implicit-extensibility)
 
 # Both executables have only one related source file.
 add_executable(HelloworldPublisher publisher.c)

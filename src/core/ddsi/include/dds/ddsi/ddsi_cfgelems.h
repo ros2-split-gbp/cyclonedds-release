@@ -1,4 +1,5 @@
 /*
+ * Copyright(c) 2022 ZettaScale Technology
  * Copyright(c) 2020 ADLINK Technology Limited and others
  *
  * This program and the accompanying materials are made available under the
@@ -14,20 +15,73 @@
 
 #include "dds/features.h"
 
-static struct cfgelem general_cfgelems[] = {
-  STRING("NetworkInterfaceAddress", NULL, 1, "auto",
-    MEMBER(networkAddressString),
-    FUNCTIONS(0, uf_networkAddress, ff_free, pf_networkAddress),
+
+static struct cfgelem network_interface_attributes[] = {
+  STRING("autodetermine", NULL, 1, "false",
+    MEMBEROF(ddsi_config_network_interface_listelem, cfg.automatic),
+    FUNCTIONS(0,  uf_boolean, 0, pf_boolean),
     DESCRIPTION(
-      "<p>This element specifies the preferred network interface for use by "
-      "Cyclone DDS. The preferred network interface determines the IP address "
-      "that Cyclone DDS advertises in the discovery protocol (but see also "
-      "General/ExternalNetworkAddress), and is also the only interface over "
-      "which multicasts are transmitted. The interface can be identified by "
-      "its IP address, network interface name or network portion of the "
-      "address. If the value \"auto\" is entered here, Cyclone DDS will "
-      "select what it considers the most suitable interface.</p>"
+      "<p>If set to \"true\" an interface is automatically selected. Specifying "
+      "a name or an address when automatic is set is considered an error.</p>"
     )),
+  STRING("name", NULL, 1, "",
+    MEMBEROF(ddsi_config_network_interface_listelem, cfg.name),
+    FUNCTIONS(0, uf_string, ff_free, pf_string),
+    DESCRIPTION(
+      "<p>This attribute specifies the name of the interface. </p>"
+    )),
+  STRING("address", NULL, 1, "",
+    MEMBEROF(ddsi_config_network_interface_listelem, cfg.address),
+    FUNCTIONS(0, uf_string, ff_free, pf_string),
+    DESCRIPTION(
+      "<p>This attribute specifies the address of the interface. With ipv4 allows "
+      " matching on network part if host part is set to zero. </p>"
+    )),
+  STRING("priority", NULL, 1, "default",
+    MEMBEROF(ddsi_config_network_interface_listelem, cfg.priority),
+    FUNCTIONS(0, uf_maybe_int32, 0, pf_maybe_int32),
+    DESCRIPTION(
+      "<p>This attribute specifies the interface priority (decimal integer or "
+      "<i>default</i>). The default value for loopback interfaces is 2, for all "
+      "other interfaces it is 0.</p>"
+    )),
+  BOOL("prefer_multicast", NULL, 1, "false",
+    MEMBEROF(ddsi_config_network_interface_listelem, cfg.prefer_multicast),
+    FUNCTIONS(0, uf_boolean, 0, pf_boolean),
+    DESCRIPTION(
+      "<p>When false (default) Cyclone DDS uses unicast for data whenever "
+      "there a single unicast suffices. Setting this to true makes it prefer "
+      "multicasting data, falling back to unicast only when no multicast "
+      "is available.</p>"
+    )),
+  STRING("multicast", NULL, 1, "default",
+    MEMBEROF(ddsi_config_network_interface_listelem, cfg.multicast),
+    FUNCTIONS(0, uf_boolean_default, 0, pf_boolean_default),
+    DESCRIPTION(
+      "<p>This attribute specifies the whether the interface should use multicast. "
+      "On its default setting 'default' it will use the value as return by the operating "
+      "system. If set to 'true' the interface will be assumed to be multicast capable "
+      "even when the interface flags returned by the operating system state it is not "
+      "(this provides a workaround for some platforms). If set to 'false' the interface "
+      "will never be used for multicast.")
+  ),
+  END_MARKER
+};
+
+
+static struct cfgelem interfaces_cfgelems[] = {
+  GROUP("NetworkInterface", NULL, network_interface_attributes, INT_MAX,
+    MEMBER(network_interfaces),
+    FUNCTIONS(if_network_interfaces, 0, 0, 0),
+    DESCRIPTION(
+      "<p>This element defines a network interface. You can set autodetermine=\"true\" "
+      "to autoselect the interface CycloneDDS deems to be the highest quality. If "
+      "autodetermine=\"false\" (the default), you must specify the name and/or address "
+      "attribute. If you specify both they must match the same interface.</p>")),
+  END_MARKER
+};
+
+static struct cfgelem general_cfgelems[] = {
   STRING("MulticastRecvNetworkInterfaceAddresses", NULL, 1, "preferred",
     MEMBER(networkRecvAddressStrings),
     FUNCTIONS(0, uf_networkAddresses, ff_networkAddresses, pf_networkAddresses),
@@ -43,7 +97,7 @@ static struct cfgelem general_cfgelems[] = {
       "</li>\n"
       "<li><i>preferred</i>: "
       "listen for multicasts on the preferred interface "
-      "(General/NetworkInterfaceAddress); or"
+      "(General/Interface/NetworkInterface with highest priority); or"
       "</li>\n"
       "<li><i>none</i>: "
       "does not listen for multicasts on any interface; or"
@@ -56,6 +110,30 @@ static struct cfgelem general_cfgelems[] = {
       "interface is a link-local address, \"all\" is treated as a synonym for "
       "\"preferred\" and a comma-separated list is treated as \"preferred\" "
       "if it contains the preferred interface and as \"none\" if not.</p>"
+    )),
+  GROUP("Interfaces", interfaces_cfgelems, NULL, 1,
+    NOMEMBER,
+    NOFUNCTIONS,
+    DESCRIPTION(
+      "<p>This element specifies the network interfaces for use by Cyclone "
+      "DDS. Multiple interfaces can be specified with an assigned priority. "
+      "The list in use will be sorted by priority. If interfaces have an "
+      "equal priority the specification order will be preserved.</p>"
+    )),
+  STRING(DEPRECATED("NetworkInterfaceAddress"), NULL, 1, "auto",
+    MEMBER(depr_networkAddressString),
+    FUNCTIONS(0, uf_networkAddress, ff_free, pf_networkAddress),
+    DESCRIPTION(
+      "<p>This configuration option is deprecated. Use General/Interfaces "
+      " instead. "
+      " This element specifies the preferred network interface for use by "
+      "Cyclone DDS. The preferred network interface determines the IP address "
+      "that Cyclone DDS advertises in the discovery protocol (but see also "
+      "General/ExternalNetworkAddress), and is also the only interface over "
+      "which multicasts are transmitted. The interface can be identified by "
+      "its IP address, network interface name or network portion of the "
+      "address. If the value \"auto\" is entered here, Cyclone DDS will "
+      "select what it considers the most suitable interface.</p>"
     )),
   STRING("ExternalNetworkAddress", NULL, 1, "auto",
     MEMBER(externalAddressString),
@@ -110,11 +188,12 @@ static struct cfgelem general_cfgelems[] = {
       "<p>\"default\" maps on spdp if the network is a WiFi network, on true "
       "if it is a wired network</p>"),
     VALUES("false","spdp","asm","ssm","true")),
-  BOOL("PreferMulticast", NULL, 1, "false",
-    MEMBER(prefer_multicast),
+  BOOL(DEPRECATED("PreferMulticast"), NULL, 1, "false",
+    MEMBER(depr_prefer_multicast),
     FUNCTIONS(0, uf_boolean, 0, pf_boolean),
     DESCRIPTION(
-      "<p>When false (default) Cyclone DDS uses unicast for data whenever "
+      "<p>Deprecated, use Interfaces/NetworkInterface[@multicast_cost] instead. "
+      "When false (default) Cyclone DDS uses unicast for data whenever "
       "there a single unicast suffices. Setting this to true makes it prefer "
       "multicasting data, falling back to unicast only when no multicast "
       "address is available.</p>")),
@@ -628,6 +707,7 @@ static struct cfgelem channel_cfgelems[] = {
       "a leaky bucket scheme. The default value \"inf\" means Cyclone DDS imposes "
       "no limitation, the underlying operating system and hardware will "
       "likely limit the maximum transmit rate.</p>")
+    BEHIND_FLAG("DDS_HAS_BANDWIDTH_LIMITING")
     UNIT("bandwidth")),
   STRING("AuxiliaryBandwidthLimit", NULL, 1, "inf",
     MEMBEROF(ddsi_config_channel_listelem, auxiliary_bandwidth_limit),
@@ -659,7 +739,9 @@ static struct cfgelem channel_cfgelems[] = {
       "traffic.\n"
       "When an application is run without Administrative priveleges then "
       "only the diffserv value of 0, 8, 40 or 56 is allowed.</p>"
-    )),
+    ),
+    BEHIND_FLAG("DDS_HAS_NETWORK_CHANNELS")
+  ),
   END_MARKER
 };
 
@@ -1011,6 +1093,50 @@ static struct cfgelem multiple_recv_threads_attrs[] = {
   END_MARKER
 };
 
+static struct cfgelem sock_rcvbuf_size_attrs[] = {
+  STRING("min", NULL, 1, "default",
+    MEMBER(socket_rcvbuf_size.min),
+    FUNCTIONS(0, uf_maybe_memsize, 0, pf_maybe_memsize),
+    DESCRIPTION(
+      "<p>This sets the minimum acceptable socket receive buffer size, "
+      "with the special value \"default\" indicating that whatever is "
+      "available is acceptable.</p>"),
+    UNIT("memsize")),
+  STRING("max", NULL, 1, "default",
+    MEMBER(socket_rcvbuf_size.max),
+    FUNCTIONS(0, uf_maybe_memsize, 0, pf_maybe_memsize),
+    DESCRIPTION(
+      "<p>This sets the size of the socket receive buffer to request, "
+      "with the special value of \"default\" indicating that it should "
+      "try to satisfy the minimum buffer size. If both are at \"default\", "
+      "it will request 1MiB and accept anything. If the maximum is set "
+      "to less than the minimum, it is ignored.</p>"),
+    UNIT("memsize")),
+  END_MARKER
+};
+
+static struct cfgelem sock_sndbuf_size_attrs[] = {
+  STRING("min", NULL, 1, "64 KiB",
+    MEMBER(socket_sndbuf_size.min),
+    FUNCTIONS(0, uf_maybe_memsize, 0, pf_maybe_memsize),
+    DESCRIPTION(
+      "<p>This sets the minimum acceptable socket send buffer size, "
+      "with the special value \"default\" indicating that whatever is "
+      "available is acceptable.</p>"),
+    UNIT("memsize")),
+  STRING("max", NULL, 1, "default",
+    MEMBER(socket_sndbuf_size.max),
+    FUNCTIONS(0, uf_maybe_memsize, 0, pf_maybe_memsize),
+    DESCRIPTION(
+      "<p>This sets the size of the socket send buffer to request, "
+      "with the special value of \"default\" indicating that it should "
+      "try to satisfy the minimum buffer size. If both are at \"default\", "
+      "it will use whatever is the system default. If the maximum is set "
+      "to less than the minimum, it is ignored.</p>"),
+    UNIT("memsize")),
+  END_MARKER
+};
+
 static struct cfgelem internal_cfgelems[] = {
   MOVED("MaxMessageSize", "CycloneDDS/Domain/General/MaxMessageSize"),
   MOVED("FragmentSize", "CycloneDDS/Domain/General/FragmentSize"),
@@ -1173,12 +1299,7 @@ static struct cfgelem internal_cfgelems[] = {
       "<p>This settings limits the maximum number of samples queued for "
       "retransmission.</p>"
     )),
-  STRING("LeaseDuration", NULL, 1, "10 s",
-    MEMBER(lease_duration),
-    FUNCTIONS(0, uf_duration_ms_1hr, 0, pf_duration),
-    DESCRIPTION(
-      "<p>This setting controls the default participant lease duration.<p>"),
-    UNIT("duration")),
+  MOVED("LeaseDuration", "CycloneDDS/Domain/Discovery/LeaseDuration"),
   STRING("WriterLingerDuration", NULL, 1, "1 s",
     MEMBER(writer_linger_duration),
     FUNCTIONS(0, uf_duration_ms_1hr, 0, pf_duration),
@@ -1187,29 +1308,31 @@ static struct cfgelem internal_cfgelems[] = {
       "deletion of a reliable writer with unacknowledged data in its history "
       "will be postponed to provide proper reliable transmission.<p>"),
     UNIT("duration")),
-  STRING("MinimumSocketReceiveBufferSize", NULL, 1, "default",
-    MEMBER(socket_min_rcvbuf_size),
-    FUNCTIONS(0, uf_maybe_memsize, 0, pf_maybe_memsize),
+  MOVED("MinimumSocketReceiveBufferSize", "CycloneDDS/Domain/Internal/SocketReceiveBufferSize[@min]"),
+  MOVED("MinimumSocketSendBufferSize", "CycloneDDS/Domain/Internal/SocketSendBufferSize[@min]"),
+  GROUP("SocketReceiveBufferSize", NULL, sock_rcvbuf_size_attrs, 1,
+    NOMEMBER,
+    NOFUNCTIONS,
     DESCRIPTION(
-      "<p>This setting controls the minimum size of socket receive buffers. "
+      "<p>The settings in this element control the size of the socket receive buffers. "
       "The operating system provides some size receive buffer upon creation "
       "of the socket, this option can be used to increase the size of the "
       "buffer beyond that initially provided by the operating system. If the "
-      "buffer size cannot be increased to the specified size, an error is "
+      "buffer size cannot be increased to the requested minimum size, an error is "
       "reported.</p>\n"
-      "<p>The default setting is the word \"default\", which means Cyclone DDS "
-      "will attempt to increase the buffer size to 1MB, but will silently "
-      "accept a smaller buffer should that attempt fail.</p>"),
-    UNIT("memsize")),
-  STRING("MinimumSocketSendBufferSize", NULL, 1, "64 KiB",
-    MEMBER(socket_min_sndbuf_size),
-    FUNCTIONS(0, uf_memsize, 0, pf_memsize),
+      "<p>The default setting requests a buffer size of 1MiB but accepts whatever "
+      "is available after that.</p>")),
+  GROUP("SocketSendBufferSize", NULL, sock_sndbuf_size_attrs, 1,
+    NOMEMBER,
+    NOFUNCTIONS,
     DESCRIPTION(
-      "<p>This setting controls the minimum size of socket send buffers. "
-      "This setting can only increase the size of the send buffer, if the "
-      "operating system by default creates a larger buffer, it is left "
-      "unchanged.</p>"),
-    UNIT("memsize")),
+      "<p>The settings in this element control the size of the socket send buffers. "
+      "The operating system provides some size send buffer upon creation "
+      "of the socket, this option can be used to increase the size of the "
+      "buffer beyond that initially provided by the operating system. If the "
+      "buffer size cannot be increased to the requested minimum size, an error is "
+      "reported.</p>\n"
+      "<p>The default setting requires a buffer of at least 64KiB.</p>")),
   STRING("NackDelay", NULL, 1, "100 ms",
     MEMBER(nack_delay),
     FUNCTIONS(0, uf_duration_ms_1hr, 0, pf_duration),
@@ -1266,7 +1389,9 @@ static struct cfgelem internal_cfgelems[] = {
       "Bandwidth limiting uses a leaky bucket scheme. The default value "
       "\"inf\" means Cyclone DDS imposes no limitation, the underlying operating "
       "system and hardware will likely limit the maximum transmit rate.</p>"
-    )),
+    ),
+    BEHIND_FLAG("DDS_HAS_BANDWIDTH_LIMITING")
+  ),
 #endif
   INT("DDSI2DirectMaxThreads", NULL, 1, "1",
     MEMBER(ddsi2direct_max_threads),
@@ -1353,11 +1478,12 @@ static struct cfgelem internal_cfgelems[] = {
       "(-1), this is disabled; specifying 0 means a kernel-allocated port is "
       "used; a positive number is used as the TCP port number.</p>"
     )),
-  STRING("AssumeMulticastCapable", NULL, 1, "",
-    MEMBER(assumeMulticastCapable),
+  STRING(DEPRECATED("AssumeMulticastCapable"), NULL, 1, "",
+    MEMBER(depr_assumeMulticastCapable),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
-      "<p>This element controls which network interfaces are assumed to be "
+      "<p>Deprecated, use General/Interfaces/NetworkInterface[@multicast] instead. "
+      "This element controls which network interfaces are assumed to be "
       "capable of multicasting even when the interface flags returned by the "
       "operating system state it is not (this provides a workaround for some "
       "platforms). It is a comma-separated lists of patterns (with ? and * "
@@ -1661,17 +1787,17 @@ static struct cfgelem shmem_cfgelems[] = {
     VALUES(
       "off","fatal","error","warn","info","debug","verbose"
     )),
-  INT("SubQueueCapacity", NULL, 1, "256",
-    MEMBER(sub_queue_capacity),
-    FUNCTIONS(0, uf_natint, 0, pf_int),
+  INT(DEPRECATED("SubQueueCapacity"), NULL, 1, "256",
+    NOMEMBER,
+    NOFUNCTIONS,
     DESCRIPTION("<p>Size of the history chunk queue, this is the amount of messages stored between taking from the iceoryx subscriber, exceeding this number will cause the oldest to be pushed off the queue. Should be a value between 1 and 256.</p>")),
-  INT("SubHistoryRequest", NULL, 1, "16",
-    MEMBER(sub_history_request),
-    FUNCTIONS(0, uf_natint, 0, pf_int),
+  INT(DEPRECATED("SubHistoryRequest"), NULL, 1, "16",
+    NOMEMBER,
+    NOFUNCTIONS,
     DESCRIPTION("<p>The number of messages published before subscription which will be requested by a subscriber upon subscription. Should be a value between 0 and 16.</p>")),
-  INT("PubHistoryCapacity", NULL, 1, "16",
-    MEMBER(pub_history_capacity),
-    FUNCTIONS(0, uf_natint, 0, pf_int),
+  INT(DEPRECATED("PubHistoryCapacity"), NULL, 1, "16",
+    NOMEMBER,
+    NOFUNCTIONS,
     DESCRIPTION("<p>The number of messages which will be stored on the publisher for late joining subscribers. Should be a value between 0 and 16 and be equal to or larger than SubHistoryRequest.</p>")),
   END_MARKER
 };
@@ -1723,7 +1849,7 @@ static struct cfgelem discovery_peers_cfgelems[] = {
 };
 
 static struct cfgelem discovery_cfgelems[] = {
-  STRING("Tag", NULL, 0, "",
+  STRING("Tag", NULL, 1, "",
     MEMBER(domainTag),
     FUNCTIONS(0, uf_string, ff_free, pf_string),
     DESCRIPTION(
@@ -1801,7 +1927,7 @@ static struct cfgelem discovery_cfgelems[] = {
     UNIT("duration")),
   STRING("DefaultMulticastAddress", NULL, 1, "auto",
     MEMBER(defaultMulticastAddressString),
-    FUNCTIONS(0, uf_networkAddress, 0, pf_networkAddress),
+    FUNCTIONS(0, uf_networkAddress, ff_free, pf_networkAddress),
     DESCRIPTION(
       "<p>This element specifies the default multicast address for all "
       "traffic other than participant discovery packets. It defaults to "
@@ -1817,14 +1943,22 @@ static struct cfgelem discovery_cfgelems[] = {
       "changed.</p>"
     )),
 #ifdef DDS_HAS_TOPIC_DISCOVERY
-  BOOL("EnableTopicDiscoveryEndpoints", NULL, 0, "false",
+  BOOL("EnableTopicDiscoveryEndpoints", NULL, 1, "false",
     MEMBER(enable_topic_discovery_endpoints),
     FUNCTIONS(0, uf_boolean, 0, pf_boolean),
     DESCRIPTION(
       "<p>This element controls whether the built-in endpoints for topic "
       "discovery are created and used to exchange topic discovery information.</p>"
-    )),
+    ),
+    BEHIND_FLAG("DDS_HAS_TOPIC_DISCOVERY")
+  ),
 #endif
+  STRING("LeaseDuration", NULL, 1, "10 s",
+    MEMBER(lease_duration),
+    FUNCTIONS(0, uf_duration_ms_1hr, 0, pf_duration),
+    DESCRIPTION(
+      "<p>This setting controls the default participant lease duration.<p>"),
+    UNIT("duration")),
   END_MARKER
 };
 
@@ -1924,6 +2058,8 @@ static struct cfgelem tracing_cfgelems[] = {
   END_MARKER
 };
 
+/* Multiplicity = 0 is a special for Domain/[@Id] as it has some special processing to
+   only process relevant configuration sections. */
 static struct cfgelem domain_cfgattrs[] = {
   STRING("Id", NULL, 0, "any",
     MEMBER(domainId),
@@ -1951,6 +2087,7 @@ static struct cfgelem domain_cfgelems[] = {
       "<p>This element is used to configure Cyclone DDS with the DDS Security "
       "specification plugins and settings.</p>"
     ),
+    BEHIND_FLAG("DDS_HAS_SECURITY"),
     MAXIMUM(1)), /* Security must occur at most once, but INT_MAX is required
                     because of the way its processed (for now) */
 #endif
@@ -1962,7 +2099,9 @@ static struct cfgelem domain_cfgelems[] = {
       "<p>The Partitioning element specifies Cyclone DDS network partitions and "
       "how DCPS partition/topic combinations are mapped onto the network "
       "partitions.</p>"
-    )),
+    ),
+    BEHIND_FLAG("DDS_HAS_NETWORK_PARTITIONS")
+  ),
 #endif
 #ifdef DDS_HAS_NETWORK_CHANNELS
   GROUP("Channels", channels_cfgelems, NULL, 1,
@@ -1974,7 +2113,9 @@ static struct cfgelem domain_cfgelems[] = {
       "and setting their priorities appropriately, chanenls can be used to "
       "map transport priorities to operating system scheduler priorities, "
       "ensuring system-wide end-to-end priority preservation.</p>"
-    )),
+    ),
+    BEHIND_FLAG("DDS_HAS_NETWORK_CHANNELS")
+  ),
 #endif
   GROUP("Threads", threads_cfgelems, NULL, 1,
     NOMEMBER,
@@ -1994,7 +2135,7 @@ static struct cfgelem domain_cfgelems[] = {
     NOFUNCTIONS,
     DESCRIPTION(
       "<p>The Compatibility elements allows specifying various settings "
-      "related to compatability with standards and with other DDSI "
+      "related to compatibility with standards and with other DDSI "
       "implementations.</p>"
     )),
   GROUP("Discovery", discovery_cfgelems, NULL, 1,
@@ -2037,7 +2178,9 @@ static struct cfgelem domain_cfgelems[] = {
     DESCRIPTION(
       "<p>The SSL element allows specifying various parameters related to "
       "using SSL/TLS for DDSI over TCP.</p>"
-    )),
+    ),
+    BEHIND_FLAG("DDS_HAS_SSL")
+  ),
 #endif
 #ifdef DDS_HAS_SHM
   GROUP("SharedMemory", shmem_cfgelems, NULL, 1,
@@ -2046,7 +2189,9 @@ static struct cfgelem domain_cfgelems[] = {
     DESCRIPTION(
       "<p>The Shared Memory element allows specifying various parameters "
       "related to using shared memory.</p>"
-    )),
+    ),
+    BEHIND_FLAG("DDS_HAS_SHM")
+  ),
 #endif
   END_MARKER
 };
@@ -2072,7 +2217,6 @@ static struct cfgelem root_cfgelems[] = {
   MOVED("Tracing", "CycloneDDS/Domain/Tracing"),
   MOVED("Internal|Unsupported", "CycloneDDS/Domain/Internal"),
   MOVED("TCP", "CycloneDDS/Domain/TCP"),
-  MOVED("ThreadPool", "CycloneDDS/Domain/ThreadPool"),
 #if DDS_HAS_SECURITY
   MOVED("DDSSecurity", "CycloneDDS/Domain/Security"),
 #endif

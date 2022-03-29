@@ -1,4 +1,5 @@
 /*
+ * Copyright(c) 2022 ZettaScale Technology
  * Copyright(c) 2006 to 2018 ADLINK Technology Limited and others
  *
  * This program and the accompanying materials are made available under the
@@ -24,7 +25,7 @@
 #include "dds/ddsi/q_protocol.h"
 #include "dds/ddsi/q_rtps.h"
 #include "dds/ddsi/q_misc.h"
-#include "dds/ddsi/q_config.h"
+#include "dds/ddsi/ddsi_config_impl.h"
 #include "dds/ddsi/q_log.h"
 #include "dds/ddsi/ddsi_plist.h"
 #include "dds/ddsi/q_unused.h"
@@ -50,7 +51,9 @@
 #include "dds/ddsi/q_init.h"
 #include "dds/ddsi/ddsi_threadmon.h"
 #include "dds/ddsi/ddsi_pmd.h"
+#include "dds/ddsi/ddsi_xt_typelookup.h"
 #include "dds/ddsi/ddsi_typelookup.h"
+#include "dds/ddsi/ddsi_cdrstream.h"
 
 #include "dds/ddsi/ddsi_tran.h"
 #include "dds/ddsi/ddsi_udp.h"
@@ -70,9 +73,9 @@
 #include "dds/ddsi/ddsi_security_omg.h"
 
 #ifdef DDS_HAS_SHM
+#include "dds/ddsi/ddsi_shm_transport.h"
 #include "dds/ddsrt/io.h"
 #include "iceoryx_binding_c/runtime.h"
-#include "dds/ddsi/shm_init.h"
 #endif
 
 static void add_peer_addresses (const struct ddsi_domaingv *gv, struct addrset *as, const struct ddsi_config_peer_listelem *list)
@@ -666,12 +669,12 @@ int rtps_config_prep (struct ddsi_domaingv *gv, struct cfgst *cfgst)
      free those. */
   if (cfgst != NULL)
   {
-    config_print_cfgst (cfgst, &gv->logconfig);
-    config_free_source_info (cfgst);
+    ddsi_config_print_cfgst (cfgst, &gv->logconfig);
+    ddsi_config_free_source_info (cfgst);
   }
   else
   {
-    config_print_rawconfig (&gv->config, &gv->logconfig);
+    ddsi_config_print_rawconfig (&gv->config, &gv->logconfig);
   }
   return 0;
 
@@ -834,7 +837,7 @@ static struct ddsi_sertype *make_special_type_pserop (const char *typename, size
   struct ddsi_sertype_pserop *st = ddsrt_malloc (sizeof (*st));
   memset (st, 0, sizeof (*st));
   ddsi_sertype_init (&st->c, typename, &ddsi_sertype_ops_pserop, &ddsi_serdata_ops_pserop, nops_key == 0);
-  st->native_encoding_identifier = (DDSRT_ENDIAN == DDSRT_LITTLE_ENDIAN) ? CDR_LE : CDR_BE;
+  st->encoding_format = CDR_ENC_FORMAT_PLAIN;
   st->memsize = memsize;
   st->nops = nops;
   st->ops = ops;
@@ -848,10 +851,24 @@ static struct ddsi_sertype *make_special_type_plist (const char *typename, nn_pa
   struct ddsi_sertype_plist *st = ddsrt_malloc (sizeof (*st));
   memset (st, 0, sizeof (*st));
   ddsi_sertype_init (&st->c, typename, &ddsi_sertype_ops_plist, &ddsi_serdata_ops_plist, false);
-  st->native_encoding_identifier = (DDSRT_ENDIAN == DDSRT_LITTLE_ENDIAN) ? PL_CDR_LE : PL_CDR_BE;
+  st->encoding_format = CDR_ENC_FORMAT_PL;
   st->keyparam = keyparam;
   return (struct ddsi_sertype *) st;
 }
+
+#ifdef DDS_HAS_TYPE_DISCOVERY
+/* Creates a sertype that is used for built-in type lookup readers and writers, which are using XCDR2
+   because the request/response messages contain mutable and appendable types. */
+static struct ddsi_sertype *make_special_type_cdrstream (const struct ddsi_domaingv *gv, const dds_topic_descriptor_t *desc)
+{
+  struct ddsi_sertype_default *st = ddsrt_malloc (sizeof (*st));
+  dds_return_t ret = ddsi_sertype_default_init (gv, st, desc, CDR_ENC_VERSION_2, DDS_DATA_REPRESENTATION_XCDR2);
+  assert (ret == DDS_RETCODE_OK);
+  (void) ret;
+  return (struct ddsi_sertype *) st;
+}
+#endif
+
 
 static void free_special_types (struct ddsi_domaingv *gv)
 {
@@ -884,8 +901,8 @@ static void make_special_types (struct ddsi_domaingv *gv)
   gv->sedp_writer_type = make_special_type_plist ("PublicationBuiltinTopicData", PID_ENDPOINT_GUID);
   gv->pmd_type = make_special_type_pserop ("ParticipantMessageData", sizeof (ParticipantMessageData_t), participant_message_data_nops, participant_message_data_ops, participant_message_data_nops_key, participant_message_data_ops_key);
 #ifdef DDS_HAS_TYPE_DISCOVERY
-  gv->tl_svc_request_type = make_special_type_pserop ("TypeLookup_Request", sizeof (type_lookup_request_t), typelookup_service_request_nops, typelookup_service_request_ops, 0, NULL);
-  gv->tl_svc_reply_type = make_special_type_pserop ("TypeLookup_Reply", sizeof (type_lookup_reply_t), typelookup_service_reply_nops, typelookup_service_reply_ops, 0, NULL);
+  gv->tl_svc_request_type = make_special_type_cdrstream (gv, &DDS_Builtin_TypeLookup_Request_desc);
+  gv->tl_svc_reply_type = make_special_type_cdrstream (gv, &DDS_Builtin_TypeLookup_Reply_desc);
 #endif
 #ifdef DDS_HAS_TOPIC_DISCOVERY
   if (gv->config.enable_topic_discovery_endpoints)
@@ -1047,17 +1064,6 @@ static uint32_t ddsi_sertype_hash_wrap (const void *tp)
 {
   return ddsi_sertype_hash (tp);
 }
-
-#ifdef DDS_HAS_TYPE_DISCOVERY
-static int tl_meta_equal_wrap (const void *tlm_a, const void *tlm_b)
-{
-  return ddsi_tl_meta_equal (tlm_a, tlm_b);
-}
-static uint32_t tl_meta_hash_wrap (const void *tlm)
-{
-  return ddsi_tl_meta_hash (tlm);
-}
-#endif /* DDS_HAS_TYPE_DISCOVERY */
 
 #ifdef DDS_HAS_TOPIC_DISCOVERY
 static int topic_definition_equal_wrap (const void *tpd_a, const void *tpd_b)
@@ -1384,10 +1390,19 @@ int rtps_init (struct ddsi_domaingv *gv)
         goto err_udp_tcp_init;
       gv->m_factory = ddsi_factory_find (gv, "raweth");
       break;
+    case DDSI_TRANS_NONE:
+      gv->config.publish_uc_locators = 0;
+      gv->config.enable_uc_locators = 0;
+      gv->config.participantIndex = DDSI_PARTICIPANT_INDEX_NONE;
+      gv->config.many_sockets_mode = DDSI_MSM_NO_UNICAST;
+      if (ddsi_vnet_init (gv, "dummy", INT32_MAX) < 0)
+        goto err_udp_tcp_init;
+      gv->m_factory = ddsi_factory_find (gv, "dummy");
+      break;
   }
   gv->m_factory->m_enable = true;
 
-  if (!find_own_ip (gv, gv->config.networkAddressString))
+  if (!find_own_ip (gv))
   {
     /* find_own_ip already logs a more informative error message */
     GVLOG (DDS_LC_CONFIG, "No network interface selected\n");
@@ -1471,6 +1486,10 @@ int rtps_init (struct ddsi_domaingv *gv)
   // a plain copy is safe because it doesn't alias anything
   gv->default_local_plist_pp = ddsi_default_plist_participant;
   assert (gv->default_local_plist_pp.aliased == 0 && gv->default_local_plist_pp.qos.aliased == 0);
+  assert (!(gv->default_local_plist_pp.qos.present & QP_LIVELINESS));
+  gv->default_local_plist_pp.qos.present |= QP_LIVELINESS;
+  gv->default_local_plist_pp.qos.liveliness.kind = DDS_LIVELINESS_AUTOMATIC;
+  gv->default_local_plist_pp.qos.liveliness.lease_duration = gv->config.lease_duration;
   ddsi_xqos_copy (&gv->spdp_endpoint_xqos, &ddsi_default_qos_reader);
   ddsi_xqos_mergein_missing (&gv->spdp_endpoint_xqos, &ddsi_default_qos_writer, ~(uint64_t)0);
   gv->spdp_endpoint_xqos.durability.kind = DDS_DURABILITY_TRANSIENT_LOCAL;
@@ -1499,9 +1518,9 @@ int rtps_init (struct ddsi_domaingv *gv)
   gv->sertypes = ddsrt_hh_new (1, ddsi_sertype_hash_wrap, ddsi_sertype_equal_wrap);
 
 #ifdef DDS_HAS_TYPE_DISCOVERY
-  ddsrt_mutex_init (&gv->tl_admin_lock);
-  ddsrt_cond_init (&gv->tl_resolved_cond);
-  gv->tl_admin = ddsrt_hh_new (1, tl_meta_hash_wrap, tl_meta_equal_wrap);
+  ddsrt_mutex_init (&gv->typelib_lock);
+  ddsrt_cond_init (&gv->typelib_resolved_cond);
+  ddsrt_avl_init (&ddsi_typelib_treedef, &gv->typelib);
 #endif
   ddsrt_mutex_init (&gv->new_topic_lock);
   ddsrt_cond_init (&gv->new_topic_cond);
@@ -1636,30 +1655,6 @@ int rtps_init (struct ddsi_domaingv *gv)
     gv->pcap_fp = NULL;
   }
 
-  gv->mship = new_group_membership();
-
-  /* Create transmit connections */
-  for (size_t i = 0; i < MAX_XMIT_CONNS; i++)
-    gv->xmit_conns[i] = NULL;
-  if (gv->config.many_sockets_mode == DDSI_MSM_NO_UNICAST)
-    gv->xmit_conns[0] = gv->data_conn_uc;
-  else
-  {
-    dds_return_t rc;
-    for (int i = 0; i < gv->n_interfaces; i++)
-    {
-      const ddsi_tran_qos_t qos = { .m_purpose = DDSI_TRAN_QOS_XMIT, .m_diffserv = 0, .m_interface = &gv->interfaces[i] };
-      // FIXME: looking up the factory here is a hack to support iceoryx in addition to (e.g.) UDP
-      ddsi_tran_factory_t fact = ddsi_factory_find_supported_kind (gv, gv->interfaces[i].loc.kind);
-      rc = ddsi_factory_create_conn (&gv->xmit_conns[i], fact, 0, &qos);
-      if (rc != DDS_RETCODE_OK)
-        goto err_mc_conn;
-      GVLOG (DDS_LC_CONFIG, "interface %s: transmit port %d\n", gv->interfaces[i].name, (int) ddsi_conn_port (gv->xmit_conns[i]));
-      gv->intf_xlocators[i].conn = gv->xmit_conns[i];
-      gv->intf_xlocators[i].c = gv->interfaces[i].loc;
-    }
-  }
-
 #ifdef DDS_HAS_NETWORK_PARTITIONS
   /* Convert address sets in partition mappings from string to address sets now that we have
      xmit_conns filled in */
@@ -1667,6 +1662,7 @@ int rtps_init (struct ddsi_domaingv *gv)
     goto err_network_partition_addrset;
 #endif
 
+  gv->mship = new_group_membership();
   if (gv->m_factory->m_connless)
   {
     if (!(gv->config.many_sockets_mode == DDSI_MSM_NO_UNICAST && gv->config.allowMulticast))
@@ -1681,6 +1677,9 @@ int rtps_init (struct ddsi_domaingv *gv)
       {
         gv->data_conn_uc = gv->data_conn_mc;
         gv->disc_conn_uc = gv->disc_conn_mc;
+        // FIXME: uc locators get set by make_uc_sockets for all cases but MSM_NO_UNICAST but we need them
+        ddsi_conn_locator (gv->disc_conn_uc, &gv->loc_meta_uc);
+        ddsi_conn_locator (gv->data_conn_uc, &gv->loc_default_uc);
       }
 
       /* Set multicast locators */
@@ -1690,9 +1689,6 @@ int rtps_init (struct ddsi_domaingv *gv)
         gv->loc_meta_mc.port = ddsi_conn_port (gv->disc_conn_mc);
       if (!is_unspec_locator(&gv->loc_default_mc))
         gv->loc_default_mc.port = ddsi_conn_port (gv->data_conn_mc);
-
-      if (joinleave_spdp_defmcip (gv, 1) < 0)
-        goto err_mc_conn;
     }
   }
   else
@@ -1723,6 +1719,44 @@ int rtps_init (struct ddsi_domaingv *gv)
       ddsi_listener_locator (gv->listener, &gv->loc_meta_uc);
       ddsi_listener_locator (gv->listener, &gv->loc_default_uc);
     }
+  }
+
+  /* Create transmit connections */
+  for (size_t i = 0; i < MAX_XMIT_CONNS; i++)
+    gv->xmit_conns[i] = NULL;
+  if (gv->config.many_sockets_mode == DDSI_MSM_NO_UNICAST)
+  {
+    gv->xmit_conns[0] = gv->data_conn_uc;
+  }
+  else
+  {
+    dds_return_t rc;
+    for (int i = 0; i < gv->n_interfaces; i++)
+    {
+      const ddsi_tran_qos_t qos = {
+        .m_purpose = (gv->config.allowMulticast ? DDSI_TRAN_QOS_XMIT_MC : DDSI_TRAN_QOS_XMIT_UC),
+        .m_diffserv = 0,
+        .m_interface = &gv->interfaces[i]
+      };
+      // FIXME: looking up the factory here is a hack to support iceoryx in addition to (e.g.) UDP
+      ddsi_tran_factory_t fact = ddsi_factory_find_supported_kind (gv, gv->interfaces[i].loc.kind);
+      rc = ddsi_factory_create_conn (&gv->xmit_conns[i], fact, 0, &qos);
+      if (rc != DDS_RETCODE_OK)
+        goto err_mc_conn;
+    }
+  }
+  for (int i = 0; i < gv->n_interfaces; i++)
+  {
+    GVLOG (DDS_LC_CONFIG, "interface %s: transmit port %d\n", gv->interfaces[i].name, (int) ddsi_conn_port (gv->xmit_conns[i]));
+    gv->intf_xlocators[i].conn = gv->xmit_conns[i];
+    gv->intf_xlocators[i].c = gv->interfaces[i].loc;
+  }
+
+  // Join SPDP, default multicast addresses if enabled
+  if (gv->m_factory->m_connless && gv->config.allowMulticast)
+  {
+    if (joinleave_spdp_defmcip (gv, 1) < 0)
+      goto err_mc_conn;
   }
 
 #ifdef DDS_HAS_NETWORK_CHANNELS
@@ -1901,9 +1935,9 @@ err_unicast_sockets:
   ddsrt_mutex_destroy (&gv->new_topic_lock);
   ddsrt_cond_destroy (&gv->new_topic_cond);
 #ifdef DDS_HAS_TYPE_DISCOVERY
-  ddsrt_hh_free (gv->tl_admin);
-  ddsrt_mutex_destroy (&gv->tl_admin_lock);
-  ddsrt_cond_destroy (&gv->tl_resolved_cond);
+  ddsrt_avl_free (&ddsi_typelib_treedef, &gv->typelib, 0);
+  ddsrt_mutex_destroy (&gv->typelib_lock);
+  ddsrt_cond_destroy (&gv->typelib_resolved_cond);
 #endif
 #ifdef DDS_HAS_SECURITY
   ddsi_xqos_fini (&gv->builtin_stateless_xqos_wr);
@@ -1952,6 +1986,16 @@ static void stop_all_xeventq_upto (struct ddsi_config_channel_listelem *chptr)
 
 int rtps_start (struct ddsi_domaingv *gv)
 {
+  gcreq_queue_start (gv->gcreq_queue);
+
+  nn_dqueue_start (gv->builtins_dqueue);
+#ifdef DDS_HAS_NETWORK_CHANNELS
+  for (struct ddsi_config_channel_listelem *chptr = gv->config.channels; chptr; chptr = chptr->next)
+    nn_dqueue_start (chptr->dqueue);
+#else
+  nn_dqueue_start (gv->user_dqueue);
+#endif
+
   if (xeventq_start (gv->xevents, NULL) < 0)
     return -1;
 #ifdef DDS_HAS_NETWORK_CHANNELS
@@ -1969,7 +2013,7 @@ int rtps_start (struct ddsi_domaingv *gv)
   }
 #endif
 
-  if (setup_and_start_recv_threads (gv) < 0)
+  if (gv->config.transport_selector != DDSI_TRANS_NONE && setup_and_start_recv_threads (gv) < 0)
   {
 #ifdef DDS_HAS_NETWORK_CHANNELS
     stop_all_xeventq_upto (NULL);
@@ -2032,7 +2076,8 @@ void rtps_stop (struct ddsi_domaingv *gv)
 
   /* Stop all I/O */
   rtps_term_prep (gv);
-  wait_for_receive_threads (gv);
+  if (gv->config.transport_selector != DDSI_TRANS_NONE)
+    wait_for_receive_threads (gv);
 
   if (gv->listener)
   {
@@ -2264,6 +2309,15 @@ void rtps_fini (struct ddsi_domaingv *gv)
   ddsrt_hh_free (gv->topic_defs);
   ddsrt_mutex_destroy (&gv->topic_defs_lock);
 #endif /* DDS_HAS_TOPIC_DISCOVERY */
+#ifdef DDS_HAS_TYPE_DISCOVERY
+#ifndef NDEBUG
+  {
+    assert(ddsrt_avl_is_empty(&gv->typelib));
+  }
+#endif
+  ddsrt_avl_free (&ddsi_typelib_treedef, &gv->typelib, 0);
+  ddsrt_mutex_destroy (&gv->typelib_lock);
+#endif /* DDS_HAS_TYPE_DISCOVERY */
 #ifndef NDEBUG
   {
     struct ddsrt_hh_iter it;
@@ -2272,16 +2326,6 @@ void rtps_fini (struct ddsi_domaingv *gv)
 #endif
   ddsrt_hh_free (gv->sertypes);
   ddsrt_mutex_destroy (&gv->sertypes_lock);
-#ifdef DDS_HAS_TYPE_DISCOVERY
-#ifndef NDEBUG
-  {
-    struct ddsrt_hh_iter it;
-    assert (ddsrt_hh_iter_first (gv->tl_admin, &it) == NULL);
-  }
-#endif
-  ddsrt_hh_free (gv->tl_admin);
-  ddsrt_mutex_destroy (&gv->tl_admin_lock);
-#endif /* DDS_HAS_TYPE_DISCOVERY */
 #ifdef DDS_HAS_SECURITY
   q_omg_security_free (gv);
   ddsi_xqos_fini (&gv->builtin_stateless_xqos_wr);

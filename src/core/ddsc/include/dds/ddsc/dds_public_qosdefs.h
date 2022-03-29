@@ -1,4 +1,5 @@
 /*
+ * Copyright(c) 2022 ZettaScale Technology and others
  * Copyright(c) 2006 to 2018 ADLINK Technology Limited and others
  *
  * This program and the accompanying materials are made available under the
@@ -19,6 +20,8 @@
  */
 #ifndef DDS_QOSDEFS_H
 #define DDS_QOSDEFS_H
+
+#include <stdint.h>
 
 #if defined (__cplusplus)
 extern "C" {
@@ -53,6 +56,7 @@ typedef enum dds_qos_policy_id {
   DDS_DURABILITYSERVICE_QOS_POLICY_ID,
   DDS_PROPERTY_QOS_POLICY_ID,
   DDS_TYPE_CONSISTENCY_ENFORCEMENT_QOS_POLICY_ID,
+  DDS_DATA_REPRESENTATION_QOS_POLICY_ID
 } dds_qos_policy_id_t;
 
 /* QoS structure is opaque */
@@ -134,6 +138,9 @@ typedef enum dds_type_consistency_kind
     DDS_TYPE_CONSISTENCY_ALLOW_TYPE_COERCION
 }
 dds_type_consistency_kind_t;
+
+/** Data Representation QoS: Applies to Topic, DataReader, DataWriter */
+typedef int16_t dds_data_representation_id_t;
 
 #if defined (__cplusplus)
 }

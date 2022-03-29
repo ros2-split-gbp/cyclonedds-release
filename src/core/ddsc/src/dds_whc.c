@@ -27,7 +27,7 @@
 #include "dds/ddsi/ddsi_deadline.h"
 #endif
 #include "dds/ddsi/q_unused.h"
-#include "dds/ddsi/q_config.h"
+#include "dds/ddsi/ddsi_config_impl.h"
 #include "dds/ddsi/ddsi_tkmap.h"
 #include "dds/ddsi/q_rtps.h"
 #include "dds/ddsi/q_freelist.h"
@@ -324,8 +324,7 @@ static void insert_whcn_in_hash (struct whc_impl *whc, struct whc_node *whcn)
   if (!ddsrt_ehh_add (whc->seq_hash, &e))
     assert (0);
 #else
-  if (!ddsrt_hh_add (whc->seq_hash, whcn))
-    assert (0);
+  ddsrt_hh_add_absent (whc->seq_hash, whcn);
 #endif
 }
 
@@ -337,8 +336,7 @@ static void remove_whcn_from_hash (struct whc_impl *whc, struct whc_node *whcn)
   if (!ddsrt_ehh_remove (whc->seq_hash, &e))
     assert (0);
 #else
-  if (!ddsrt_hh_remove (whc->seq_hash, whcn))
-    assert (0);
+  ddsrt_hh_remove_present (whc->seq_hash, whcn);
 #endif
 }
 
@@ -566,7 +564,7 @@ static void get_state_locked (const struct whc_impl *whc, struct whc_state *st)
 {
   if (whc->seq_size == 0)
   {
-    st->min_seq = st->max_seq = -1;
+    st->min_seq = st->max_seq = 0;
     st->unacked_bytes = 0;
   }
   else
@@ -681,8 +679,7 @@ static void free_one_instance_from_idx (struct whc_impl *whc, seqno_t max_drop_s
 
 static void delete_one_instance_from_idx (struct whc_impl *whc, seqno_t max_drop_seq, struct whc_idxnode *idxn)
 {
-  if (!ddsrt_hh_remove (whc->idx_hash, idxn))
-    assert (0);
+  ddsrt_hh_remove_present (whc->idx_hash, idxn);
 #ifdef DDS_HAS_DEADLINE_MISSED
   deadline_unregister_instance_locked (&whc->deadline, &idxn->deadline);
 #endif
@@ -1021,7 +1018,7 @@ static uint32_t whc_default_remove_acked_messages_full (struct whc_impl *whc, se
   prev_seq = whcn ? whcn->prev_seq : NULL;
   while (whcn && whcn->seq <= max_drop_seq)
   {
-    TRACE ("  whcn %p %"PRId64, (void *) whcn, whcn->seq);
+    TRACE ("  whcn %p %"PRIu64, (void *) whcn, whcn->seq);
     if (whcn_in_tlidx (whc, whcn->idxnode, whcn->idxnode_pos))
     {
       /* quickly skip over samples in tlidx */
@@ -1077,7 +1074,7 @@ static uint32_t whc_default_remove_acked_messages_full (struct whc_impl *whc, se
       struct whc_idxnode * const idxn = whcn->idxnode;
       uint32_t cnt, idx;
 
-      TRACE ("  whcn %p %"PRId64" idxn %p prune_seq %"PRId64":", (void *) whcn, whcn->seq, (void *) idxn, idxn->prune_seq);
+      TRACE ("  whcn %p %"PRIu64" idxn %p prune_seq %"PRIu64":", (void *) whcn, whcn->seq, (void *) idxn, idxn->prune_seq);
 
       assert (whcn_in_tlidx (whc, idxn, whcn->idxnode_pos));
       assert (idxn->prune_seq <= max_drop_seq);
@@ -1106,7 +1103,7 @@ static uint32_t whc_default_remove_acked_messages_full (struct whc_impl *whc, se
           template.iid = idxn->iid;
           assert (oldn->seq < whcn->seq);
 #endif
-          TRACE (" del %p %"PRId64, (void *) oldn, oldn->seq);
+          TRACE (" del %p %"PRIu64, (void *) oldn, oldn->seq);
           whc_delete_one (whc, oldn);
 #ifndef NDEBUG
           assert (ddsrt_hh_lookup (whc->idx_hash, &template) == idxn);
@@ -1140,8 +1137,8 @@ static uint32_t whc_default_remove_acked_messages (struct whc *whc_generic, seqn
   {
     struct whc_state tmp;
     get_state_locked (whc, &tmp);
-    TRACE ("whc_default_remove_acked_messages(%p max_drop_seq %"PRId64")\n", (void *)whc, max_drop_seq);
-    TRACE ("  whc: [%"PRId64",%"PRId64"] max_drop_seq %"PRId64" h %"PRIu32" tl %"PRIu32"\n",
+    TRACE ("whc_default_remove_acked_messages(%p max_drop_seq %"PRIu64")\n", (void *)whc, max_drop_seq);
+    TRACE ("  whc: [%"PRIu64",%"PRIu64"] max_drop_seq %"PRIu64" h %"PRIu32" tl %"PRIu32"\n",
            tmp.min_seq, tmp.max_seq, whc->max_drop_seq, whc->wrinfo.hdepth, whc->wrinfo.tldepth);
   }
 
@@ -1252,9 +1249,9 @@ static int whc_default_insert (struct whc *whc_generic, seqno_t max_drop_seq, se
   {
     struct whc_state whcst;
     get_state_locked (whc, &whcst);
-    TRACE ("whc_default_insert(%p max_drop_seq %"PRId64" seq %"PRId64" exp %"PRId64" plist %p serdata %p:%"PRIx32")\n",
+    TRACE ("whc_default_insert(%p max_drop_seq %"PRIu64" seq %"PRIu64" exp %"PRId64" plist %p serdata %p:%"PRIx32")\n",
            (void *) whc, max_drop_seq, seq, exp.v, (void *) plist, (void *) serdata, serdata->hash);
-    TRACE ("  whc: [%"PRId64",%"PRId64"] max_drop_seq %"PRId64" h %"PRIu32" tl %"PRIu32"\n",
+    TRACE ("  whc: [%"PRIu64",%"PRIu64"] max_drop_seq %"PRIu64" h %"PRIu32" tl %"PRIu32"\n",
            whcst.min_seq, whcst.max_seq, whc->max_drop_seq, whc->wrinfo.hdepth, whc->wrinfo.tldepth);
   }
 
@@ -1365,8 +1362,7 @@ static int whc_default_insert (struct whc *whc_generic, seqno_t max_drop_seq, se
         newn->idxnode = idxn;
         newn->idxnode_pos = 0;
       }
-      if (!ddsrt_hh_add (whc->idx_hash, idxn))
-        assert (0);
+      ddsrt_hh_add_absent (whc->idx_hash, idxn);
 #ifdef DDS_HAS_DEADLINE_MISSED
       deadline_register_instance_locked (&whc->deadline, &idxn->deadline, ddsrt_time_monotonic ());
 #endif
