@@ -24,7 +24,7 @@
 #include "dds/ddsi/q_xmsg.h"
 #include "dds/ddsi/q_xevent.h"
 #include "dds/ddsi/q_thread.h"
-#include "dds/ddsi/q_config.h"
+#include "dds/ddsi/ddsi_config_impl.h"
 #include "dds/ddsi/q_unused.h"
 #include "dds/ddsi/ddsi_domaingv.h"
 #include "dds/ddsi/ddsi_entity_index.h"
@@ -198,7 +198,7 @@ static void trace_msg (struct xeventq *evq, const char *func, const struct nn_xm
     seqno_t wrseq;
     nn_fragment_number_t wrfragid;
     nn_xmsg_guid_seq_fragid (m, &wrguid, &wrseq, &wrfragid);
-    EVQTRACE(" %s("PGUIDFMT"/%"PRId64"/%u)", func, PGUID (wrguid), wrseq, wrfragid);
+    EVQTRACE(" %s("PGUIDFMT"/%"PRId64"/%"PRIu32")", func, PGUID (wrguid), wrseq, wrfragid);
   }
 }
 #else
@@ -670,7 +670,7 @@ static void send_heartbeat_to_all_readers (struct nn_xpack *xp, struct xevent *e
         prd = entidx_lookup_proxy_reader_guid(wr->e.gv->entity_index, &m->prd_guid);
         if (prd)
         {
-          ETRACE (wr, " heartbeat(wr "PGUIDFMT" rd "PGUIDFMT" %s) send, resched in %g s (min-ack %"PRId64", avail-seq %"PRId64")\n",
+          ETRACE (wr, " heartbeat(wr "PGUIDFMT" rd "PGUIDFMT" %s) send, resched in %g s (min-ack %"PRIu64", avail-seq %"PRIu64")\n",
               PGUID (wr->e.guid),
               PGUID (m->prd_guid),
               hbansreq ? "" : " final",
@@ -693,13 +693,24 @@ static void send_heartbeat_to_all_readers (struct nn_xpack *xp, struct xevent *e
 
   if (count == 0)
   {
-    ETRACE (wr, "heartbeat(wr "PGUIDFMT") suppressed, resched in %g s (min-ack %"PRId64"%s, avail-seq %"PRId64", xmit %"PRId64")\n",
-        PGUID (wr->e.guid),
-        (t_next.v == DDS_NEVER) ? INFINITY : (double)(t_next.v - tnow.v) / 1e9,
-        ddsrt_avl_is_empty (&wr->readers) ? (int64_t) -1 : ((struct wr_prd_match *) ddsrt_avl_root (&wr_readers_treedef, &wr->readers))->min_seq,
-        ddsrt_avl_is_empty (&wr->readers) || ((struct wr_prd_match *) ddsrt_avl_root (&wr_readers_treedef, &wr->readers))->all_have_replied_to_hb ? "" : "!",
-        whcst.max_seq,
-        writer_read_seq_xmit(wr));
+    if (ddsrt_avl_is_empty (&wr->readers))
+    {
+      ETRACE (wr, "heartbeat(wr "PGUIDFMT") suppressed, resched in %g s (min-ack [none], avail-seq %"PRIu64", xmit %"PRIu64")\n",
+              PGUID (wr->e.guid),
+              (t_next.v == DDS_NEVER) ? INFINITY : (double)(t_next.v - tnow.v) / 1e9,
+              whcst.max_seq,
+              writer_read_seq_xmit(wr));
+    }
+    else
+    {
+      ETRACE (wr, "heartbeat(wr "PGUIDFMT") suppressed, resched in %g s (min-ack %"PRIu64"%s, avail-seq %"PRIu64", xmit %"PRIu64")\n",
+              PGUID (wr->e.guid),
+              (t_next.v == DDS_NEVER) ? INFINITY : (double)(t_next.v - tnow.v) / 1e9,
+              ((struct wr_prd_match *) ddsrt_avl_root (&wr_readers_treedef, &wr->readers))->min_seq,
+              ((struct wr_prd_match *) ddsrt_avl_root (&wr_readers_treedef, &wr->readers))->all_have_replied_to_hb ? "" : "!",
+              whcst.max_seq,
+              writer_read_seq_xmit(wr));
+    }
   }
 
   ddsrt_mutex_unlock (&wr->e.lock);
@@ -751,14 +762,26 @@ static void handle_xevk_heartbeat (struct nn_xpack *xp, struct xevent *ev, ddsrt
     t_next.v = tnow.v + writer_hbcontrol_intv (wr, &whcst, tnow);
   }
 
-  GVTRACE ("heartbeat(wr "PGUIDFMT"%s) %s, resched in %g s (min-ack %"PRId64"%s, avail-seq %"PRId64", xmit %"PRId64")\n",
-           PGUID (wr->e.guid),
-           hbansreq ? "" : " final",
-           msg ? "sent" : "suppressed",
-           (t_next.v == DDS_NEVER) ? INFINITY : (double)(t_next.v - tnow.v) / 1e9,
-           ddsrt_avl_is_empty (&wr->readers) ? (seqno_t) -1 : ((struct wr_prd_match *) ddsrt_avl_root_non_empty (&wr_readers_treedef, &wr->readers))->min_seq,
-           ddsrt_avl_is_empty (&wr->readers) || ((struct wr_prd_match *) ddsrt_avl_root_non_empty (&wr_readers_treedef, &wr->readers))->all_have_replied_to_hb ? "" : "!",
-           whcst.max_seq, writer_read_seq_xmit (wr));
+  if (ddsrt_avl_is_empty (&wr->readers))
+  {
+    GVTRACE ("heartbeat(wr "PGUIDFMT"%s) %s, resched in %g s (min-ack [none], avail-seq %"PRIu64", xmit %"PRIu64")\n",
+             PGUID (wr->e.guid),
+             hbansreq ? "" : " final",
+             msg ? "sent" : "suppressed",
+             (t_next.v == DDS_NEVER) ? INFINITY : (double)(t_next.v - tnow.v) / 1e9,
+             whcst.max_seq, writer_read_seq_xmit (wr));
+  }
+  else
+  {
+    GVTRACE ("heartbeat(wr "PGUIDFMT"%s) %s, resched in %g s (min-ack %"PRId64"%s, avail-seq %"PRIu64", xmit %"PRIu64")\n",
+             PGUID (wr->e.guid),
+             hbansreq ? "" : " final",
+             msg ? "sent" : "suppressed",
+             (t_next.v == DDS_NEVER) ? INFINITY : (double)(t_next.v - tnow.v) / 1e9,
+             ((struct wr_prd_match *) ddsrt_avl_root_non_empty (&wr_readers_treedef, &wr->readers))->min_seq,
+             ((struct wr_prd_match *) ddsrt_avl_root_non_empty (&wr_readers_treedef, &wr->readers))->all_have_replied_to_hb ? "" : "!",
+             whcst.max_seq, writer_read_seq_xmit (wr));
+  }
   (void) resched_xevent_if_earlier (ev, t_next);
   wr->hbcontrol.tsched = t_next;
   ddsrt_mutex_unlock (&wr->e.lock);
@@ -1356,21 +1379,21 @@ void qxev_pwr_entityid (struct proxy_writer *pwr, const ddsi_guid_t *guid)
   }
 }
 
-int qxev_msg_rexmit_wrlock_held (struct xeventq *evq, struct nn_xmsg *msg, int force)
+enum qxev_msg_rexmit_result qxev_msg_rexmit_wrlock_held (struct xeventq *evq, struct nn_xmsg *msg, int force)
 {
   struct ddsi_domaingv * const gv = evq->gv;
   size_t msg_size = nn_xmsg_size (msg);
-  struct xevent_nt *ev;
+  struct xevent_nt *existing_ev;
 
   assert (evq);
   assert (nn_xmsg_kind (msg) == NN_XMSG_KIND_DATA_REXMIT || nn_xmsg_kind (msg) == NN_XMSG_KIND_DATA_REXMIT_NOMERGE);
   ddsrt_mutex_lock (&evq->lock);
-  if ((ev = lookup_msg (evq, msg)) != NULL && nn_xmsg_merge_rexmit_destinations_wrlock_held (gv, ev->u.msg_rexmit.msg, msg))
+  if ((existing_ev = lookup_msg (evq, msg)) != NULL && nn_xmsg_merge_rexmit_destinations_wrlock_held (gv, existing_ev->u.msg_rexmit.msg, msg))
   {
     /* MSG got merged with a pending retransmit, so it has effectively been queued */
     ddsrt_mutex_unlock (&evq->lock);
     nn_xmsg_free (msg);
-    return 1;
+    return QXEV_MSG_REXMIT_MERGED;
   }
   else if ((evq->queued_rexmit_bytes > evq->max_queued_rexmit_bytes ||
             evq->queued_rexmit_msgs == evq->max_queued_rexmit_msgs) &&
@@ -1383,13 +1406,27 @@ int qxev_msg_rexmit_wrlock_held (struct xeventq *evq, struct nn_xmsg *msg, int f
     GVTRACE (" qxev_msg_rexmit%s drop (sz %"PA_PRIuSIZE" qb %"PA_PRIuSIZE" qm %"PA_PRIuSIZE")", force ? "!" : "",
              msg_size, evq->queued_rexmit_bytes, evq->queued_rexmit_msgs);
 #endif
-    return 0;
+    return QXEV_MSG_REXMIT_DROPPED;
   }
   else
   {
+    // kind == rexmit && existing_ev != NULL (i.e., same writer, sequence number and fragment already enqueued,
+    // but not mergeable despite both entries not being of the NOMERGE kind) is really rare but not impossible.
+    // Treating it as XEVK_MSG_REXMIT would lead to attempting to insert a duplicate for (GUID,seq#,frag#) into
+    // the table of enqueued retransmits and that is disallowed by the default settings of the AVL tree used
+    // to implement the table. That leaves two options:
+    // - Preventing this new message from getting inserted. Only those of kind REXMIT get inserted, so simply
+    //   marking it as REXMIT_NOMERGE will do that. Downside, the new copy will never be a candidate for
+    //   merging.
+    // - Marking the AVL tree as ALLOWDUPS. Once upon a time a heavily used feature of this tree implementation
+    //   but not used for a long time and perhaps best removed. Reintroducing a usage for doubtful benefit had
+    //   better have a positive effect. The lookup logic always returns the first match in insertion order, so
+    //   the new entry won't be considered for merging until the first one has been sent.
+    // So in a very rare case, there'd be a (presumably) even rarer case where the second option confers a
+    // benefit. The first has the advantage of being simpler, which weighs heaver in my opinion.
     const enum xeventkind_nt kind =
-      (nn_xmsg_kind (msg) == NN_XMSG_KIND_DATA_REXMIT) ? XEVK_MSG_REXMIT : XEVK_MSG_REXMIT_NOMERGE;
-    ev = qxev_common_nt (evq, kind);
+      (nn_xmsg_kind (msg) == NN_XMSG_KIND_DATA_REXMIT && existing_ev == NULL) ? XEVK_MSG_REXMIT : XEVK_MSG_REXMIT_NOMERGE;
+    struct xevent_nt *ev = qxev_common_nt (evq, kind);
     ev->u.msg_rexmit.msg = msg;
     ev->u.msg_rexmit.queued_rexmit_bytes = msg_size;
     evq->queued_rexmit_bytes += msg_size;
@@ -1399,7 +1436,7 @@ int qxev_msg_rexmit_wrlock_held (struct xeventq *evq, struct nn_xmsg *msg, int f
     GVTRACE ("AAA(%p,%"PA_PRIuSIZE")", (void *) ev, msg_size);
 #endif
     ddsrt_mutex_unlock (&evq->lock);
-    return 2;
+    return QXEV_MSG_REXMIT_QUEUED;
   }
 }
 

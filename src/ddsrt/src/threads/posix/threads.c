@@ -25,12 +25,13 @@
 
 #include <limits.h>
 
+#include "threads_priv.h"
 #include "dds/ddsrt/heap.h"
 #include "dds/ddsrt/log.h"
 #include "dds/ddsrt/string.h"
-#include "dds/ddsrt/threads_priv.h"
 #include "dds/ddsrt/types.h"
 #include "dds/ddsrt/static_assert.h"
+#include "dds/ddsrt/misc.h"
 
 typedef struct {
   char *name;
@@ -61,6 +62,10 @@ typedef struct {
 /* VX_TASK_NAME_LENGTH is the maximum number of bytes, excluding
    null-terminating byte, for a thread name. */
 #define MAXTHREADNAMESIZE (VX_TASK_NAME_LENGTH)
+#elif defined(__QNXNTO__)
+#include <pthread.h>
+#include <sys/neutrino.h>
+#define MAXTHREADNAMESIZE (_NTO_THREAD_NAME_MAX - 1)
 #endif /* __APPLE__ */
 
 size_t
@@ -107,6 +112,9 @@ ddsrt_thread_getname(char *str, size_t size)
     }
     cnt = ddsrt_strlcpy(str, ptr, size);
   }
+#elif defined(__QNXNTO__)
+  (void)pthread_getname_np(pthread_self(), buf, sizeof(buf));
+  cnt = ddsrt_strlcpy(str, buf, size);
 #endif
 
   /* Thread identifier is used as fall back if thread name lookup is not
@@ -140,6 +148,8 @@ ddsrt_thread_setname(const char *__restrict name)
 #if !(__SunOS_5_6 || __SunOS_5_7 || __SunOS_5_8 || __SunOS_5_9 || __SunOS_5_10)
   (void)pthread_setname_np(pthread_self(), name);
 #endif
+#elif defined(__QNXNTO__)
+  (void)pthread_setname_np(pthread_self(), name);
 #else
   /* VxWorks does not support the task name to be set after a task is created.
      Setting the name of a task can be done through pthread_attr_setname. */
@@ -305,7 +315,13 @@ ddsrt_thread_create (
   /* Block signal delivery in our own threads (SIGXCPU is excluded so we have a way of
      dumping stack traces, but that should be improved upon) */
   sigfillset (&set);
+#ifdef __APPLE__
+  DDSRT_WARNING_GNUC_OFF(sign-conversion)
+#endif
   sigdelset (&set, SIGXCPU);
+#ifdef __APPLE__
+  DDSRT_WARNING_GNUC_ON(sign-conversion)
+#endif
   sigprocmask (SIG_BLOCK, &set, &oset);
   if ((create_ret = pthread_create (&threadptr->v, &attr, os_startRoutineWrapper, ctx)) != 0)
   {

@@ -1,4 +1,5 @@
 /*
+ * Copyright(c) 2022 ZettaScale Technology
  * Copyright(c) 2006 to 2018 ADLINK Technology Limited and others
  *
  * This program and the accompanying materials are made available under the
@@ -37,14 +38,14 @@
 #include "dds/ddsi/ddsi_statistics.h"
 
 #ifdef DDS_HAS_SHM
-#include "shm__monitor.h"
-#include "dds/ddsi/q_receive.h"
+#include "dds/ddsi/ddsi_shm_transport.h"
 #include "dds/ddsi/ddsi_tkmap.h"
-#include "iceoryx_binding_c/wait_set.h"
-#include "dds/ddsrt/threads.h"
-#include "dds/ddsrt/sync.h"
+#include "dds/ddsi/q_receive.h"
 #include "dds/ddsrt/md5.h"
-#include "dds/ddsi/shm_sync.h"
+#include "dds/ddsrt/sync.h"
+#include "dds/ddsrt/threads.h"
+#include "iceoryx_binding_c/wait_set.h"
+#include "shm__monitor.h"
 #endif
 
 DECL_ENTITY_LOCK_UNLOCK (dds_reader)
@@ -109,7 +110,7 @@ static dds_return_t dds_reader_delete (dds_entity *e)
     // since the mutex is needed and the data needs to be released using the iceoryx subscriber
     DDS_CLOG (DDS_LC_SHM, &e->m_domain->gv.logconfig, "Release iceoryx's subscriber\n");
     iox_sub_deinit(rd->m_iox_sub);
-    iox_sub_storage_extension_fini(&rd->m_iox_sub_stor);
+    iox_sub_context_fini(&rd->m_iox_sub_context);
   }
 #endif
 
@@ -475,18 +476,64 @@ static bool dds_reader_support_shm(const struct ddsi_config* cfg, const dds_qos_
       false == cfg->enable_shm)
     return false;
 
-  if (!tp->m_stype->fixed_size)
+  // check necessary condition: fixed size data type OR serializing into shared
+  // memory is available
+  if (!tp->m_stype->fixed_size && (!tp->m_stype->ops->get_serialized_size ||
+                                   !tp->m_stype->ops->serialize_into)) {
     return false;
+  }
 
-  uint32_t sub_history_req = cfg->sub_history_request;
+  if(qos->history.kind != DDS_HISTORY_KEEP_LAST) {
+    return false;
+  }
 
-  return (NULL != qos &&
-    DDS_READER_QOS_CHECK_FIELDS == (qos->present & DDS_READER_QOS_CHECK_FIELDS) &&
-    DDS_LIVELINESS_AUTOMATIC == qos->liveliness.kind &&
-    DDS_INFINITY == qos->deadline.deadline &&
-    DDS_DURABILITY_VOLATILE == qos->durability.kind &&
-    DDS_HISTORY_KEEP_LAST == qos->history.kind &&
-    (int)sub_history_req >= (int)qos->history.depth);
+  if(!(qos->durability.kind == DDS_DURABILITY_VOLATILE ||
+    qos->durability.kind == DDS_DURABILITY_TRANSIENT_LOCAL)) {
+    return false;
+  }  
+
+  return (DDS_READER_QOS_CHECK_FIELDS ==
+              (qos->present & DDS_READER_QOS_CHECK_FIELDS) &&
+          DDS_LIVELINESS_AUTOMATIC == qos->liveliness.kind &&
+          DDS_INFINITY == qos->deadline.deadline);
+}
+
+static iox_sub_options_t create_iox_sub_options(const dds_qos_t* qos) {
+
+  iox_sub_options_t opts;
+  iox_sub_options_init(&opts);
+
+  const uint32_t max_sub_queue_capacity = iox_cfg_max_subscriber_queue_capacity();
+
+  // NB: We may lose data after history.depth many samples are received (if we
+  // are not taking them fast enough from the iceoryx queue and move them in
+  // the reader history cache), but this is valid behavior for volatile.
+  // It may still lead to undesired behavior as the queues are filled very
+  // fast if data is published as fast as possible.
+  // NB: If the history depth is larger than the queue capacity, we still use
+  // shared memory but limit the queueCapacity accordingly (otherwise iceoryx
+  // emits a warning and limits it itself)
+
+  if ((uint32_t) qos->history.depth <= max_sub_queue_capacity) {
+    opts.queueCapacity = (uint64_t)qos->history.depth;
+  } else {
+    opts.queueCapacity = max_sub_queue_capacity;
+  }
+
+  // with BEST EFFORT DDS requires that no historical
+  // data is received (regardless of durability)
+  if(qos->reliability.kind == DDS_RELIABILITY_BEST_EFFORT ||
+     qos->durability.kind == DDS_DURABILITY_VOLATILE) {
+    opts.historyRequest = 0;
+  } else {
+    // TRANSIENT LOCAL and stronger
+    opts.historyRequest = (uint64_t) qos->history.depth;
+    // if the publisher does not support historicial data
+    // it will not be connected by iceoryx
+    opts.requirePublisherHistorySupport = true;
+  }
+
+  return opts;
 }
 #endif
 
@@ -574,7 +621,9 @@ static dds_entity_t dds_create_reader_int (dds_entity_t participant_or_subscribe
     ddsi_xqos_mergein_missing (rqos, sub->m_entity.m_qos, ~(uint64_t)0);
   if (tp->m_ktopic->qos)
     ddsi_xqos_mergein_missing (rqos, tp->m_ktopic->qos, ~(uint64_t)0);
-  ddsi_xqos_mergein_missing (rqos, &ddsi_default_qos_reader, ~(uint64_t)0);
+  ddsi_xqos_mergein_missing (rqos, &ddsi_default_qos_reader, ~QP_DATA_REPRESENTATION);
+  if ((rc = dds_ensure_valid_data_representation (rqos, tp->m_stype->allowed_data_representation, false)) != 0)
+    goto err_data_repr;
 
   if ((rc = ddsi_xqos_valid (&gv->logconfig, rqos)) < 0 || (rc = validate_reader_qos(rqos)) != DDS_RETCODE_OK)
     goto err_bad_qos;
@@ -605,7 +654,8 @@ static dds_entity_t dds_create_reader_int (dds_entity_t participant_or_subscribe
     if (!q_omg_security_check_create_reader (pp, gv->config.domainId, tp->m_name, rqos))
     {
       rc = DDS_RETCODE_NOT_ALLOWED_BY_SECURITY;
-      goto err_not_allowed;
+      thread_state_asleep(lookup_thread_state());
+      goto err_bad_qos;
     }
   }
 #endif
@@ -640,6 +690,8 @@ static dds_entity_t dds_create_reader_int (dds_entity_t participant_or_subscribe
     rqos->ignore_locator_type |= NN_LOCATOR_KIND_SHEM;
 #endif
 
+  /* Reader gets the sertype from the topic, as the serdata functions the reader uses are
+     not specific for a data representation (the representation can be retrieved from the cdr header) */
   rc = new_reader (&rd->m_rd, &rd->m_entity.m_guid, NULL, pp, tp->m_name, tp->m_stype, rqos, &rd->m_rhc->common.rhc, dds_reader_status_cb, rd);
   assert (rc == DDS_RETCODE_OK); /* FIXME: can be out-of-resources at the very least */
   thread_state_asleep (lookup_thread_state ());
@@ -647,24 +699,42 @@ static dds_entity_t dds_create_reader_int (dds_entity_t participant_or_subscribe
 #ifdef DDS_HAS_SHM
   if (0x0 == (rqos->ignore_locator_type & NN_LOCATOR_KIND_SHEM))
   {
-    DDS_CLOG (DDS_LC_SHM, &rd->m_entity.m_domain->gv.logconfig, "Reader's topic name will be DDS:Cyclone:%s\n", rd->m_topic->m_name);
+    DDS_CLOG (DDS_LC_SHM, &rd->m_entity.m_domain->gv.logconfig, "Reader's topic name will be DDS:Cyclone:%s\n", rd->m_topic->m_name);    
+    
+    iox_sub_context_init(&rd->m_iox_sub_context);
 
-    iox_sub_options_t opts;
-    iox_sub_options_init(&opts);
+    iox_sub_options_t opts = create_iox_sub_options(rqos);
 
-    // ICEORYX TODO: handle failure (how should the system behave if resources are insufficient?)
-    iox_sub_storage_extension_init(&rd->m_iox_sub_stor);
+    // NB: This may fail due to icoeryx being out of internal resources for subsribers.
+    //     In this case terminate is called by iox_sub_init.
+    //     it is currently (iceoryx 2.0 and lower) not possible to change this to
+    //     e.g. return a nullptr and handle the error here.   
+    rd->m_iox_sub = iox_sub_init(&(iox_sub_storage_t){0}, gv->config.iceoryx_service, rd->m_topic->m_stype->type_name, rd->m_topic->m_name, &opts);
 
-    assert (rqos->durability.kind == DDS_DURABILITY_VOLATILE);
-    opts.queueCapacity = rd->m_entity.m_domain->gv.config.sub_queue_capacity;
-    opts.historyRequest = 0;
-    rd->m_iox_sub = iox_sub_init(&rd->m_iox_sub_stor.storage, gv->config.iceoryx_service, rd->m_topic->m_stype->type_name, rd->m_topic->m_name, &opts);
-    shm_monitor_attach_reader(&rd->m_entity.m_domain->m_shm_monitor, rd);
+    // NB: Due to some storage paradigm change of iceoryx structs
+    // we now have a pointer 8 bytes before m_iox_sub
+    // We use this address to store a pointer to the context.
+    iox_sub_context_t **context = iox_sub_context_ptr(rd->m_iox_sub);
+    *context = &rd->m_iox_sub_context;
+
+    rc = shm_monitor_attach_reader(&rd->m_entity.m_domain->m_shm_monitor, rd);
+
+    if (rc != DDS_RETCODE_OK) {
+      // we fail if we cannot attach to the listener (as we would get no data)
+      iox_sub_deinit(rd->m_iox_sub);
+      rd->m_iox_sub = NULL;
+      DDS_CLOG(DDS_LC_WARNING | DDS_LC_SHM,
+               &rd->m_entity.m_domain->gv.logconfig,
+               "Failed to attach iox subscriber to iox listener\n");
+      // FIXME: We need to clean up everything created up to now.
+      //        Currently there is only partial cleanup, we need to extend it.
+      goto err_bad_qos;
+    }
 
     // those are set once and never changed
     // they are used to access reader and monitor from the callback when data is received
-    rd->m_iox_sub_stor.monitor = &rd->m_entity.m_domain->m_shm_monitor;
-    rd->m_iox_sub_stor.parent_reader = rd;
+    rd->m_iox_sub_context.monitor = &rd->m_entity.m_domain->m_shm_monitor;
+    rd->m_iox_sub_context.parent_reader = rd;
   }
 #endif
 
@@ -687,11 +757,8 @@ static dds_entity_t dds_create_reader_int (dds_entity_t participant_or_subscribe
   dds_subscriber_unlock (sub);
   return reader;
 
-#ifdef DDS_HAS_SECURITY
-err_not_allowed:
-  thread_state_asleep (lookup_thread_state ());
-#endif
 err_bad_qos:
+err_data_repr:
   dds_delete_qos (rqos);
   dds_topic_allow_set_qos (tp);
 err_pp_mismatch:
@@ -832,6 +899,7 @@ dds_return_t dds__reader_data_allocator_init (const dds_reader *rd, dds_data_all
 {
 #ifdef DDS_HAS_SHM
   dds_iox_allocator_t *d = (dds_iox_allocator_t *) data_allocator->opaque.bytes;
+  ddsrt_mutex_init(&d->mutex);
   if (NULL != rd->m_iox_sub)
   {
     d->kind = DDS_IOX_ALLOCATOR_KIND_SUBSCRIBER;
@@ -853,6 +921,7 @@ dds_return_t dds__reader_data_allocator_fini (const dds_reader *rd, dds_data_all
 {
 #ifdef DDS_HAS_SHM
   dds_iox_allocator_t *d = (dds_iox_allocator_t *) data_allocator->opaque.bytes;
+  ddsrt_mutex_destroy(&d->mutex);
   d->kind = DDS_IOX_ALLOCATOR_KIND_FINI;
 #else
   (void) data_allocator;

@@ -9,8 +9,8 @@
 #
 # SPDX-License-Identifier: EPL-2.0 OR BSD-3-Clause
 #
-cmake_minimum_required(VERSION 3.7)
-project(CycloneDDS VERSION 0.8.2 LANGUAGES C)
+cmake_minimum_required(VERSION 3.10)
+project(CycloneDDS VERSION 0.9.0 LANGUAGES C)
 if(CMAKE_VERSION VERSION_LESS 3.12)
   # GENERATE_EXPORT_HEADER requires a C++ compiler up to version 3.12
   enable_language(CXX)
@@ -41,8 +41,7 @@ option(WERROR "Treat compiler warnings as errors" OFF)
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake/Modules")
 
 option(BUILD_IDLC "Build IDL preprocessor" ${not_crosscompiling})
-option(BUILD_DDSCONF "Build DDSCONF buildtool" ${not_crosscompiling})
-
+option(BUILD_DDSPERF "Build ddsperf tool" ${not_crosscompiling})
 
 set(CMAKE_C_STANDARD 99)
 if(CMAKE_SYSTEM_NAME STREQUAL "VxWorks")
@@ -243,11 +242,15 @@ set(MEMORYCHECK_COMMAND_OPTIONS "--track-origins=yes --leak-check=full --trace-c
 # build the product itself, switch to off by default.
 option(BUILD_TESTING "Build the testing tree." OFF)
 
+# Include the tests for idlc. These tests use the idl compiler (C back-end) to
+# compile an idl file at (test) runtime, and use the C compiler to build a test
+# application for the generated types, that is executed to do the actual testing.
+option(BUILD_IDLC_TESTING "Build the idl compiler tests" OFF)
+
 # Disable building examples by default because it is not strictly required.
 option(BUILD_EXAMPLES "Build examples." OFF)
 
 option(BUILD_DOCS "Build documentation." OFF)
-option(BUILD_SCHEMA "Build generated schema for configuration options." ${not_crosscompiling})
 
 # Build all executables and libraries into the top-level /bin and /lib folders.
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
@@ -257,6 +260,15 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 include(CTest)
+
+option(APPEND_PROJECT_NAME_TO_INCLUDEDIR
+  "When ON headers are installed to a folder ending with an extra ${PROJECT_NAME}. \
+  This avoids include directory search order issues when overriding this package
+  from a merged catkin, ament, or colcon workspace." OFF)
+
+if(APPEND_PROJECT_NAME_TO_INCLUDEDIR)
+  set(CMAKE_INSTALL_INCLUDEDIR "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}")
+endif()
 
 if(APPLE)
   set(CMAKE_INSTALL_RPATH "@loader_path/../${CMAKE_INSTALL_LIBDIR}")
@@ -302,11 +314,36 @@ install(
   DESTINATION "${CMAKE_INSTALL_CMAKEDIR}"
   COMPONENT dev)
 
+# Generate Pkg-Config file
+configure_file(
+  "PkgConfig.pc.in"
+  "${PROJECT_NAME}.pc"
+  @ONLY
+)
+install(
+  FILES "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}.pc"
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig"
+  COMPONENT dev
+)
+
+# Generated file paths
+# although the following files are generated, they are checked into source
+# control for convenience, but the user must copy them manually
+set(generated_cyclonedds_rnc "${CMAKE_CURRENT_SOURCE_DIR}/etc/cyclonedds.rnc")
+set(generated_cyclonedds_xsd "${CMAKE_CURRENT_SOURCE_DIR}/etc/cyclonedds.xsd")
+set(generated_options_md     "${CMAKE_CURRENT_SOURCE_DIR}/docs/manual/options.md")
+set(generated_defconfig_src  "${CMAKE_CURRENT_SOURCE_DIR}/src/core/ddsi/defconfig.c")
+
+add_subdirectory(compat)
 add_subdirectory(src)
 if(BUILD_EXAMPLES)
   add_subdirectory(examples)
 endif()
 
 add_subdirectory(docs)
+
+if(DEFINED ENV{LIB_FUZZING_ENGINE})
+  add_subdirectory(fuzz)
+endif()
 
 include(CMakeCPack.cmake)

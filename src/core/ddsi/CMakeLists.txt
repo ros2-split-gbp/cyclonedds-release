@@ -9,13 +9,8 @@
 #
 # SPDX-License-Identifier: EPL-2.0 OR BSD-3-Clause
 #
-set(defconfig_src "${CMAKE_CURRENT_BINARY_DIR}/defconfig.c")
 
 
-add_custom_command(
-  OUTPUT ${defconfig_src}
-  COMMAND ddsconf-native -f defconfig -o ${defconfig_src}
-  DEPENDS ddsconf-native)
 
 set(srcs_ddsi
   ddsi_eth.c
@@ -52,15 +47,16 @@ set(srcs_ddsi
   ddsi_deliver_locally.c
   ddsi_plist.c
   ddsi_cdrstream.c
+  ddsi_config.c
   ddsi_time.c
   ddsi_ownip.c
   ddsi_acknack.c
   ddsi_list_genptr.c
   ddsi_wraddrset.c
+  ddsi_typelib.c
   q_addrset.c
   q_bitset_inlines.c
   q_bswap.c
-  q_config.c
   q_ddsi_discovery.c
   q_debmon.c
   q_entity.c
@@ -125,14 +121,15 @@ set(hdrs_private_ddsi
   ddsi_cfgunits.h
   ddsi_cfgelems.h
   ddsi_config.h
+  ddsi_config_impl.h
   ddsi_acknack.h
   ddsi_list_tmpl.h
   ddsi_list_genptr.h
   ddsi_wraddrset.h
+  ddsi_typelib.h
   q_addrset.h
   q_bitset.h
   q_bswap.h
-  q_config.h
   q_ddsi_discovery.h
   q_debmon.h
   q_entity.h
@@ -169,22 +166,23 @@ if(ENABLE_DEADLINE_MISSED)
   list(APPEND hdrs_private_ddsi ddsi_deadline.h)
 endif()
 if(ENABLE_TYPE_DISCOVERY)
-  list(APPEND srcs_ddsi ddsi_typeid.c ddsi_typelookup.c)
-  list(APPEND hdrs_private_ddsi ddsi_typeid.h ddsi_typelookup.h)
+  list(APPEND srcs_ddsi ddsi_xt_typeinfo.c ddsi_xt_typelookup.c ddsi_xt_typemap.c ddsi_typelookup.c ddsi_typewrap.c)
+  list(APPEND hdrs_private_ddsi ddsi_xt_typeinfo.h ddsi_xt_typelookup.h ddsi_xt_typemap.h ddsi_typelookup.h ddsi_typewrap.h)
 endif()
 if(ENABLE_SECURITY)
   list(APPEND srcs_ddsi ddsi_security_msg.c ddsi_security_exchange.c)
   list(APPEND hdrs_private_ddsi ddsi_security_msg.h ddsi_security_exchange.h)
 endif()
-if(iceoryx_binding_c_FOUND)
-  list(APPEND srcs_ddsi shm_init.c shm_sync.c)
-  list(APPEND hdrs_private_ddsi shm_sync.h)
+if(ENABLE_SHM)
+  list(APPEND srcs_ddsi ddsi_shm_transport.c)
+  list(APPEND hdrs_private_ddsi ddsi_shm_transport.h)
 endif()
 
 prepend(hdrs_private_ddsi "${CMAKE_CURRENT_LIST_DIR}/include/dds/ddsi/" ${hdrs_private_ddsi})
 prepend(srcs_ddsi "${CMAKE_CURRENT_LIST_DIR}/src/" ${srcs_ddsi})
 
-target_sources(ddsc PRIVATE ${srcs_ddsi} ${defconfig_src} ${hdrs_private_ddsi})
+target_sources(ddsc PRIVATE ${srcs_ddsi} ${generated_defconfig_src} ${hdrs_private_ddsi})
+add_dependencies(ddsc _confgen)
 target_include_directories(ddsc PRIVATE "${CMAKE_CURRENT_LIST_DIR}/include")
 
 install(

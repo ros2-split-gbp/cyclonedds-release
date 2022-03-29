@@ -1,4 +1,5 @@
 /*
+ * Copyright(c) 2022 ZettaScale Technology and others
  * Copyright(c) 2021 ADLINK Technology Limited and others
  *
  * This program and the accompanying materials are made available under the
@@ -32,52 +33,56 @@
 
 #define IDL_DECLARATION \
   (IDL_MODULE | IDL_CONST | IDL_CONSTR_TYPE | IDL_TYPEDEF | \
-   IDL_MEMBER | IDL_CASE | IDL_CASE_LABEL | IDL_ENUMERATOR | IDL_DECLARATOR)
+   IDL_MEMBER | IDL_CASE | IDL_CASE_LABEL | IDL_ENUMERATOR | IDL_DECLARATOR | IDL_BIT_VALUE)
 
 #define IDL_TYPE \
   (IDL_BASE_TYPE | IDL_TEMPL_TYPE | IDL_CONSTR_TYPE | IDL_TYPEDEF)
 
 #define IDL_CONSTR_TYPE \
-  (IDL_STRUCT | IDL_UNION | IDL_ENUM)
+  (IDL_STRUCT | IDL_UNION | IDL_ENUM | IDL_BITMASK)
 
 #define IDL_TEMPL_TYPE \
   (IDL_SEQUENCE | IDL_STRING | IDL_WSTRING | IDL_FIXED_PT)
 
 /* miscellaneous */
-#define IDL_KEYLIST (1llu<<37)
-#define IDL_KEY (1llu<<36)
-#define IDL_INHERIT_SPEC (1llu<<35)
-#define IDL_SWITCH_TYPE_SPEC (1llu<<34)
-#define IDL_LITERAL (1ull<<33)
+#define IDL_KEYLIST (1llu<<39)
+#define IDL_KEY (1llu<<38)
+#define IDL_INHERIT_SPEC (1llu<<37)
+#define IDL_SWITCH_TYPE_SPEC (1llu<<36)
+#define IDL_LITERAL (1ull<<35)
 /* declarations */
-#define IDL_MODULE (1llu<<32)
-#define IDL_CONST (1llu<<31)
-#define IDL_MEMBER (1llu<<30)
-#define IDL_FORWARD (1llu<<29)
-#define IDL_CASE (1llu<<28)
-#define IDL_CASE_LABEL (1llu<<27)
+#define IDL_MODULE (1llu<<34)
+#define IDL_CONST (1llu<<33)
+#define IDL_MEMBER (1llu<<32)
+#define IDL_FORWARD (1llu<<31)
+#define IDL_CASE (1llu<<30)
+#define IDL_CASE_LABEL (1llu<<29)
 /* if explicit default is specified */
 #define IDL_DEFAULT_CASE_LABEL (IDL_CASE_LABEL | 1u)
 /* if no explicit default is specified and range is not covered */
 #define IDL_IMPLICIT_DEFAULT_CASE_LABEL (IDL_DEFAULT_CASE_LABEL | 2u)
-#define IDL_ENUMERATOR (1llu<<26)
-#define IDL_DECLARATOR (1llu<<25)
+#define IDL_ENUMERATOR (1llu<<28)
+#define IDL_DEFAULT_ENUMERATOR (IDL_ENUMERATOR | 1u)
+#define IDL_IMPLICIT_DEFAULT_ENUMERATOR (IDL_DEFAULT_ENUMERATOR | 2u)
+#define IDL_BIT_VALUE (1llu<<27)
+#define IDL_DECLARATOR (1llu<<26)
 /* annotations */
-#define IDL_ANNOTATION (1llu<<24)
-#define IDL_ANNOTATION_MEMBER (1llu<<23)
-#define IDL_ANNOTATION_APPL (1llu<<22)
-#define IDL_ANNOTATION_APPL_PARAM (1llu<<21)
+#define IDL_ANNOTATION (1llu<<25)
+#define IDL_ANNOTATION_MEMBER (1llu<<24)
+#define IDL_ANNOTATION_APPL (1llu<<23)
+#define IDL_ANNOTATION_APPL_PARAM (1llu<<22)
 
-/* bits 19 - 20 are reserved for operators (not exposed in tree) */
+/* bits 20 - 21 are reserved for operators (not exposed in tree) */
 
 typedef enum idl_type idl_type_t;
 enum idl_type {
   IDL_NULL = 0u,
-  IDL_TYPEDEF = (1llu<<18),
+  IDL_TYPEDEF = (1llu<<19),
   /* constructed types */
   IDL_STRUCT = (1u<<17),
   IDL_UNION = (1u<<16),
   IDL_ENUM = (1u<<15),
+  IDL_BITMASK = (1u<<18),
   /* template types */
   IDL_SEQUENCE = (1llu<<14),
   IDL_STRING = (1llu<<13),
@@ -117,6 +122,8 @@ enum idl_type {
   IDL_DOUBLE = (IDL_BASE_TYPE | IDL_FLOATING_PT_TYPE | 2u),
   IDL_LDOUBLE = (IDL_BASE_TYPE | IDL_FLOATING_PT_TYPE | 3u)
 };
+
+#define IDL_TYPE_MASK ((IDL_TYPEDEF << 1) - 1)
 
 typedef struct idl_name idl_name_t;
 struct idl_name {
@@ -174,51 +181,56 @@ struct idl_path {
   const idl_node_t **nodes;
 };
 
-typedef struct idl_id idl_id_t;
-struct idl_id {
-  enum {
-    IDL_AUTOID, /**< value assigned automatically */
-    IDL_ID, /**< value assigned by @id */
-    IDL_HASHID /**< value assigned by @hashid */
-  } annotation;
-  uint32_t value;
-};
-
 typedef enum idl_autoid idl_autoid_t;
 enum idl_autoid {
-  IDL_AUTOID_SEQUENTIAL,
-  IDL_AUTOID_HASH
+  IDL_SEQUENTIAL,
+  IDL_HASH
 };
 
 typedef enum idl_extensibility idl_extensibility_t;
 enum idl_extensibility {
-  IDL_EXTENSIBILITY_FINAL,
-  IDL_EXTENSIBILITY_APPENDABLE,
-  IDL_EXTENSIBILITY_MUTABLE
+  IDL_FINAL,
+  IDL_APPENDABLE,
+  IDL_MUTABLE
 };
 
-/* constructed types are not considered @nested types by default, implicitly
-   stating the intent to use it as a topic. extensible and dynamic topic types
-   added @default_nested and @topic to explicitly state the intent to use a
-   type as a topic. for ease of use, the sum-total is provided as a single
-   boolean */
-typedef struct idl_nested idl_nested_t;
-struct idl_nested {
-  enum {
-    IDL_DEFAULT_NESTED, /**< implicit through @default_nested (or not) */
-    IDL_NESTED, /**< annotated with @nested */
-    IDL_TOPIC /**< annotated with @topic (overrides @nested) */
-  } annotation;
-  bool value;
+typedef enum idl_try_construct idl_try_construct_t;
+enum idl_try_construct {
+  IDL_DISCARD,
+  IDL_USE_DEFAULT,
+  IDL_TRIM
 };
 
-/* nullable boolean, like Boolean object in e.g. JavaScript or Java */
-typedef enum idl_boolean idl_boolean_t;
-enum idl_boolean {
-  IDL_DEFAULT,
-  IDL_FALSE,
-  IDL_TRUE
-};
+typedef uint32_t allowable_data_representations_t;
+#define IDL_ALLOWABLE_DATAREPRESENTATION_DEFAULT (0xffffffff)
+typedef enum {
+  IDL_DATAREPRESENTATION_FLAG_XCDR1 = 0x1 << 0,
+  IDL_DATAREPRESENTATION_FLAG_XML   = 0x1 << 1,
+  IDL_DATAREPRESENTATION_FLAG_XCDR2 = 0x1 << 2
+} idl_data_representation_flags_t;
+
+typedef enum {
+  IDL_REQUIRES_XCDR2_UNSET,
+  IDL_REQUIRES_XCDR2_SETTING,
+  IDL_REQUIRES_XCDR2_TRUE,
+  IDL_REQUIRES_XCDR2_FALSE
+} idl_requires_xcdr2_t;
+
+/* most types have convenience members for information that is shared between
+   generators or makes sense to calculate in advance. e.g. the field
+   identifier for struct members, which can be assigned through @id, @hashid,
+   be assigned a value based on @autoid or the lack thereof. enumerator values
+   are another good example. in both scenarios the value can be assigned
+   through one or multiple annotations or automatically assigned when the
+   enclosing scope is finalized. if the value is assigned through use of
+   annotations, it must not be overwritten later on. alternatively, if
+   conflicting annotations are used, it must be possible to throw an
+   exception. therefore, each value that can be assigned explicitly, keeps a
+   weak reference to the annotation, or is set to NULL. only annotations on
+   the construct itself may be referenced. e.g. @default_nested annotations
+   are only referenced by the annotated module, not by any subconstructs */
+#define IDL_ANNOTATABLE(type) \
+  struct { const struct idl_annotation_appl *annotation; type value; }
 
 /* annotations */
 
@@ -282,7 +294,9 @@ struct idl_module {
   idl_definition_t *definitions;
   const idl_module_t *previous; /**< previous module if module was reopened */
   /* metadata */
-  idl_boolean_t default_nested;
+  IDL_ANNOTATABLE(bool) default_nested;
+  IDL_ANNOTATABLE(idl_autoid_t) autoid;
+  IDL_ANNOTATABLE(allowable_data_representations_t) data_representation;
 };
 
 typedef struct idl_declarator idl_declarator_t;
@@ -290,6 +304,8 @@ struct idl_declarator {
   idl_node_t node;
   idl_name_t *name;
   idl_const_expr_t *const_expr;
+  /* metadata */
+  IDL_ANNOTATABLE(uint32_t) id;
 };
 
 typedef struct idl_member idl_member_t;
@@ -298,8 +314,15 @@ struct idl_member {
   idl_type_spec_t *type_spec;
   idl_declarator_t *declarators;
   /* metadata */
-  idl_boolean_t key;
-  idl_id_t id;
+  IDL_ANNOTATABLE(bool) key;
+  IDL_ANNOTATABLE(bool) optional;
+  IDL_ANNOTATABLE(bool) external;
+  IDL_ANNOTATABLE(bool) must_understand;
+  IDL_ANNOTATABLE(idl_try_construct_t) try_construct;
+  IDL_ANNOTATABLE(const idl_literal_t*) min;
+  IDL_ANNOTATABLE(const idl_literal_t*) max;
+  IDL_ANNOTATABLE(const idl_literal_t*) value;
+  IDL_ANNOTATABLE(const char *) unit;
 };
 
 /* types can inherit from and extend other types (interfaces, values and
@@ -308,7 +331,7 @@ struct idl_member {
 typedef struct idl_inherit_spec idl_inherit_spec_t;
 struct idl_inherit_spec {
   idl_node_t node;
-  void *base;
+  idl_type_spec_t *base;
 };
 
 /* keylist directives can use dotted names, e.g. "#pragma keylist foo bar.baz"
@@ -335,10 +358,29 @@ struct idl_struct {
   struct idl_name *name;
   idl_member_t *members;
   /* metadata */
-  idl_nested_t nested; /**< if type is a topic (sum total of annotations) */
   idl_keylist_t *keylist; /**< if type is a topic (#pragma keylist) */
-  idl_autoid_t autoid;
-  idl_extensibility_t extensibility;
+  idl_requires_xcdr2_t requires_xcdr2;
+  IDL_ANNOTATABLE(uint32_t) id;
+  IDL_ANNOTATABLE(idl_autoid_t) autoid;
+  /* constructed types are not considered @nested types by default, implicitly
+     stating the intent to use it as a topic. extensible and dynamic topic
+     types added @default_nested and @topic to explicitly state the intent to
+     use a type as a topic. for ease of use, the sum-total is provided as a
+     single boolean */
+  IDL_ANNOTATABLE(bool) nested;
+  IDL_ANNOTATABLE(idl_extensibility_t) extensibility;
+  IDL_ANNOTATABLE(allowable_data_representations_t) data_representation;
+};
+
+typedef struct idl_forward idl_forward_t;
+struct idl_forward {
+  idl_node_t node;
+  struct idl_name *name;
+  /* FIXME: no reference count is maintained for type specifier in forward
+            declarations as it may introduce cyclic dependencies. perfect
+            reason to remove use of destructors in Bison and use a pool
+            allocator instead */
+  idl_type_spec_t *type_spec;
 };
 
 typedef struct idl_case_label idl_case_label_t;
@@ -353,6 +395,11 @@ struct idl_case {
   idl_case_label_t *labels;
   idl_type_spec_t *type_spec;
   idl_declarator_t *declarator;
+  IDL_ANNOTATABLE(bool) external;
+  IDL_ANNOTATABLE(idl_try_construct_t) try_construct;
+  IDL_ANNOTATABLE(const idl_literal_t*) min;
+  IDL_ANNOTATABLE(const idl_literal_t*) max;
+  IDL_ANNOTATABLE(const char *) unit;
 };
 
 typedef struct idl_switch_type_spec idl_switch_type_spec_t;
@@ -360,7 +407,7 @@ struct idl_switch_type_spec {
   idl_node_t node;
   idl_type_spec_t *type_spec;
   /* metadata */
-  idl_boolean_t key;
+  IDL_ANNOTATABLE(bool) key;
 };
 
 typedef struct idl_union idl_union_t;
@@ -371,14 +418,16 @@ struct idl_union {
   idl_case_t *cases;
   /* metadata */
   /* label associated with the default value for the discriminator. i.e.
-   * the first discriminant value if the entire range of the discriminator is
-   * covered, the default case if specified, or a spontaneously materialised
-   * implicit default case that does not reference any branch
-   */
+     the first discriminant value if the entire range of the discriminator is
+     covered, the default case if specified, or a spontaneously materialised
+     implicit default case that does not reference any branch */
   idl_case_label_t *default_case;
   uint64_t unused_labels; /**< number of unused labels */
-  idl_nested_t nested; /**< if type is topic (sum total of annotations) */
-  idl_extensibility_t extensibility;
+  idl_requires_xcdr2_t requires_xcdr2;
+  IDL_ANNOTATABLE(bool) nested; /**< if type is nested or a topic */
+  IDL_ANNOTATABLE(idl_extensibility_t) extensibility;
+  IDL_ANNOTATABLE(idl_autoid_t) autoid;
+  IDL_ANNOTATABLE(allowable_data_representations_t) data_representation;
 };
 
 typedef struct idl_enumerator idl_enumerator_t;
@@ -389,7 +438,7 @@ struct idl_enumerator {
   /* an enumeration must contain no more than 2^32 enumerators and must be
      mapped to a native data type capable of representing a maximally-sized
      enumeration */
-  uint32_t value;
+  IDL_ANNOTATABLE(uint32_t) value;
 };
 
 typedef struct idl_enum idl_enum_t;
@@ -397,7 +446,25 @@ struct idl_enum {
   idl_node_t node;
   struct idl_name *name;
   idl_enumerator_t *enumerators;
-  idl_extensibility_t extensibility;
+  idl_enumerator_t *default_enumerator;
+  IDL_ANNOTATABLE(uint16_t) bit_bound;
+  IDL_ANNOTATABLE(idl_extensibility_t) extensibility;
+};
+
+typedef struct idl_bit_value idl_bit_value_t;
+struct idl_bit_value {
+  idl_node_t node;
+  struct idl_name *name;
+  IDL_ANNOTATABLE(uint16_t) position;
+};
+
+typedef struct idl_bitmask idl_bitmask_t;
+struct idl_bitmask {
+  idl_node_t node;
+  struct idl_name *name;
+  idl_bit_value_t *bit_values;
+  IDL_ANNOTATABLE(uint16_t) bit_bound;
+  IDL_ANNOTATABLE(idl_extensibility_t) extensibility;
 };
 
 typedef struct idl_typedef idl_typedef_t;
@@ -458,8 +525,11 @@ IDL_EXPORT bool idl_is_templ_type(const void *node);
 IDL_EXPORT bool idl_is_bounded(const void *node);
 IDL_EXPORT bool idl_is_sequence(const void *node);
 IDL_EXPORT bool idl_is_string(const void *node);
+IDL_EXPORT bool idl_is_unbounded_string(const void *node);
+IDL_EXPORT bool idl_is_bounded_string(const void *node);
 IDL_EXPORT bool idl_is_constr_type(const void *node);
 IDL_EXPORT bool idl_is_struct(const void *node);
+IDL_EXPORT bool idl_is_empty(const void *node);
 IDL_EXPORT bool idl_is_inherit_spec(const void *node);
 IDL_EXPORT bool idl_is_member(const void *node);
 IDL_EXPORT bool idl_is_union(const void *node);
@@ -470,6 +540,8 @@ IDL_EXPORT bool idl_is_implicit_default_case(const void *ptr);
 IDL_EXPORT bool idl_is_case_label(const void *node);
 IDL_EXPORT bool idl_is_enum(const void *node);
 IDL_EXPORT bool idl_is_enumerator(const void *node);
+IDL_EXPORT bool idl_is_bitmask(const void *node);
+IDL_EXPORT bool idl_is_bit_value(const void *node);
 IDL_EXPORT bool idl_is_alias(const void *node);
 IDL_EXPORT bool idl_is_typedef(const void *node);
 IDL_EXPORT bool idl_is_declarator(const void *node);
@@ -478,8 +550,15 @@ IDL_EXPORT bool idl_is_annotation_member(const void *node);
 IDL_EXPORT bool idl_is_annotation_appl(const void *node);
 IDL_EXPORT bool idl_is_topic(const void *node, bool keylist);
 IDL_EXPORT bool idl_is_keyless(const void *node, bool keylist);
+IDL_EXPORT bool idl_is_forward(const void *node);
 /* 1-based, returns 0 if path does not refer to key, non-0 otherwise */
-IDL_EXPORT uint32_t idl_is_topic_key(const void *node, bool keylist, const idl_path_t *path);
+IDL_EXPORT bool idl_is_topic_key(const void *node, bool keylist, const idl_path_t *path, uint32_t *order);
+IDL_EXPORT bool idl_is_extensible(const idl_node_t *node, idl_extensibility_t extensibility);
+IDL_EXPORT bool idl_has_unset_extensibility_r(idl_node_t *node);
+IDL_EXPORT bool idl_is_external(const idl_node_t *node);
+IDL_EXPORT bool idl_is_optional(const idl_node_t *node);
+IDL_EXPORT bool idl_is_must_understand(const idl_node_t *node);
+IDL_EXPORT int64_t idl_case_label_intvalue(const void *ptr);
 
 /* accessors */
 IDL_EXPORT idl_mask_t idl_mask(const void *node);
@@ -489,9 +568,14 @@ IDL_EXPORT idl_type_spec_t *idl_type_spec(const void *node);
    "forward struct" for modules and forward struct declarations respectively */
 IDL_EXPORT const char *idl_construct(const void *node);
 IDL_EXPORT const char *idl_identifier(const void *node);
+IDL_EXPORT bool idl_identifier_is(const void *node, const char *identifier);
 IDL_EXPORT const idl_name_t *idl_name(const void *node);
 IDL_EXPORT uint32_t idl_array_size(const void *node);
 IDL_EXPORT uint32_t idl_bound(const void *node);
+IDL_EXPORT const idl_literal_t *idl_default_value(const void *node);
+IDL_EXPORT bool idl_requires_xcdr2(const void *node);
+IDL_EXPORT allowable_data_representations_t idl_allowable_data_representations(const void *node);
+IDL_EXPORT uint32_t idl_enum_max_value(const void *node);
 
 /* navigation */
 IDL_EXPORT void *idl_ancestor(const void *node, size_t levels);
@@ -504,7 +588,11 @@ IDL_EXPORT void *idl_iterate(const void *root, const void *node);
 #define IDL_FOREACH(node, list) \
   for ((node) = (list); (node); (node) = idl_next(node))
 
-#define IDL_UNALIAS_IGNORE_ARRAY (1u<<0) /**< ignore array declarators */
-IDL_EXPORT void *idl_unalias(const void *node, uint32_t flags);
+IDL_EXPORT void *idl_unalias(const void *node);
+
+#define IDL_STRIP_ALIASES (1u<<0) /**< expose base type of aliase(s) for a non-array type */
+#define IDL_STRIP_ALIASES_ARRAY (1u<<1) /**< expose base type of aliase(s) for array type */
+#define IDL_STRIP_FORWARD (1u<<2) /**< expose definition */
+IDL_EXPORT void *idl_strip(const void *node, uint32_t flags);
 
 #endif /* IDL_TREE_H */

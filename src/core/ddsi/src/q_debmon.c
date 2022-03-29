@@ -21,7 +21,7 @@
 #include "dds/ddsrt/avl.h"
 
 #include "dds/ddsi/q_entity.h"
-#include "dds/ddsi/q_config.h"
+#include "dds/ddsi/ddsi_config_impl.h"
 #include "dds/ddsi/q_misc.h"
 #include "dds/ddsi/q_log.h"
 #include "dds/ddsi/ddsi_plist.h"
@@ -199,7 +199,7 @@ static int print_participants (struct thread_state1 * const ts1, struct ddsi_dom
         ddsrt_mutex_lock (&w->e.lock);
         print_endpoint_common (conn, "wr", &w->e, &w->c, w->xqos);
         whc_get_state(w->whc, &whcst);
-        x += cpf (conn, "    whc [%"PRId64",%"PRId64"] unacked %"PRIuSIZE"%s [%"PRIu32",%"PRIu32"] seq %"PRId64" seq_xmit %"PRId64" cs_seq %"PRId64"\n",
+        x += cpf (conn, "    whc [%"PRIu64",%"PRIu64"] unacked %"PRIuSIZE"%s [%"PRIu32",%"PRIu32"] seq %"PRIu64" seq_xmit %"PRIu64" cs_seq %"PRIu64"\n",
                   whcst.min_seq, whcst.max_seq, whcst.unacked_bytes,
                   w->throttling ? " THROTTLING" : "",
                   w->whc_low, w->whc_high,
@@ -212,7 +212,7 @@ static int print_participants (struct thread_state1 * const ts1, struct ddsi_dom
                     w->hbcontrol.tsched.v, w->num_reliable_readers);
           x += cpf (conn, "    #acks %"PRIu32" #nacks %"PRIu32" #rexmit %"PRIu32" #lost %"PRIu32" #throttle %"PRIu32"\n",
                     w->num_acks_received, w->num_nacks_received, w->rexmit_count, w->rexmit_lost_count, w->throttle_count);
-          x += cpf (conn, "    max-drop-seq %"PRId64"\n", writer_max_drop_seq (w));
+          x += cpf (conn, "    max-drop-seq %"PRIu64"\n", writer_max_drop_seq (w));
         }
         x += print_addrset_if_notempty (conn, "    as", w->as, "\n");
         for (m = ddsrt_avl_iter_first (&wr_readers_treedef, &w->readers, &rdit); m; m = ddsrt_avl_iter_next (&rdit))
@@ -222,7 +222,7 @@ static int print_participants (struct thread_state1 * const ts1, struct ddsi_dom
           wr_prd_flags[1] = m->assumed_in_sync ? 's' : '.';
           wr_prd_flags[2] = m->has_replied_to_hb ? 'a' : '.'; /* a = ack seen */
           wr_prd_flags[3] = 0;
-          x += cpf (conn, "    prd "PGUIDFMT" %s @ %"PRId64" [%"PRId64",%"PRId64"] #nacks %"PRIu32"\n",
+          x += cpf (conn, "    prd "PGUIDFMT" %s @ %"PRIu64" [%"PRIu64",%"PRIu64"] #nacks %"PRIu32"\n",
                     PGUID (m->prd_guid), wr_prd_flags, m->seq, m->min_seq, m->max_seq, m->rexmit_requests);
         }
         ddsrt_mutex_unlock (&w->e.lock);
@@ -281,20 +281,20 @@ static int print_proxy_participants (struct thread_state1 * const ts1, struct dd
           continue;
         ddsrt_mutex_lock (&w->e.lock);
         print_proxy_endpoint_common (conn, "pwr", &w->e, &w->c);
-        x += cpf (conn, "    last_seq %"PRId64" last_fragnum %"PRIu32"\n", w->last_seq, w->last_fragnum);
+        x += cpf (conn, "    last_seq %"PRIu64" last_fragnum %"PRIu32"\n", w->last_seq, w->last_fragnum);
         for (m = ddsrt_avl_iter_first (&wr_readers_treedef, &w->readers, &rdit); m; m = ddsrt_avl_iter_next (&rdit))
         {
-          x += cpf (conn, "    rd "PGUIDFMT" (nack %"PRId64" frag %"PRIu32" %"PRId64")\n",
+          x += cpf (conn, "    rd "PGUIDFMT" (nack %"PRIu64" frag %"PRIu32" %"PRId64")\n",
                     PGUID (m->rd_guid), m->last_nack.seq_end_p1, m->last_nack.frag_end_p1, m->t_last_nack.v);
           switch (m->in_sync)
           {
             case PRMSS_SYNC:
               break;
             case PRMSS_TLCATCHUP:
-              x += cpf (conn, "      tl-catchup end_of_tl_seq %"PRId64"\n", m->u.not_in_sync.end_of_tl_seq);
+              x += cpf (conn, "      tl-catchup end_of_tl_seq %"PRIu64"\n", m->u.not_in_sync.end_of_tl_seq);
               break;
             case PRMSS_OUT_OF_SYNC:
-              x += cpf (conn, "      out-of-sync end_of_tl_seq %"PRId64"\n", m->u.not_in_sync.end_of_tl_seq);
+              x += cpf (conn, "      out-of-sync end_of_tl_seq %"PRIu64"\n", m->u.not_in_sync.end_of_tl_seq);
               break;
           }
         }
