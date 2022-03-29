@@ -121,15 +121,15 @@ tracks:
       :{release_inc} --os-name fedora
     - git-bloom-generate -y rosrpm --prefix release/:{ros_distro} :{ros_distro} -i
       :{release_inc} --os-name rhel
-    devel_branch: releases/0.8.x
+    devel_branch: releases/0.9.x
     last_release: 0.8.0beta6
     last_version: 0.8.2
     name: cyclonedds
     patches: null
     release_inc: '1'
     release_repo_url: https://github.com/ros2-gbp/cyclonedds-release.git
-    release_tag: :{version}
+    release_tag: 0.9.0b1
     ros_distro: rolling
     vcs_type: git
     vcs_uri: https://github.com/eclipse-cyclonedds/cyclonedds.git
-    version: 0.8.2
+    version: 0.9.0
