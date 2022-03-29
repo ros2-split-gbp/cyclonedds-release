@@ -9,8 +9,6 @@
 #
 # SPDX-License-Identifier: EPL-2.0 OR BSD-3-Clause
 #
-cmake_minimum_required(VERSION 3.7)
-
 if(NOT ${PROJECT_NAME} STREQUAL "CycloneDDS")
   get_filename_component(dir ${CMAKE_CURRENT_LIST_DIR} DIRECTORY)
   message(FATAL_ERROR "Top-level CMakeLists.txt was moved to the top-level directory.  Please run cmake on ${dir} instead of ${CMAKE_CURRENT_LIST_DIR}")
@@ -24,15 +22,6 @@ function(PREPEND var prefix)
   set(${var} "${listVar}" PARENT_SCOPE)
 endfunction()
 
-# Generate a header file listing compile-time options relevant to the API.  Define to
-# "1" if enabled so that the generated features.h ends up having either
-#
-# - #define DDS_HAS_SECURITY 1
-# or
-# - /* #undef DDS_HAS_SECURITY */
-#
-# which caters both for those who prefer #ifdef DDS_HAS_SECURITY and for those who prefer
-# #if DDS_HAS_SECURITY.
 option(ENABLE_SECURITY "Enable OMG DDS Security support" ON)
 option(ENABLE_LIFESPAN "Enable Lifespan QoS support" ON)
 option(ENABLE_DEADLINE_MISSED "Enable Deadline Missed QoS support" ON)
@@ -40,45 +29,33 @@ option(ENABLE_NETWORK_PARTITIONS "Enable network partition support" ON)
 option(ENABLE_SOURCE_SPECIFIC_MULTICAST "Enable support for source-specific multicast" ON)
 option(ENABLE_TYPE_DISCOVERY "Enable Type Discovery support" OFF)
 option(ENABLE_TOPIC_DISCOVERY "Enable Topic Discovery support" OFF)
-option(ENABLE_SHM "Enable shared memory support" ON)
-if(ENABLE_SECURITY)
-  set(DDS_HAS_SECURITY "1")
-endif()
-if(ENABLE_LIFESPAN)
-  set(DDS_HAS_LIFESPAN "1")
-endif()
-if(ENABLE_DEADLINE_MISSED)
-  set(DDS_HAS_DEADLINE_MISSED "1")
-endif()
-if(ENABLE_NETWORK_PARTITIONS)
-  set(DDS_HAS_NETWORK_PARTITIONS "1")
-endif()
-if(ENABLE_SOURCE_SPECIFIC_MULTICAST)
-  set(DDS_HAS_SSM "1")
-endif()
-if(ENABLE_TYPE_DISCOVERY)
-  set(DDS_HAS_TYPE_DISCOVERY "1")
-endif()
 if(ENABLE_TOPIC_DISCOVERY)
   if(NOT ENABLE_TYPE_DISCOVERY)
     message(FATAL_ERROR "ENABLE_TOPIC_DISCOVERY requires ENABLE_TYPE_DISCOVERY to be enabled")
   endif()
-  set(DDS_HAS_TOPIC_DISCOVERY "1")
 endif()
 
-option(CYCLONE_BUILD_WITH_ICEORYX "iceoryx not found by default" OFF)
+if(ENABLE_SOURCE_SPECIFIC_MULTICAST)
+  set(ENABLE_SSM ON)
+endif()
+
+# Prefer iceoryx integration but do not require it.
+if(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
+  set(ENABLE_SHM "OFF" CACHE STRING "Disable shared memory support")
+  message(STATUS "Warning: iceoryx binding for Windows currently not supported")
+else()
+  set(ENABLE_SHM "AUTO" CACHE STRING "Enable shared memory support")
+endif()
+
+set_property(CACHE ENABLE_SHM PROPERTY STRINGS ON OFF AUTO)
 if(ENABLE_SHM)
-  if(CMAKE_SYSTEM_NAME MATCHES Linux OR CMAKE_SYSTEM_NAME MATCHES Darwin)
-    message(STATUS "Linux/MacOS system found, trying to find iceoryx...")
-    find_package(iceoryx_binding_c QUIET)
-    if(iceoryx_binding_c_FOUND)
-      set(CYCLONE_BUILD_WITH_ICEORYX TRUE CACHE BOOL "Iceoryx found!" FORCE)
-      set(DDS_HAS_SHM "1")
-      message(STATUS "Build CycloneDDS with iceoryx shared memory support!")
-    else()
-      message(STATUS "iceoryx not found, falling back to loopback communication.")
-    endif()
+  if(NOT ENABLE_SHM STREQUAL "AUTO")
+    set(iceoryx_required REQUIRED)
+  else()
+    set(iceoryx_required QUIET)
   endif()
+  find_package(iceoryx_binding_c ${iceoryx_required})
+  set(ENABLE_SHM ${iceoryx_binding_c_FOUND} CACHE STRING "" FORCE)
 endif()
 
 # ones that linger in the sources
@@ -91,27 +68,26 @@ endif()
 #
 # Historically the option was DDSC_ENABLE_OPENSSL so make some allowance for those who are
 # currently relying on it.
-option(ENABLE_SSL "Enable openssl support" ON)
-option(DDSC_ENABLE_OPENSSL "Deprecated: please use ENABLE_SSL instead" ON)
-if(NOT DDSC_ENABLE_OPENSSL)
-  message(ERROR "DDSC_ENABLE_OPENSSL is deprecated, please use ENABLE_SSL instead")
-  set(ENABLE_SSL OFF)
-endif()
+set(ENABLE_SSL "AUTO" CACHE STRING "Enable OpenSSL support")
+set_property(CACHE ENABLE_SSL PROPERTY STRINGS ON OFF AUTO)
 if(ENABLE_SSL)
-  find_package(OpenSSL)
-  if(OPENSSL_FOUND)
-    set(DDS_HAS_SSL "1")
-    message(STATUS "Building with OpenSSL support")
+  if(NOT ENABLE_SSL STREQUAL "AUTO")
+    find_package(OpenSSL REQUIRED)
   else()
-    message(STATUS "Building without OpenSSL support")
+    find_package(OpenSSL QUIET)
+    if(OPENSSL_FOUND)
+      message(STATUS "Building with OpenSSL support")
+      set(ENABLE_SSL "ON")
+    else()
+      message(STATUS "Building without OpenSSL support")
+      set(ENABLE_SSL "OFF")
+    endif()
   endif()
 endif()
 
 if(NOT ENABLE_SECURITY)
   message(STATUS "Building without OMG DDS Security support")
 endif()
-
-configure_file(features.h.in "${CMAKE_CURRENT_BINARY_DIR}/core/include/dds/features.h")
 
 add_subdirectory(tools)
 add_subdirectory(ddsrt)

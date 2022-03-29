@@ -22,22 +22,21 @@
 #include "dds/ddsi/q_xmsg.h"
 #include "dds/ddsi/ddsi_tkmap.h"
 #include "dds/ddsi/ddsi_rhc.h"
+#include "iceoryx_binding_c/chunk.h"
 
 #if defined (__cplusplus)
 extern "C" {
 #endif
 
-static void shm_wakeup_trigger_callback(iox_user_trigger_t trigger);
-static void shm_subscriber_callback(iox_sub_t subscriber);
+static void shm_subscriber_callback(iox_sub_t subscriber, void * context_data);
 
 void shm_monitor_init(shm_monitor_t* monitor) 
 {
     ddsrt_mutex_init(&monitor->m_lock);
-
-    monitor->m_listener = iox_listener_init(&monitor->m_listener_storage);
-    monitor->m_wakeup_trigger = iox_user_trigger_init(&monitor->m_wakeup_trigger_storage.storage);
-    monitor->m_wakeup_trigger_storage.monitor = monitor;
-    iox_listener_attach_user_trigger_event(monitor->m_listener, monitor->m_wakeup_trigger, shm_wakeup_trigger_callback);
+    
+    // storage is ignored internally now but we cannot pass a nullptr    
+    monitor->m_listener = iox_listener_init(&(iox_listener_storage_t){0});
+    monitor->m_wakeup_trigger = iox_user_trigger_init(&(iox_user_trigger_storage_t){0});
 
     monitor->m_state = SHM_MONITOR_RUNNING;
 }
@@ -51,16 +50,8 @@ void shm_monitor_destroy(shm_monitor_t* monitor)
     // any remaining callbacks will be executed
 
     iox_listener_deinit(monitor->m_listener);
+    iox_user_trigger_deinit(monitor->m_wakeup_trigger);
     ddsrt_mutex_destroy(&monitor->m_lock);
-}
-
-dds_return_t shm_monitor_wake_and_invoke(shm_monitor_t* monitor, void (*function) (void*), void* arg) 
-{
-    iox_user_trigger_storage_extension_t* storage = (iox_user_trigger_storage_extension_t*) monitor->m_wakeup_trigger;
-    storage->call = function;
-    storage->arg = arg;
-    iox_user_trigger_trigger(monitor->m_wakeup_trigger);
-    return DDS_RETCODE_OK;
 }
 
 dds_return_t shm_monitor_wake_and_disable(shm_monitor_t* monitor) 
@@ -80,7 +71,11 @@ dds_return_t shm_monitor_wake_and_enable(shm_monitor_t* monitor)
 dds_return_t shm_monitor_attach_reader(shm_monitor_t* monitor, struct dds_reader* reader) 
 {
 
-    if(iox_listener_attach_subscriber_event(monitor->m_listener, reader->m_iox_sub, SubscriberEvent_DATA_RECEIVED, shm_subscriber_callback) != ListenerResult_SUCCESS) {
+    if(iox_listener_attach_subscriber_event_with_context_data(monitor->m_listener,
+                                                              reader->m_iox_sub,
+                                                              SubscriberEvent_DATA_RECEIVED,
+                                                              shm_subscriber_callback,
+                                                              &reader->m_iox_sub_context) != ListenerResult_SUCCESS) {
         DDS_CLOG(DDS_LC_SHM, &reader->m_rd->e.gv->logconfig, "error attaching reader\n");    
         return DDS_RETCODE_OUT_OF_RESOURCES;
     }
@@ -108,10 +103,38 @@ static void receive_data_wakeup_handler(struct dds_reader* rd)
     enum iox_ChunkReceiveResult take_result = iox_sub_take_chunk(rd->m_iox_sub, (const void** const)&chunk);
     shm_unlock_iox_sub(rd->m_iox_sub);
 
-    if (ChunkReceiveResult_SUCCESS != take_result)
-      break;
+    // NB: If we cannot take the chunk (sample) the user may lose data.
+    // Since the subscriber queue can overflow and will evict the least recent sample.
+    // This entirely depends on the producer and consumer frequency (and the queue size if they are close).
+    // The consumer here is essentially the reader history cache.
+    if (ChunkReceiveResult_SUCCESS != take_result) 
+    {
+      switch(take_result) 
+      {
+        case ChunkReceiveResult_TOO_MANY_CHUNKS_HELD_IN_PARALLEL :
+        {
+          // we hold to many chunks and cannot get more
+          DDS_CLOG (DDS_LC_WARNING | DDS_LC_SHM, &rd->m_entity.m_domain->gv.logconfig, 
+              "DDS reader with topic %s : iceoryx subscriber - TOO_MANY_CHUNKS_HELD_IN_PARALLEL -"
+              "could not take sample\n", rd->m_topic->m_name);
+          break;
+        }
+        case ChunkReceiveResult_NO_CHUNK_AVAILABLE: {
+          // no more chunks to take, ok
+          break;
+        }
+        default : {
+          // some unkown error occurred
+          DDS_CLOG(DDS_LC_WARNING | DDS_LC_SHM, &rd->m_entity.m_domain->gv.logconfig,
+              "DDS reader with topic %s : iceoryx subscriber - UNKNOWN ERROR -"
+              "could not take sample\n", rd->m_topic->m_name);
+        }
+      }
 
-    iceoryx_header_t* ice_hdr = (iceoryx_header_t*)chunk;
+      break;
+    }
+  
+    const iceoryx_header_t* ice_hdr = iceoryx_header_from_chunk(chunk);
 
     // Get writer or proxy writer
     struct entity_common * e = entidx_lookup_guid_untyped (gv->entity_index, &ice_hdr->guid);
@@ -122,9 +145,8 @@ static void receive_data_wakeup_handler(struct dds_reader* rd)
       continue;
     }
 
-    // Create struct ddsi_serdata
-    struct ddsi_serdata* d = ddsi_serdata_from_iox(rd->m_topic->m_stype, ice_hdr->data_kind, &rd->m_iox_sub, chunk);
-    //keyhash needs to be set here
+    // Create struct ddsi_serdata    
+    struct ddsi_serdata* d = ddsi_serdata_from_iox(rd->m_topic->m_stype, ice_hdr->data_kind, &rd->m_iox_sub, chunk);    
     d->timestamp.v = ice_hdr->tstamp;
     d->statusinfo = ice_hdr->statusinfo;
 
@@ -155,21 +177,13 @@ release:
   thread_state_asleep(lookup_thread_state());
 }
 
-static void shm_wakeup_trigger_callback(iox_user_trigger_t trigger) 
-{    
-    // we know it is actually in extended storage since we created it like this
-    iox_user_trigger_storage_extension_t* storage = (iox_user_trigger_storage_extension_t*) trigger;
-    if(storage->monitor->m_state == SHM_MONITOR_RUNNING && storage->call) {
-        storage->call(storage->arg);
-    }
-}
-
-static void shm_subscriber_callback(iox_sub_t subscriber) 
+static void shm_subscriber_callback(iox_sub_t subscriber, void * context_data)
 {
+    (void)subscriber;
     // we know it is actually in extended storage since we created it like this
-    iox_sub_storage_extension_t *storage = (iox_sub_storage_extension_t*) subscriber; 
-    if(storage->monitor->m_state == SHM_MONITOR_RUNNING) {
-        receive_data_wakeup_handler(storage->parent_reader);
+    iox_sub_context_t *context = (iox_sub_context_t*) context_data;
+    if(context->monitor->m_state == SHM_MONITOR_RUNNING) {
+        receive_data_wakeup_handler(context->parent_reader);
     }
 }
 

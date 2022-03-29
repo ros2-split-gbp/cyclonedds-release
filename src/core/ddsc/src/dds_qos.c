@@ -1,4 +1,5 @@
 /*
+ * Copyright(c) 2022 ZettaScale Technology
  * Copyright(c) 2006 to 2018 ADLINK Technology Limited and others
  *
  * This program and the accompanying materials are made available under the
@@ -16,6 +17,7 @@
 #include "dds/ddsrt/heap.h"
 #include "dds/ddsrt/string.h"
 #include "dds/ddsi/ddsi_plist.h"
+#include "dds__qos.h"
 
 static void dds_qos_data_copy_in (ddsi_octetseq_t *data, const void * __restrict value, size_t sz, bool overwrite)
 {
@@ -121,7 +123,7 @@ bool dds_qos_equal (const dds_qos_t * __restrict a, const dds_qos_t * __restrict
   else if (a == NULL || b == NULL)
     return false;
   else
-    return ddsi_xqos_delta (a, b, ~(QP_CYCLONE_TYPE_INFORMATION)) == 0;
+    return ddsi_xqos_delta (a, b, ~(QP_TYPE_INFORMATION)) == 0;
 }
 
 void dds_qset_userdata (dds_qos_t * __restrict qos, const void * __restrict value, size_t sz)
@@ -455,6 +457,34 @@ void dds_qset_type_consistency (dds_qos_t * __restrict qos, dds_type_consistency
   qos->present |= QP_TYPE_CONSISTENCY_ENFORCEMENT;
 }
 
+void dds_qset_data_representation (dds_qos_t * __restrict qos, uint32_t n, const dds_data_representation_id_t *values)
+{
+  if (qos == NULL || (n && !values))
+    return;
+  if ((qos->present & QP_DATA_REPRESENTATION) && qos->data_representation.value.ids != NULL)
+    ddsrt_free (qos->data_representation.value.ids);
+  qos->data_representation.value.n = 0;
+  qos->data_representation.value.ids = NULL;
+
+  /* De-duplicate the provided list of data representation identifiers. The re-alloc
+     approach is rather inefficient, but not really a problem because the list will
+     typically have a very limited number of values */
+  for (uint32_t x = 0; x < n; x++)
+  {
+    bool duplicate = false;
+    for (uint32_t c = 0; !duplicate && c < x; c++)
+      if (qos->data_representation.value.ids[c] == values[x])
+        duplicate = true;
+    if (!duplicate)
+    {
+      qos->data_representation.value.n++;
+      qos->data_representation.value.ids = dds_realloc (qos->data_representation.value.ids, qos->data_representation.value.n * sizeof (*qos->data_representation.value.ids));
+      qos->data_representation.value.ids[qos->data_representation.value.n - 1] = values[x];
+    }
+  }
+  qos->present |= QP_DATA_REPRESENTATION;
+}
+
 bool dds_qget_userdata (const dds_qos_t * __restrict qos, void **value, size_t *sz)
 {
   if (qos == NULL || !(qos->present & QP_USER_DATA))
@@ -768,3 +798,70 @@ bool dds_qget_type_consistency (const dds_qos_t * __restrict qos, dds_type_consi
     *force_type_validation = qos->type_consistency.force_type_validation;
   return true;
 }
+
+bool dds_qget_data_representation (const dds_qos_t * __restrict qos, uint32_t *n, dds_data_representation_id_t **values)
+{
+  if (qos == NULL || !(qos->present & QP_DATA_REPRESENTATION))
+    return false;
+  if (n == NULL)
+    return false;
+  if (qos->data_representation.value.n > 0)
+    assert (qos->data_representation.value.ids != NULL);
+  *n = qos->data_representation.value.n;
+  if (values != NULL)
+  {
+    if (qos->data_representation.value.n > 0)
+    {
+      size_t sz = qos->data_representation.value.n * sizeof (*qos->data_representation.value.ids);
+      *values = dds_alloc (sz);
+      memcpy (*values, qos->data_representation.value.ids, sz);
+    }
+    else
+    {
+      *values = NULL;
+    }
+  }
+  return true;
+}
+
+dds_return_t dds_ensure_valid_data_representation (dds_qos_t *qos, uint32_t allowed_data_representations, bool topicqos)
+{
+  const bool allow1 = allowed_data_representations & DDS_DATA_REPRESENTATION_FLAG_XCDR1,
+    allow2 = allowed_data_representations & DDS_DATA_REPRESENTATION_FLAG_XCDR2;
+
+  if ((qos->present & QP_DATA_REPRESENTATION) && qos->data_representation.value.n > 0)
+  {
+    assert (qos->data_representation.value.ids != NULL);
+    for (uint32_t n = 0; n < qos->data_representation.value.n; n++)
+    {
+      switch (qos->data_representation.value.ids[n])
+      {
+        case DDS_DATA_REPRESENTATION_XML:
+          return DDS_RETCODE_UNSUPPORTED;
+        case DDS_DATA_REPRESENTATION_XCDR1:
+          if (!allow1)
+            return DDS_RETCODE_BAD_PARAMETER;
+          break;
+        case DDS_DATA_REPRESENTATION_XCDR2:
+          if (!allow2)
+            return DDS_RETCODE_BAD_PARAMETER;
+          break;
+        default:
+          return DDS_RETCODE_BAD_PARAMETER;
+      }
+    }
+  }
+  else
+  {
+    if (!allow1 && !allow2)
+      return DDS_RETCODE_BAD_PARAMETER;
+    if (!allow1)
+      dds_qset_data_representation (qos, 1, (dds_data_representation_id_t[]) { DDS_DATA_REPRESENTATION_XCDR2 });
+    else if (!topicqos || !allow2)
+      dds_qset_data_representation (qos, 1, (dds_data_representation_id_t[]) { DDS_DATA_REPRESENTATION_XCDR1 });
+    else
+      dds_qset_data_representation (qos, 2, (dds_data_representation_id_t[]) { DDS_DATA_REPRESENTATION_XCDR1, DDS_DATA_REPRESENTATION_XCDR2 });
+  }
+  return DDS_RETCODE_OK;
+}
+

@@ -13,22 +13,22 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "sockets_priv.h"
 #include "dds/ddsrt/log.h"
 #include "dds/ddsrt/misc.h"
-#include "dds/ddsrt/sockets_priv.h"
 
 #if !LWIP_SOCKET
 #if defined(__VXWORKS__)
 #include <vxWorks.h>
 #include <sockLib.h>
 #include <ioLib.h>
-#else
+#elif !defined(__QNXNTO__)
 #include <sys/fcntl.h>
 #endif /* __VXWORKS__ */
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#ifdef __sun
+#if defined(__sun) || defined(__QNXNTO__)
 #include <fcntl.h>
 #endif
 
@@ -256,15 +256,6 @@ ddsrt_getsockopt(
   void *optval,
   socklen_t *optlen)
 {
-#if LWIP_SOCKET
-  if (optname == SO_SNDBUF || optname == SO_RCVBUF)
-    return DDS_RETCODE_BAD_PARAMETER;
-# if !SO_REUSE
-  if (optname == SO_REUSEADDR)
-    return DDS_RETCODE_BAD_PARAMETER;
-# endif /* SO_REUSE */
-#endif /* LWIP_SOCKET */
-
   if (getsockopt(sock, level, optname, optval, optlen) == 0)
     return DDS_RETCODE_OK;
 
@@ -272,9 +263,10 @@ ddsrt_getsockopt(
     case EBADF:
     case EFAULT:
     case EINVAL:
-    case ENOPROTOOPT:
     case ENOTSOCK:
       return DDS_RETCODE_BAD_PARAMETER;
+    case ENOPROTOOPT:
+      return DDS_RETCODE_UNSUPPORTED;
     default:
       break;
   }
@@ -290,15 +282,6 @@ ddsrt_setsockopt(
   const void *optval,
   socklen_t optlen)
 {
-#if LWIP_SOCKET
-  if (optname == SO_SNDBUF || optname == SO_RCVBUF)
-    return DDS_RETCODE_BAD_PARAMETER;
-# if !SO_REUSE
-  if (optname == SO_REUSEADDR)
-    return DDS_RETCODE_BAD_PARAMETER;
-# endif /* SO_REUSE */
-#endif /* LWIP_SOCKET */
-
   switch (optname) {
     case SO_SNDBUF:
     case SO_RCVBUF:
@@ -312,26 +295,16 @@ ddsrt_setsockopt(
       return DDS_RETCODE_OK;
   }
 
-  if (setsockopt(sock, level, optname, optval, optlen) == -1) {
-    goto err_setsockopt;
-  }
+  if (setsockopt(sock, level, optname, optval, optlen) == 0)
+    return DDS_RETCODE_OK;
 
-#if defined(__APPLE__) || defined(__FreeBSD__)
-  if (level == SOL_SOCKET && optname == SO_REUSEADDR &&
-      setsockopt(sock, level, SO_REUSEPORT, optval, optlen) == -1)
-  {
-    goto err_setsockopt;
-  }
-#endif /* __APPLE__ || __FreeBSD__ */
-
-  return DDS_RETCODE_OK;
-err_setsockopt:
   switch (errno) {
     case EBADF:
     case EINVAL:
-    case ENOPROTOOPT:
     case ENOTSOCK:
       return DDS_RETCODE_BAD_PARAMETER;
+    case ENOPROTOOPT:
+      return DDS_RETCODE_UNSUPPORTED;
     default:
       break;
   }
@@ -547,17 +520,14 @@ ddsrt_select(
   fd_set *readfds,
   fd_set *writefds,
   fd_set *errorfds,
-  dds_duration_t reltime,
-  int32_t *ready)
+  dds_duration_t reltime)
 {
   int n;
   struct timeval tv, *tvp = NULL;
 
   tvp = ddsrt_duration_to_timeval_ceil(reltime, &tv);
-  if ((n = select(nfds, readfds, writefds, errorfds, tvp)) != -1) {
-    *ready = n;
-    return (n == 0 ? DDS_RETCODE_TIMEOUT : DDS_RETCODE_OK);
-  }
+  if ((n = select(nfds, readfds, writefds, errorfds, tvp)) != -1)
+    return (n == 0 ? DDS_RETCODE_TIMEOUT : n);
 
   switch (errno) {
     case EINTR:

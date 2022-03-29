@@ -7,7 +7,7 @@
 # Eclipse Cyclone DDS
 
 Eclipse Cyclone DDS is a very performant and robust open-source DDS implementation.  Cyclone DDS is developed completely in the open as an Eclipse IoT project
-(see [eclipse-cyclone-dds](https://projects.eclipse.org/projects/iot.cyclonedds)) with a growing list of [adopters](https://iot.eclipse.org/adopters/?#iot.cyclonedds) (if you're one of them, please add your [logo](https://github.com/EclipseFdn/iot.eclipse.org/issues/new?template=adopter_request.md)).  It is a tier-1 middleware for the Robot Operating System [ROS 2](https://index.ros.org/doc/ros2/).
+(see [eclipse-cyclone-dds](https://projects.eclipse.org/projects/iot.cyclonedds)) with a growing list of [adopters](https://iot.eclipse.org/adopters/?#iot.cyclonedds) (if you're one of them, please add your [logo](https://github.com/EclipseFdn/iot.eclipse.org/issues/new?template=adopter_request.md)).  It is a tier-1 middleware for the Robot Operating System [ROS 2](https://docs.ros.org/en/rolling/).
 
 * [Getting Started](#getting-started)
 * [Performance](#performance)
@@ -23,15 +23,14 @@ In order to build Cyclone DDS you need a Linux, Mac or Windows 10 machine (or, w
 
   * C compiler (most commonly GCC on Linux, Visual Studio on Windows, Xcode on macOS);
   * GIT version control system;
-  * [CMake](https://cmake.org/download/), version 3.7 or later;
+  * [CMake](https://cmake.org/download/), version 3.10 or later;
   * [OpenSSL](https://www.openssl.org/), preferably version 1.1 or later if you want to use TLS over
     TCP.  You can explicitly disable it by setting ``ENABLE_SSL=NO``, which is very useful for
     reducing the footprint or when the FindOpenSSL CMake script gives you trouble;
-  * [Bison](https://www.gnu.org/software/bison/) parser generator.
+  * Optionally [Bison](https://www.gnu.org/software/bison/) parser generator. A cached source is checked into the repository.
 
-On Ubuntu ``apt install bison`` should do the trick for getting Bison installed, and the rest should
-already be there.  On Windows, installing chocolatey and ``choco install winflexbison3`` should get
-you a long way.  On macOS, ``brew install bison`` is easiest.
+If you want to play around with the parser you will need to install the bison parser generator. On Ubuntu ``apt install bison`` should do the trick for getting it installed.
+On Windows, installing chocolatey and ``choco install winflexbison3`` should get you a long way.  On macOS, ``brew install bison`` is easiest.
 
 To obtain Eclipse Cyclone DDS, do
 
@@ -186,9 +185,11 @@ point to it.  E.g. (on Linux):
     $ cat cyclonedds.xml
     <?xml version="1.0" encoding="UTF-8" ?>
     <CycloneDDS xmlns="https://cdds.io/config" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="https://cdds.io/config https://raw.githubusercontent.com/eclipse-cyclonedds/cyclonedds/master/etc/cyclonedds.xsd">
-        <Domain id="any">
+        <Domain Id="any">
             <General>
-                <NetworkInterfaceAddress>auto</NetworkInterfaceAddress>
+                <Interfaces>
+                    <NetworkInterface autodetermine="true" priority="default" multicast="default" />
+                </Interfaces>
                 <AllowMulticast>default</AllowMulticast>
                 <MaxMessageSize>65500B</MaxMessageSize>
                 <FragmentSize>4000B</FragmentSize>
@@ -210,9 +211,16 @@ point to it.  E.g. (on Linux):
 
 This example shows a few things:
 
-* ``NetworkInterfaceAddress`` can be used to override the interface selected by default (you can use
-  the address or the interface name).  Proper use of multiple network interfaces simultaneously will
-  come, but is not there yet.
+* ``Interfaces`` can be used to override the interfaces selected by default. Members are
+  * ``NetworkInterface[@autodetermine]`` tells Cyclone DDS to autoselect the interface it deems best.
+  * ``NetworkInterface[@name]`` specifies the name of an interface to select (not shown above, alternative for autodetermine).
+  * ``NetworkInterface[@ip]`` specifies the ipv4/ipv6 address of an interface to select (not shown above, alternative for autodetermine).
+  * ``NetworkInterface[@multicast]`` specifies whether multicast should be used on this interface.
+    The default value 'default' means Cyclone DDS will check the OS reported flags of the interface
+    and enable multicast if it is supported. Use 'true' to ignore what the OS reports and enable it
+    anyway and 'false' to always disable multicast on this interface.
+  * ``NetworkInterface[@priority]`` specifies the priority of an interface. The default value (``default``)
+    means priority ``0`` for normal interfaces and ``2`` for loopback interfaces.
 * ``AllowMulticast`` configures the circumstances under which multicast will be used.  If the
   selected interface doesn't support it, it obviously won't be used (``false``); but if it does
   support it, the type of the network adapter determines the default value.  For a wired network, it

@@ -25,6 +25,9 @@
 #include "idl/version.h"
 #include "idl/processor.h"
 #include "idl/print.h"
+#include "idlc/generator.h"
+
+const char *export_macro = NULL;
 
 static int print_base_type(
   char *str, size_t size, const void *node, void *user_data)
@@ -161,6 +164,8 @@ static int print_decl_type(
       continue;
     if ((idl_mask(n) & IDL_ENUM) == IDL_ENUM && n != node)
       continue;
+    if ((idl_mask(n) & IDL_BITMASK) == IDL_BITMASK && n != node)
+      continue;
     ident = idl_identifier(n);
     assert(ident);
     len += strlen(ident) + (len ? strlen(sep) : 0);
@@ -171,6 +176,8 @@ static int print_decl_type(
     if ((idl_mask(n) & IDL_TYPEDEF) == IDL_TYPEDEF)
       continue;
     if ((idl_mask(n) & IDL_ENUM) == IDL_ENUM && n != node)
+      continue;
+    if ((idl_mask(n) & IDL_BITMASK) == IDL_BITMASK && n != node)
       continue;
     ident = idl_identifier(n);
     assert(ident);
@@ -201,7 +208,10 @@ int print_type(
 int print_scoped_name(
   char *str, size_t size, const void *ptr, void *user_data)
 {
-  (void)user_data;
+  if (idl_is_base_type(ptr))
+    return print_base_type(str, size, ptr, user_data);
+  if (idl_is_templ_type(ptr))
+    return print_templ_type(str, size, ptr, user_data);
   return print_decl_type(str, size, ptr, "::");
 }
 
@@ -333,8 +343,20 @@ generate_nosetup(const idl_pstate_t *pstate, struct generator *generator)
   return IDL_RETCODE_OK;
 }
 
+static const idlc_option_t *opts[] = {
+  &(idlc_option_t){
+    IDLC_STRING, { .string = &export_macro }, 'e', "", "<export macro>",
+    "Add export macro before topic descriptors." },
+  NULL
+};
+
+const idlc_option_t** idlc_generator_options(void)
+{
+  return opts;
+}
+
 idl_retcode_t
-idlc_generate(const idl_pstate_t *pstate)
+idlc_generate(const idl_pstate_t *pstate, const idlc_generator_config_t *config)
 {
   idl_retcode_t ret = IDL_RETCODE_NO_MEMORY;
   const char *sep, *ext, *file, *path;
@@ -344,6 +366,7 @@ idlc_generate(const idl_pstate_t *pstate)
 
   assert(pstate->paths);
   assert(pstate->paths->name);
+  assert(config);
   path = pstate->sources->path->name;
   /* use relative directory if user provided a relative path, use current
      word directory otherwise */
@@ -381,8 +404,18 @@ idlc_generate(const idl_pstate_t *pstate)
     goto err_source;
   if (!(generator.source.handle = idl_fopen(generator.source.path, "wb")))
     goto err_source;
+  generator.config.c = *config;
+  if (export_macro) {
+    if (!(generator.config.export_macro = idl_strdup (export_macro)))
+      goto err_options;
+  } else {
+    generator.config.export_macro = NULL;
+  }
   ret = generate_nosetup(pstate, &generator);
 
+err_options:
+  if (generator.config.export_macro)
+    free(generator.config.export_macro);
 err_source:
   if (generator.source.handle)
     fclose(generator.source.handle);

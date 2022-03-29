@@ -18,7 +18,7 @@
 #include "dds/ddsrt/sync.h"
 
 #include "dds/ddsi/q_sockwaitset.h"
-#include "dds/ddsi/q_config.h"
+#include "dds/ddsi/ddsi_config_impl.h"
 #include "dds/ddsi/q_log.h"
 #include "dds/ddsi/ddsi_tran.h"
 
@@ -41,7 +41,9 @@
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
+#ifndef __QNXNTO__
 #include <sys/fcntl.h>
+#endif  // __QNXNTO__
 #include <sys/types.h>
 #include <sys/event.h>
 #include <sys/time.h>
@@ -505,9 +507,9 @@ int os_sockWaitsetNextEvent (os_sockWaitsetCtx ctx, ddsi_tran_conn_t * conn)
 
 #if !_WIN32 && !LWIP_SOCKET
 
-#ifndef __VXWORKS__
+#if ! __VXWORKS__&& !__QNXNTO__
 #include <sys/fcntl.h>
-#endif /* __VXWORKS__ */
+#endif /* __VXWORKS__ __QNXNTO__ */
 
 #ifndef _WRS_KERNEL
 #include <sys/select.h>
@@ -671,7 +673,7 @@ os_sockWaitset os_sockWaitsetNew (void)
 #endif
   ws->set.conns[0] = NULL;
 
-#if !defined(__VXWORKS__) && !defined(_WIN32) && !defined(LWIP_SOCKET)
+#if !defined(__VXWORKS__) && !defined(_WIN32) && !defined(LWIP_SOCKET) && !defined(__QNXNTO__)
   (void) fcntl (ws->pipe[0], F_SETFD, fcntl (ws->pipe[0], F_GETFD) | FD_CLOEXEC);
   (void) fcntl (ws->pipe[1], F_SETFD, fcntl (ws->pipe[1], F_GETFD) | FD_CLOEXEC);
 #endif
@@ -813,7 +815,6 @@ void os_sockWaitsetRemove (os_sockWaitset ws, ddsi_tran_conn_t conn)
 
 os_sockWaitsetCtx os_sockWaitsetWait (os_sockWaitset ws)
 {
-  int32_t n = -1;
   unsigned u;
 #if !_WIN32
   int fdmax;
@@ -863,18 +864,18 @@ os_sockWaitsetCtx os_sockWaitsetWait (os_sockWaitset ws)
   }
 #endif /* LWIP_SOCKET */
 
+  dds_return_t rc;
   do
   {
-    dds_return_t rc = ddsrt_select (fdmax, rdset, NULL, NULL, DDS_INFINITY, &n);
-    if (rc != DDS_RETCODE_OK && rc != DDS_RETCODE_INTERRUPTED && rc != DDS_RETCODE_TRY_AGAIN)
+    rc = ddsrt_select (fdmax, rdset, NULL, NULL, DDS_INFINITY);
+    if (rc < 0 && rc != DDS_RETCODE_INTERRUPTED && rc != DDS_RETCODE_TRY_AGAIN)
     {
       DDS_WARNING("os_sockWaitsetWait: select failed, retcode = %"PRId32, rc);
       break;
     }
-  }
-  while (n == -1);
+  } while (rc < 0);
 
-  if (n > 0)
+  if (rc > 0)
   {
     /* this simply skips the trigger fd */
     ctx->index = 1;

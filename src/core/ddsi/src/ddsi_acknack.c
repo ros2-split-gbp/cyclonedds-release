@@ -67,9 +67,9 @@ static seqno_t next_deliv_seq (const struct proxy_writer *pwr, const seqno_t nex
      before delivery. */
   const uint32_t lw = ddsrt_atomic_ld32 (&pwr->next_deliv_seq_lowword);
   seqno_t next_deliv_seq;
-  next_deliv_seq = (next_seq & ~(seqno_t) UINT32_MAX) | lw;
+  next_deliv_seq = (next_seq & ~(uint64_t)UINT32_MAX) | lw;
   if (next_deliv_seq > next_seq)
-    next_deliv_seq -= ((seqno_t) 1) << 32;
+    next_deliv_seq -= ((uint64_t) 1) << 32;
   assert (0 < next_deliv_seq && next_deliv_seq <= next_seq);
   return next_deliv_seq;
 }
@@ -191,7 +191,7 @@ static void add_NackFrag (struct nn_xmsg *msg, const struct proxy_writer *pwr, c
 
   if (pwr->e.gv->logconfig.c.mask & DDS_LC_TRACE)
   {
-    ETRACE (pwr, "nackfrag #%"PRIu32":%"PRId64"/%u/%"PRIu32":",
+    ETRACE (pwr, "nackfrag #%"PRIu32":%"PRIu64"/%"PRIu32"/%"PRIu32":",
             pwr->nackfragcount, fromSN (nf->writerSN),
             nf->fragmentNumberState.bitmap_base, nf->fragmentNumberState.numbits);
     for (uint32_t ui = 0; ui != nf->fragmentNumberState.numbits; ui++)
@@ -236,7 +236,7 @@ static void add_AckNack (struct nn_xmsg *msg, const struct proxy_writer *pwr, co
 
   if (pwr->e.gv->logconfig.c.mask & DDS_LC_TRACE)
   {
-    ETRACE (pwr, "acknack "PGUIDFMT" -> "PGUIDFMT": F#%"PRIu32":%"PRId64"/%"PRIu32":",
+    ETRACE (pwr, "acknack "PGUIDFMT" -> "PGUIDFMT": F#%"PRIu32":%"PRIu64"/%"PRIu32":",
             PGUID (rwn->rd_guid), PGUID (pwr->e.guid), rwn->count,
             fromSN (an->readerSNState.bitmap_base), an->readerSNState.numbits);
     for (uint32_t ui = 0; ui != an->readerSNState.numbits; ui++)
