@@ -20,7 +20,7 @@
 #include "dds/ddsrt/hopscotch.h"
 #include "dds/ddsrt/string.h"
 #include "dds/ddsi/q_bswap.h"
-#include "dds/ddsi/q_config.h"
+#include "dds/ddsi/ddsi_config_impl.h"
 #include "dds/ddsi/q_freelist.h"
 #include "dds/ddsi/ddsi_iid.h"
 #include "dds/ddsi/ddsi_sertopic.h"
@@ -156,11 +156,11 @@ static const struct ddsi_sertype_ops sertopic_ops_wrap = {
   .zero_samples = ddsi_sertopic_zero_samples_wrap,
   .realloc_samples = ddsi_sertopic_realloc_samples_wrap,
   .free_samples = ddsi_sertopic_free_samples_wrap,
-  .typeid_hash = 0,
-  .serialized_size = 0,
-  .serialize = 0,
-  .deserialize = 0,
-  .assignable_from = 0
+  .type_id = 0,
+  .type_map = 0,
+  .type_info = 0,
+  .get_serialized_size = 0,
+  .serialize_into = 0
 };
 
 static uint32_t sertopic_serdata_get_size_wrap (const struct ddsi_serdata *d)

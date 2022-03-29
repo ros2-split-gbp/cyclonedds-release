@@ -21,12 +21,13 @@
 #include "dds/ddsrt/sockets.h"
 #include "dds/ddsrt/sync.h"
 #include "dds/ddsrt/fibheap.h"
+#include "dds/ddsrt/avl.h"
 
 #include "dds/ddsi/ddsi_plist.h"
 #include "dds/ddsi/ddsi_ownip.h"
 #include "dds/ddsi/q_protocol.h"
 #include "dds/ddsi/q_sockwaitset.h"
-#include "dds/ddsi/q_config.h"
+#include "dds/ddsi/ddsi_config_impl.h"
 
 #if defined (__cplusplus)
 extern "C" {
@@ -323,9 +324,9 @@ struct ddsi_domaingv {
   struct ddsrt_hh *sertypes;
 
 #ifdef DDS_HAS_TYPE_DISCOVERY
-  ddsrt_mutex_t tl_admin_lock;
-  struct ddsrt_hh *tl_admin;
-  ddsrt_cond_t tl_resolved_cond;
+  ddsrt_mutex_t typelib_lock;
+  ddsrt_avl_tree_t typelib;
+  ddsrt_cond_t typelib_resolved_cond;
 #endif
 #ifdef DDS_HAS_TOPIC_DISCOVERY
   ddsrt_mutex_t topic_defs_lock;

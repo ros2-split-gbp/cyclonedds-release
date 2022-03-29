@@ -13,6 +13,7 @@
 #include <assert.h>
 #include <string.h>
 
+#include "dds/features.h"
 #include "dds/ddsrt/heap.h"
 #include "dds/ddsrt/log.h"
 #include "dds/ddsrt/sockets.h"
@@ -21,7 +22,7 @@
 #include "dds/ddsi/ddsi_tcp.h"
 #include "dds/ddsi/ddsi_ipaddr.h"
 #include "dds/ddsrt/avl.h"
-#include "dds/ddsi/q_config.h"
+#include "dds/ddsi/ddsi_config_impl.h"
 #include "dds/ddsi/q_log.h"
 #include "dds/ddsi/q_entity.h"
 #include "dds/ddsi/ddsi_domaingv.h"
@@ -176,9 +177,11 @@ static void ddsi_tcp_sock_free (struct ddsi_domaingv const * const gv, ddsrt_soc
 static dds_return_t ddsi_tcp_sock_new (struct ddsi_tran_factory_tcp * const fact, ddsrt_socket_t *sock, uint16_t port)
 {
   struct ddsi_domaingv const * const gv = fact->fact.gv;
-  const int one = 1;
   union addr socketname;
   dds_return_t rc;
+#if defined SO_NOSIGPIPE || defined TCP_NODELAY
+  const int one = 1;
+#endif
 
   memset (&socketname, 0, sizeof (socketname));
   switch (fact->m_kind)
@@ -204,11 +207,17 @@ static dds_return_t ddsi_tcp_sock_new (struct ddsi_tran_factory_tcp * const fact
     goto fail;
   }
 
-  /* REUSEADDR if we're binding to a port number */
-  if (port && (rc = ddsrt_setsockopt (*sock, SOL_SOCKET, SO_REUSEADDR, &one, sizeof (one))) != DDS_RETCODE_OK)
-  {
-    GVERROR ("ddsi_tcp_sock_new: failed to enable address reuse: %s\n", dds_strretcode (rc));
-    goto fail_w_socket;
+  /* If we're binding to a port number, allow others to bind to the same port */
+  if (port && (rc = ddsrt_setsockreuse (*sock, true)) != DDS_RETCODE_OK) {
+    if (rc != DDS_RETCODE_UNSUPPORTED) {
+      GVERROR ("ddsi_tcp_sock_new: failed to enable port reuse: %s\n", dds_strretcode(rc));
+      goto fail_w_socket;
+    } else {
+      // If the network stack doesn't support it, do make it fairly easy to find out,
+      // but don't always print it to stderr because it would likely be more annoying
+      // than helpful.
+      GVLOG (DDS_LC_CONFIG, "ddsi_tcp_sock_new: port reuse not supported by network stack\n");
+    }
   }
 
   if ((rc = ddsrt_bind (*sock, &socketname.a, ddsrt_sockaddr_get_size (&socketname.a))) != DDS_RETCODE_OK)
@@ -425,7 +434,6 @@ static bool ddsi_tcp_select (struct ddsi_domaingv const * const gv, ddsrt_socket
   fd_set *rdset = read ? &fds : NULL;
   fd_set *wrset = read ? NULL : &fds;
   int64_t tval = timeout;
-  int32_t ready = 0;
 
   FD_ZERO (&fds);
 #if LWIP_SOCKET == 1
@@ -438,15 +446,15 @@ static bool ddsi_tcp_select (struct ddsi_domaingv const * const gv, ddsrt_socket
 
   GVLOG (DDS_LC_TCP, "tcp blocked %s: sock %d\n", read ? "read" : "write", (int) sock);
   do {
-    rc = ddsrt_select (sock + 1, rdset, wrset, NULL, tval, &ready);
+    rc = ddsrt_select (sock + 1, rdset, wrset, NULL, tval);
   } while (rc == DDS_RETCODE_INTERRUPTED);
 
-  if (rc != DDS_RETCODE_OK)
+  if (rc < 0)
   {
     GVWARNING ("tcp abandoning %s on blocking socket %d after %"PRIuSIZE" bytes\n", read ? "read" : "write", (int) sock, pos);
   }
 
-  return (ready > 0);
+  return (rc > 0);
 }
 
 static int32_t addrfam_to_locator_kind (int af)
@@ -994,7 +1002,7 @@ static void ddsi_tcp_conn_delete (ddsi_tcp_conn_t conn)
   struct ddsi_domaingv const * const gv = fact->fact.gv;
   char buff[DDSI_LOCSTRLEN];
   sockaddr_to_string_with_port(buff, sizeof(buff), &conn->m_peer_addr.a);
-  GVLOG (DDS_LC_TCP, "tcp free %s connnection on socket %"PRIdSOCK" to %s\n", conn->m_base.m_server ? "server" : "client", conn->m_sock, buff);
+  GVLOG (DDS_LC_TCP, "tcp free %s connection on socket %"PRIdSOCK" to %s\n", conn->m_base.m_server ? "server" : "client", conn->m_sock, buff);
 
 #ifdef DDS_HAS_SSL
   if (fact->ddsi_tcp_ssl_plugin.ssl_free)
@@ -1020,7 +1028,7 @@ static void ddsi_tcp_close_conn (ddsi_tran_conn_t tc)
     ddsi_xlocator_t loc;
     ddsi_tcp_conn_t conn = (ddsi_tcp_conn_t) tc;
     sockaddr_to_string_with_port(buff, sizeof(buff), &conn->m_peer_addr.a);
-    GVLOG (DDS_LC_TCP, "tcp close %s connnection on socket %"PRIdSOCK" to %s\n", conn->m_base.m_server ? "server" : "client", conn->m_sock, buff);
+    GVLOG (DDS_LC_TCP, "tcp close %s connection on socket %"PRIdSOCK" to %s\n", conn->m_base.m_server ? "server" : "client", conn->m_sock, buff);
     (void) shutdown (conn->m_sock, 2);
     ddsi_ipaddr_to_loc(&loc.c, &conn->m_peer_addr.a, addrfam_to_locator_kind(conn->m_peer_addr.a.sa_family));
     loc.c.port = conn->m_peer_port;

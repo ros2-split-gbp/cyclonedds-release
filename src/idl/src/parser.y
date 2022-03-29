@@ -56,18 +56,11 @@ static void yyerror(idl_location_t *, idl_pstate_t *, idl_retcode_t *, const cha
 #define YYLLOC_DEFAULT(Cur, Rhs, N) \
   do { \
     if (N) { \
-      (Cur).first.source = YYRHSLOC(Rhs, 1).first.source; \
-      (Cur).first.file = YYRHSLOC(Rhs, 1).first.file; \
-      (Cur).first.line = YYRHSLOC(Rhs, 1).first.line; \
-      (Cur).first.column = YYRHSLOC(Rhs, 1).first.column; \
+      (Cur).first = YYRHSLOC(Rhs, 1).first; \
     } else { \
-      (Cur).first.source = YYRHSLOC(Rhs, 0).last.source; \
-      (Cur).first.file = YYRHSLOC(Rhs, 0).last.file; \
-      (Cur).first.line = YYRHSLOC(Rhs, 0).last.line; \
-      (Cur).first.column = YYRHSLOC(Rhs, 0).last.column; \
+      (Cur).first = YYRHSLOC(Rhs, 0).last; \
     } \
-    (Cur).last.line = YYRHSLOC(Rhs, N).last.line; \
-    (Cur).last.column = YYRHSLOC(Rhs, N).last.column; \
+    (Cur).last = YYRHSLOC(Rhs, N).last; \
   } while(0)
 
 #define TRY_EXCEPT(action, except) \
@@ -127,6 +120,7 @@ void idl_yypstate_delete_stack(idl_yypstate *yyps);
   idl_definition_t *definition;
   idl_module_t *module_dcl;
   idl_struct_t *struct_dcl;
+  idl_forward_t *forward;
   idl_member_t *member;
   idl_declarator_t *declarator;
   idl_union_t *union_dcl;
@@ -134,6 +128,8 @@ void idl_yypstate_delete_stack(idl_yypstate *yyps);
   idl_case_label_t *case_label;
   idl_enum_t *enum_dcl;
   idl_enumerator_t *enumerator;
+  idl_bitmask_t *bitmask_dcl;
+  idl_bit_value_t *bit_value;
   idl_typedef_t *typedef_dcl;
   idl_const_t *const_dcl;
   /* annotations */
@@ -164,7 +160,7 @@ void idl_yypstate_delete_stack(idl_yypstate *yyps);
 %start specification
 
 %type <node> definitions definition type_dcl
-             constr_type_dcl struct_dcl union_dcl enum_dcl
+             constr_type_dcl struct_dcl union_dcl enum_dcl bitmask_dcl
 %type <type_spec> type_spec simple_type_spec template_type_spec
                   switch_type_spec const_type annotation_member_type
                   any_const_type struct_inherit_spec
@@ -188,8 +184,11 @@ void idl_yypstate_delete_stack(idl_yypstate *yyps);
 %type <switch_type_spec> switch_header
 %type <_case> switch_body case element_spec
 %type <case_label> case_labels case_label
+%type <forward> struct_forward_dcl union_forward_dcl
 %type <enum_dcl> enum_def
 %type <enumerator> enumerators enumerator
+%type <bitmask_dcl> bitmask_def
+%type <bit_value> bit_values bit_value
 %type <declarator> declarators declarator simple_declarator
                    complex_declarator array_declarator
 %type <typedef_dcl> typedef_dcl
@@ -214,8 +213,8 @@ void idl_yypstate_delete_stack(idl_yypstate *yyps);
 
 %destructor { idl_delete_node($$); } <node> <literal> <sequence>
                                      <string> <module_dcl> <struct_dcl> <member> <union_dcl>
-                                     <_case> <case_label> <enum_dcl> <enumerator> <declarator> <typedef_dcl>
-                                     <const_dcl> <annotation> <annotation_member> <annotation_appl> <annotation_appl_param>
+                                     <_case> <case_label> <enum_dcl> <enumerator> <bitmask_dcl> <bit_value> <declarator> <typedef_dcl>
+                                     <const_dcl> <annotation> <annotation_member> <annotation_appl> <annotation_appl_param> <forward>
                                      <switch_type_spec>
 
 %token IDL_TOKEN_LINE_COMMENT
@@ -361,8 +360,8 @@ const_type:
         static const char fmt[] =
           "Scoped name '%s' does not resolve to a valid constant type";
         TRY(idl_resolve(pstate, 0u, $1, &declaration));
-        node = idl_unalias(declaration->node, 0u);
-        if (!(idl_mask(node) & (IDL_BASE_TYPE|IDL_STRING|IDL_ENUM)))
+        node = idl_unalias(declaration->node);
+        if (!(idl_mask(node) & (IDL_BASE_TYPE|IDL_STRING|IDL_ENUM|IDL_BITMASK)))
           SEMANTIC_ERROR(&@1, fmt, $1->identifier);
         $$ = idl_reference_node((idl_node_t *)declaration->node);
         idl_delete_scoped_name($1);
@@ -464,9 +463,9 @@ primary_expr:
              (builtin) annotation, stick to syntax checks */
           const idl_declaration_t *declaration = NULL;
           static const char fmt[] =
-            "Scoped name '%s' does not resolve to an enumerator or a contant";
+            "Scoped name '%s' does not resolve to an enumerator or a constant";
           TRY(idl_resolve(pstate, 0u, $1, &declaration));
-          if (!(idl_mask(declaration->node) & (IDL_CONST|IDL_ENUMERATOR)))
+          if (!(idl_mask(declaration->node) & (IDL_CONST|IDL_ENUMERATOR|IDL_BIT_VALUE)))
             SEMANTIC_ERROR(&@1, fmt, $1->identifier);
           $$ = idl_reference_node((idl_node_t *)declaration->node);
         }
@@ -685,10 +684,17 @@ constr_type_dcl:
     struct_dcl
   | union_dcl
   | enum_dcl
+  | bitmask_dcl
   ;
 
 struct_dcl:
     struct_def { $$ = $1; }
+  | struct_forward_dcl { $$ = $1; }
+  ;
+
+struct_forward_dcl:
+    "struct" identifier
+      { TRY(idl_create_forward(pstate, &@1, $2, IDL_STRUCT, &$$)); }
   ;
 
 struct_def:
@@ -713,7 +719,7 @@ struct_inherit_spec:
         static const char fmt[] =
           "Scoped name '%s' does not resolve to a struct";
         TRY(idl_resolve(pstate, 0u, $2, &declaration));
-        node = idl_unalias(declaration->node, 0u);
+        node = idl_unalias(declaration->node);
         if (!idl_is_struct(node))
           SEMANTIC_ERROR(&@2, fmt, $2->identifier);
         TRY(idl_create_inherit_spec(pstate, &@2, idl_reference_node(node), &$$));
@@ -746,6 +752,7 @@ member:
 
 union_dcl:
     union_def { $$ = $1; }
+  | union_forward_dcl { $$ = $1; }
   ;
 
 union_def:
@@ -753,6 +760,11 @@ union_def:
       { TRY(idl_finalize_union(pstate, LOC(@1.first, @4.last), $1, $3));
         $$ = $1;
       }
+  ;
+
+union_forward_dcl:
+    "union" identifier
+      { TRY(idl_create_forward(pstate, &@1, $2, IDL_UNION, &$$)); }
   ;
 
 union_header:
@@ -819,8 +831,12 @@ case_label:
   ;
 
 element_spec:
-    type_spec declarator
-      { TRY(idl_create_case(pstate, LOC(@1.first, @2.last), $1, $2, &$$)); }
+    /* some annotations may also occur on the union branch definitions (@id, @hashid, @external, @try_construct)
+       as defined in [XTypes v1.3] Table 21 */
+    annotations type_spec declarator
+      { TRY(idl_create_case(pstate, LOC(@1.first, @3.last), $2, $3, &$$));
+        TRY_EXCEPT(idl_annotate(pstate, $$, $1), free($$));
+      }
   ;
 
 enum_dcl: enum_def { $$ = $1; } ;
@@ -840,6 +856,27 @@ enumerators:
 enumerator:
     annotations identifier
       { TRY(idl_create_enumerator(pstate, &@2, $2, &$$));
+        TRY_EXCEPT(idl_annotate(pstate, $$, $1), free($$));
+      }
+  ;
+
+bitmask_dcl: bitmask_def { $$ = $1; } ;
+
+bitmask_def:
+    "bitmask" identifier '{' bit_values '}'
+      { TRY(idl_create_bitmask(pstate, LOC(@1.first, @5.last), $2, $4, &$$)); }
+  ;
+
+bit_values:
+    bit_value
+      { $$ = $1; }
+  | bit_values ',' bit_value
+      { $$ = idl_push_node($1, $3); }
+  ;
+
+bit_value:
+    annotations identifier
+      { TRY(idl_create_bit_value(pstate, &@2, $2, &$$));
         TRY_EXCEPT(idl_annotate(pstate, $$, $1), free($$));
       }
   ;
@@ -871,6 +908,20 @@ complex_declarator: array_declarator ;
 typedef_dcl:
     "typedef" type_spec declarators
       { TRY(idl_create_typedef(pstate, LOC(@1.first, @3.last), $2, $3, &$$)); }
+  | "typedef" constr_type_dcl declarators
+      {
+        idl_typedef_t *node;
+        idl_type_spec_t *type_spec;
+        assert($2);
+        /* treat forward declaration as no-op if definition is available */
+        if ((idl_mask($2) & IDL_FORWARD) && ((idl_forward_t *)$2)->type_spec)
+          type_spec = ((idl_forward_t *)$2)->type_spec;
+        else
+          type_spec = $2;
+        TRY(idl_create_typedef(pstate, LOC(@1.first, @3.last), type_spec, $3, &node));
+        idl_reference_node(type_spec);
+        $$ = idl_push_node($2, node);
+      }
   ;
 
 declarators:
@@ -889,7 +940,7 @@ identifier:
     IDL_TOKEN_IDENTIFIER
       { $$ = NULL;
         size_t n;
-        bool nocase = (pstate->flags & IDL_FLAG_CASE_SENSITIVE) == 0;
+        bool nocase = (pstate->config.flags & IDL_FLAG_CASE_SENSITIVE) == 0;
         if (pstate->parser.state == IDL_PARSE_ANNOTATION_APPL)
           n = 0;
         else if (pstate->parser.state == IDL_PARSE_ANNOTATION)
@@ -927,6 +978,8 @@ annotation_body:
   | annotation_body annotation_member ';'
       { $$ = idl_push_node($1, $2); }
   | annotation_body enum_dcl ';'
+      { $$ = idl_push_node($1, $2); }
+  | annotation_body bitmask_dcl ';'
       { $$ = idl_push_node($1, $2); }
   | annotation_body const_dcl ';'
       { $$ = idl_push_node($1, $2); }
@@ -1000,6 +1053,8 @@ annotation_appl_header:
           pstate->annotation_scope = declaration->scope;
         } else {
           pstate->parser.state = IDL_PARSE_UNKNOWN_ANNOTATION_APPL_PARAMS;
+          if (strcmp(@1.first.file->name, "<builtin>") && strcmp(@3.last.file->name, "<builtin>"))
+            idl_warning(pstate, IDL_WARN_UNSUPPORTED_ANNOTATIONS, LOC(@1.first, @3.last), "Unrecognized annotation: @%s", $3->identifier);
         }
 
         idl_delete_scoped_name($3);
@@ -1131,7 +1186,7 @@ int idl_iskeyword(idl_pstate_t *pstate, const char *str, int nc)
     case IDL_TOKEN_MAP:
       /* intX and uintX are considered keywords if and only if building block
          extended data-types is enabled */
-      if (!(pstate->flags & IDL_FLAG_EXTENDED_DATA_TYPES))
+      if (!(pstate->config.flags & IDL_FLAG_EXTENDED_DATA_TYPES))
         return 0;
       break;
     default:
@@ -1144,6 +1199,6 @@ int idl_iskeyword(idl_pstate_t *pstate, const char *str, int nc)
 static void
 yyerror(idl_location_t *loc, idl_pstate_t *pstate, idl_retcode_t *result, const char *str)
 {
-  idl_error(pstate, loc, str);
+  idl_error(pstate, loc, "%s", str);
   *result = IDL_RETCODE_SYNTAX_ERROR;
 }

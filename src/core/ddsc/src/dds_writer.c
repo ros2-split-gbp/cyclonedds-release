@@ -1,4 +1,5 @@
 /*
+ * Copyright(c) 2022 ZettaScale Technology
  * Copyright(c) 2006 to 2018 ADLINK Technology Limited and others
  *
  * This program and the accompanying materials are made available under the
@@ -15,13 +16,14 @@
 #include "dds/dds.h"
 #include "dds/version.h"
 #include "dds/ddsrt/static_assert.h"
-#include "dds/ddsi/q_config.h"
+#include "dds/ddsi/ddsi_config_impl.h"
 #include "dds/ddsi/ddsi_domaingv.h"
 #include "dds/ddsi/q_entity.h"
 #include "dds/ddsi/q_thread.h"
 #include "dds/ddsi/q_xmsg.h"
 #include "dds/ddsi/ddsi_entity_index.h"
 #include "dds/ddsi/ddsi_security_omg.h"
+#include "dds/ddsi/ddsi_cdrstream.h"
 #include "dds__writer.h"
 #include "dds__listener.h"
 #include "dds__init.h"
@@ -289,19 +291,53 @@ static bool dds_writer_support_shm(const struct ddsi_config* cfg, const dds_qos_
       false == cfg->enable_shm)
     return false;
 
-  if (!tp->m_stype->fixed_size)
+  // check necessary condition: fixed size data type OR serializing into shared
+  // memory is available
+  if (!tp->m_stype->fixed_size && (!tp->m_stype->ops->get_serialized_size ||
+                                   !tp->m_stype->ops->serialize_into)) {
     return false;
+  }
 
-  uint32_t pub_history_cap = cfg->pub_history_capacity;
+  // only VOLATILE or TRANSIENT LOCAL
+  if(!(qos->durability.kind == DDS_DURABILITY_VOLATILE ||
+    qos->durability.kind == DDS_DURABILITY_TRANSIENT_LOCAL)) {
+    return false;
+  }
 
-  return (NULL != qos &&
-          DDS_WRITER_QOS_CHECK_FIELDS == (qos->present&DDS_WRITER_QOS_CHECK_FIELDS) &&
+  // only KEEP LAST
+  if(qos->history.kind != DDS_HISTORY_KEEP_LAST) {
+    return false;
+  }
+  // we cannot support the required history with iceoryx
+  if (qos->durability.kind == DDS_DURABILITY_TRANSIENT_LOCAL &&
+      qos->durability_service.history.kind == DDS_HISTORY_KEEP_LAST &&
+      qos->durability_service.history.depth >
+          (int32_t)iox_cfg_max_publisher_history()) {
+    return false;
+  }
+
+  return (DDS_WRITER_QOS_CHECK_FIELDS == (qos->present & DDS_WRITER_QOS_CHECK_FIELDS) &&
           DDS_LIVELINESS_AUTOMATIC == qos->liveliness.kind &&
-          DDS_INFINITY == qos->deadline.deadline &&
-          DDS_RELIABILITY_RELIABLE == qos->reliability.kind &&
-          DDS_DURABILITY_VOLATILE == qos->durability.kind &&
-          DDS_HISTORY_KEEP_LAST == qos->history.kind &&
-          (int)pub_history_cap >= (int)qos->history.depth);
+          DDS_INFINITY == qos->deadline.deadline);
+}
+
+static iox_pub_options_t create_iox_pub_options(const dds_qos_t* qos) {
+
+  iox_pub_options_t opts;
+  iox_pub_options_init(&opts);
+
+  if(qos->durability.kind == DDS_DURABILITY_VOLATILE) {
+    opts.historyCapacity = 0;
+  } else {
+    // Transient Local and stronger
+    if (qos->durability_service.history.kind == DDS_HISTORY_KEEP_LAST) {
+      opts.historyCapacity = (uint64_t)qos->durability_service.history.depth;
+    } else {
+      opts.historyCapacity = 0;
+    }
+  }
+
+  return opts;
 }
 #endif
 
@@ -366,10 +402,15 @@ dds_entity_t dds_create_writer (dds_entity_t participant_or_publisher, dds_entit
     ddsi_xqos_mergein_missing (wqos, pub->m_entity.m_qos, ~(uint64_t)0);
   if (tp->m_ktopic->qos)
     ddsi_xqos_mergein_missing (wqos, tp->m_ktopic->qos, ~(uint64_t)0);
-  ddsi_xqos_mergein_missing (wqos, &ddsi_default_qos_writer, ~(uint64_t)0);
+  ddsi_xqos_mergein_missing (wqos, &ddsi_default_qos_writer, ~QP_DATA_REPRESENTATION);
+  if ((rc = dds_ensure_valid_data_representation (wqos, tp->m_stype->allowed_data_representation, false)) != 0)
+    goto err_data_repr;
 
   if ((rc = ddsi_xqos_valid (&gv->logconfig, wqos)) < 0 || (rc = validate_writer_qos(wqos)) != DDS_RETCODE_OK)
     goto err_bad_qos;
+
+  assert (wqos->present & QP_DATA_REPRESENTATION && wqos->data_representation.value.n > 0);
+  dds_data_representation_id_t data_representation = wqos->data_representation.value.ids[0];
 
   thread_state_awake (lookup_thread_state (), gv);
   const struct ddsi_guid *ppguid = dds_entity_participant_guid (&pub->m_entity);
@@ -412,7 +453,12 @@ dds_entity_t dds_create_writer (dds_entity_t participant_or_publisher, dds_entit
     wqos->ignore_locator_type |= NN_LOCATOR_KIND_SHEM;
 #endif
 
-  rc = new_writer (&wr->m_wr, &wr->m_entity.m_guid, NULL, pp, tp->m_name, tp->m_stype, wqos, wr->m_whc, dds_writer_status_cb, wr);
+  struct ddsi_sertype *sertype = ddsi_sertype_derive_sertype (tp->m_stype, data_representation,
+    wqos->present & QP_TYPE_CONSISTENCY_ENFORCEMENT ? wqos->type_consistency : ddsi_default_qos_topic.type_consistency);
+  if (!sertype)
+    sertype = tp->m_stype;
+
+  rc = new_writer (&wr->m_wr, &wr->m_entity.m_guid, NULL, pp, tp->m_name, sertype, wqos, wr->m_whc, dds_writer_status_cb, wr);
   assert(rc == DDS_RETCODE_OK);
   thread_state_asleep (lookup_thread_state ());
 
@@ -420,10 +466,13 @@ dds_entity_t dds_create_writer (dds_entity_t participant_or_publisher, dds_entit
   if (0x0 == (wqos->ignore_locator_type & NN_LOCATOR_KIND_SHEM))
   {
     DDS_CLOG (DDS_LC_SHM, &wr->m_entity.m_domain->gv.logconfig, "Writer's topic name will be DDS:Cyclone:%s\n", wr->m_topic->m_name);
-    iox_pub_options_t opts;
-    iox_pub_options_init(&opts);
-    opts.historyCapacity = wr->m_entity.m_domain->gv.config.pub_history_capacity;
-    wr->m_iox_pub = iox_pub_init(&wr->m_iox_pub_stor, gv->config.iceoryx_service, wr->m_topic->m_stype->type_name, wr->m_topic->m_name, &opts);
+    iox_pub_options_t opts = create_iox_pub_options(wqos);
+
+    // NB: This may fail due to icoeryx being out of internal resources for publishers
+    //     In this case terminate is called by iox_pub_init.
+    //     it is currently (iceoryx 2.0 and lower) not possible to change this to
+    //     e.g. return a nullptr and handle the error here.   
+    wr->m_iox_pub = iox_pub_init(&(iox_pub_storage_t){0}, gv->config.iceoryx_service, wr->m_topic->m_stype->type_name, wr->m_topic->m_name, &opts);
     memset(wr->m_iox_pub_loans, 0, sizeof(wr->m_iox_pub_loans));
     dds_sleepfor(DDS_MSECS(10));
   }
@@ -452,6 +501,7 @@ err_not_allowed:
   thread_state_asleep (lookup_thread_state ());
 #endif
 err_bad_qos:
+err_data_repr:
   dds_delete_qos(wqos);
   dds_topic_allow_set_qos (tp);
 err_pp_mismatch:
@@ -488,6 +538,7 @@ dds_return_t dds__writer_data_allocator_init (const dds_writer *wr, dds_data_all
 {
 #ifdef DDS_HAS_SHM
   dds_iox_allocator_t *d = (dds_iox_allocator_t *) data_allocator->opaque.bytes;
+  ddsrt_mutex_init(&d->mutex);
   if (NULL != wr->m_iox_pub)
   {
     d->kind = DDS_IOX_ALLOCATOR_KIND_PUBLISHER;
@@ -509,6 +560,7 @@ dds_return_t dds__writer_data_allocator_fini (const dds_writer *wr, dds_data_all
 {
 #ifdef DDS_HAS_SHM
   dds_iox_allocator_t *d = (dds_iox_allocator_t *) data_allocator->opaque.bytes;
+  ddsrt_mutex_destroy(&d->mutex);
   d->kind = DDS_IOX_ALLOCATOR_KIND_FINI;
 #else
   (void) data_allocator;

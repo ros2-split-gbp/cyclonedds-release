@@ -17,11 +17,24 @@ else()
   add_library(ddsc)
 endif()
 
+if("${CMAKE_C_COMPILER_ID}" STREQUAL "MSVC")
+  target_link_libraries(ddsc PRIVATE dbghelp)
+endif()
+
 if(ENABLE_SSL AND OPENSSL_FOUND)
   target_link_libraries(ddsc PRIVATE OpenSSL::SSL)
   if(CMAKE_GENERATOR MATCHES "Visual Studio")
     set_target_properties(ddsc PROPERTIES LINK_FLAGS "/ignore:4099")
   endif()
+endif()
+
+include(CheckIPOSupported)
+check_ipo_supported(RESULT ipo_supported OUTPUT error)
+if(ipo_supported)
+  set_property(TARGET ddsc PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+  set_property(TARGET ddsc PROPERTY INTERPROCEDURAL_OPTIMIZATION_MINSIZEREL TRUE)
+  #-flto and debugging info do not seem to go well together
+  #set_property(TARGET ddsc PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO TRUE)
 endif()
 
 # Support the OMG DDS Security within ddsc adds quite a bit of code.
@@ -32,7 +45,7 @@ if(ENABLE_SECURITY)
     $<BUILD_INTERFACE:$<TARGET_PROPERTY:security_api,INTERFACE_INCLUDE_DIRECTORIES>>)
 endif()
 
-if(iceoryx_binding_c_FOUND)
+if(ENABLE_SHM)
   target_link_libraries(ddsc PRIVATE iceoryx_binding_c::iceoryx_binding_c)
 endif()
 
@@ -58,9 +71,35 @@ define_property(TARGET
     FULL_DOCS "Indicator whether SHM support is available with current Cyclone DDS build configuration."
     )
 set_target_properties(ddsc PROPERTIES
-    SHM_SUPPORT_IS_AVAILABLE "${DDS_HAS_SHM}")
+    SHM_SUPPORT_IS_AVAILABLE "${ENABLE_SHM}")
 set_target_properties(ddsc PROPERTIES EXPORT_PROPERTIES
     "SHM_SUPPORT_IS_AVAILABLE")
+
+# define target property to indicate if Cyclone DDS is compiled with type discovery
+define_property(TARGET
+    PROPERTY TYPE_DISCOVERY_IS_AVAILABLE
+    BRIEF_DOCS "Indicator whether type discovery is available with current Cyclone DDS build configuration."
+    FULL_DOCS "Indicator whether type discovery is available with current Cyclone DDS build configuration."
+    )
+set_property(
+    TARGET ddsc
+    APPEND PROPERTY TYPE_DISCOVERY_IS_AVAILABLE "${ENABLE_TYPE_DISCOVERY}")
+set_property(
+    TARGET ddsc
+    APPEND PROPERTY EXPORT_PROPERTIES "TYPE_DISCOVERY_IS_AVAILABLE")
+
+# define target property to indicate if Cyclone DDS is compiled with topic discovery
+define_property(TARGET
+    PROPERTY TOPIC_DISCOVERY_IS_AVAILABLE
+    BRIEF_DOCS "Indicator whether topic discovery is available with current Cyclone DDS build configuration."
+    FULL_DOCS "Indicator whether topic discovery is available with current Cyclone DDS build configuration."
+    )
+set_property(
+    TARGET ddsc
+    APPEND PROPERTY TOPIC_DISCOVERY_IS_AVAILABLE "${ENABLE_TOPIC_DISCOVERY}")
+set_property(
+    TARGET ddsc
+    APPEND PROPERTY EXPORT_PROPERTIES "TOPIC_DISCOVERY_IS_AVAILABLE")
 
 # Create a pseudo-target that other targets (i.e. examples, tests) can depend
 # on and can also be provided as import-target by a package-file when building

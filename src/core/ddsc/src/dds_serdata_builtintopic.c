@@ -1,4 +1,5 @@
 /*
+ * Copyright(c) 2022 ZettaScale Technology
  * Copyright(c) 2006 to 2018 ADLINK Technology Limited and others
  *
  * This program and the accompanying materials are made available under the
@@ -17,7 +18,7 @@
 #include "dds/ddsrt/heap.h"
 #include "dds/ddsrt/md5.h"
 #include "dds/ddsi/q_bswap.h"
-#include "dds/ddsi/q_config.h"
+#include "dds/ddsi/ddsi_config_impl.h"
 #include "dds/ddsi/q_freelist.h"
 #include "dds/ddsi/ddsi_plist.h"
 #include "dds/ddsi/ddsi_domaingv.h"
@@ -99,16 +100,28 @@ static struct ddsi_serdata_builtintopic *serdata_builtin_new(const struct ddsi_s
   return d;
 }
 
+static void translate_pp_lease_duration (dds_qos_t *qos, const ddsi_plist_t *plist)
+{
+  // Participant lease duration doesn't play by the rules because it doesn't officially exist as a QoS
+  // and we make it available via the liveliness QoS setting
+  assert (plist->present & PP_PARTICIPANT_LEASE_DURATION);
+  qos->present |= QP_LIVELINESS;
+  qos->liveliness.kind = DDS_LIVELINESS_AUTOMATIC;
+  qos->liveliness.lease_duration = plist->participant_lease_duration;
+}
+
 static void from_entity_pp (struct ddsi_serdata_builtintopic_participant *d, const struct participant *pp)
 {
   ddsi_xqos_copy(&d->common.xqos, &pp->plist->qos);
   d->pphandle = pp->e.iid;
+  translate_pp_lease_duration (&d->common.xqos, pp->plist);
 }
 
 static void from_entity_proxypp (struct ddsi_serdata_builtintopic_participant *d, const struct proxy_participant *proxypp)
 {
   ddsi_xqos_copy(&d->common.xqos, &proxypp->plist->qos);
   d->pphandle = proxypp->e.iid;
+  translate_pp_lease_duration (&d->common.xqos, proxypp->plist);
 }
 
 static void from_qos (struct ddsi_serdata_builtintopic *d, const dds_qos_t *xqos)
@@ -121,27 +134,18 @@ static void from_qos (struct ddsi_serdata_builtintopic *d, const dds_qos_t *xqos
 static void from_entity_rd (struct ddsi_serdata_builtintopic_endpoint *d, const struct reader *rd)
 {
   d->pphandle = rd->c.pp->e.iid;
-#ifdef DDS_HAS_TYPE_DISCOVERY
-  d->type_id = rd->c.type_id;
-#endif
   from_qos (&d->common, rd->xqos);
 }
 
 static void from_entity_wr (struct ddsi_serdata_builtintopic_endpoint *d, const struct writer *wr)
 {
   d->pphandle = wr->c.pp->e.iid;
-#ifdef DDS_HAS_TYPE_DISCOVERY
-  d->type_id = wr->c.type_id;
-#endif
   from_qos (&d->common, wr->xqos);
 }
 
 static void from_proxy_endpoint_common (struct ddsi_serdata_builtintopic_endpoint *d, const struct proxy_endpoint_common *pec)
 {
   d->pphandle = pec->proxypp->e.iid;
-#ifdef DDS_HAS_TYPE_DISCOVERY
-  d->type_id = pec->type_id;
-#endif
   from_qos (&d->common, pec->xqos);
 }
 
@@ -231,6 +235,8 @@ static struct ddsi_serdata *ddsi_serdata_builtin_from_sample (const struct ddsi_
       break;
     }
     case DSBT_TOPIC:
+      /* Should not be used for topics. For topics a specific set of ddsi_serdata_ops
+         is used, with a specialized variant of this function. */
       assert (0);
       break;
   }
@@ -259,14 +265,6 @@ static char *dds_string_dup_reuse (char *old, const char *src)
   char *new = dds_realloc(old, size);
   return memcpy (new, src, size);
 }
-
-#ifdef DDS_HAS_TYPE_DISCOVERY
-static void *dds_mem_dup_reuse (void *old, const void *src, size_t size)
-{
-  void *new = dds_realloc (old, size);
-  return memcpy (new, src, size);
-}
-#endif
 
 static dds_qos_t *dds_qos_from_xqos_reuse (dds_qos_t *old, const dds_qos_t *src)
 {
@@ -304,15 +302,6 @@ static bool to_sample_endpoint (const struct ddsi_serdata_builtintopic_endpoint 
     sample->topic_name = dds_string_dup_reuse (sample->topic_name, dep->common.xqos.topic_name);
     sample->type_name = dds_string_dup_reuse (sample->type_name, dep->common.xqos.type_name);
     sample->qos = dds_qos_from_xqos_reuse (sample->qos, &dep->common.xqos);
-#ifdef DDS_HAS_TYPE_DISCOVERY
-    if (!(sample->qos->present & QP_CYCLONE_TYPE_INFORMATION))
-    {
-      sample->qos->type_information.value = NULL;
-      sample->qos->present |= QP_CYCLONE_TYPE_INFORMATION;
-    }
-    sample->qos->type_information.length = (uint32_t) sizeof (dep->type_id);
-    sample->qos->type_information.value = dds_mem_dup_reuse (sample->qos->type_information.value, &dep->type_id, sample->qos->type_information.length);
-#endif
   }
   return true;
 }
@@ -328,13 +317,6 @@ static bool to_sample_topic (const struct ddsi_serdata_builtintopic_topic *dtp, 
     sample->topic_name = dds_string_dup_reuse (sample->topic_name, dtp->common.xqos.topic_name);
     sample->type_name = dds_string_dup_reuse (sample->type_name, dtp->common.xqos.type_name);
     sample->qos = dds_qos_from_xqos_reuse (sample->qos, &dtp->common.xqos);
-    if (!(sample->qos->present & QP_CYCLONE_TYPE_INFORMATION))
-    {
-      sample->qos->type_information.value = NULL;
-      sample->qos->present |= QP_CYCLONE_TYPE_INFORMATION;
-    }
-    sample->qos->type_information.length = (uint32_t) sizeof (dtp->type_id);
-    sample->qos->type_information.value = dds_mem_dup_reuse (sample->qos->type_information.value, &dtp->type_id, sample->qos->type_information.length);
   }
   return true;
 }
@@ -424,10 +406,7 @@ struct ddsi_serdata *dds_serdata_builtin_from_topic_definition (const struct dds
   struct ddsi_serdata_builtintopic_topic *d = (struct ddsi_serdata_builtintopic_topic *) serdata_builtin_new (tp, kind);
   memcpy (&d->common.key.raw, key, sizeof (d->common.key.raw));
   if (tpd != NULL && kind == SDK_DATA)
-  {
-    d->type_id = tpd->type_id;
     from_qos (&d->common, tpd->xqos);
-  }
   return fix_serdata_builtin (&d->common, DSBT_TOPIC, tp->c.serdata_basehash);
 }
 
@@ -439,6 +418,7 @@ static struct ddsi_serdata *ddsi_serdata_builtin_from_sample_topic (const struct
     return NULL;
 
   const struct ddsi_sertype_builtintopic *tp = (const struct ddsi_sertype_builtintopic *) tpcmn;
+  assert (tp->entity_kind == DSBT_TOPIC);
   struct ddsi_domaingv *gv = ddsrt_atomic_ldvoidp (&tp->c.gv);
   const dds_builtintopic_topic_t *s = sample;
   union { ddsi_guid_t guid; dds_builtintopic_topic_key_t key; } x;

@@ -177,7 +177,8 @@ enum ddsi_transport_selector {
   DDSI_TRANS_UDP6,
   DDSI_TRANS_TCP,
   DDSI_TRANS_TCP6,
-  DDSI_TRANS_RAWETH
+  DDSI_TRANS_RAWETH,
+  DDSI_TRANS_NONE /* FIXME: see FIXME above ... :( */
 };
 
 enum ddsi_many_sockets_mode {
@@ -230,6 +231,24 @@ struct ddsi_config_ssl_min_version {
 };
 #endif
 
+struct ddsi_config_socket_buf_size {
+  struct ddsi_config_maybe_uint32 min, max;
+};
+
+struct ddsi_config_network_interface {
+  bool automatic;
+  char *name;
+  char *address;
+  bool prefer_multicast;
+  enum ddsi_boolean_default multicast;
+  struct ddsi_config_maybe_int32 priority;
+};
+
+struct ddsi_config_network_interface_listelem {
+  struct ddsi_config_network_interface_listelem *next;
+  struct ddsi_config_network_interface cfg;
+};
+
 /* Expensive checks (compiled in when NDEBUG not defined, enabled only if flag set in xchecks) */
 #define DDSI_XCHECK_WHC 1u
 #define DDSI_XCHECK_RHC 2u
@@ -242,15 +261,21 @@ struct ddsi_config
   uint32_t enabled_xchecks;
   char *pcap_file;
 
-  char *networkAddressString;
+  /* interfaces */
+  struct ddsi_config_network_interface_listelem *network_interfaces;
+
+  /* deprecated interface support */
+  char *depr_networkAddressString;
+  int depr_prefer_multicast;
+  char *depr_assumeMulticastCapable;
+
   char **networkRecvAddressStrings;
+  uint32_t allowMulticast;
   char *externalAddressString;
   char *externalMaskString;
   FILE *tracefp;
   char *tracefile;
   int tracingAppendToFile;
-  uint32_t allowMulticast;
-  int prefer_multicast;
   enum ddsi_transport_selector transport_selector;
   enum ddsi_boolean_default compat_use_ipv6;
   enum ddsi_boolean_default compat_tcp_enable;
@@ -263,7 +288,6 @@ struct ddsi_config
   int maxAutoParticipantIndex;
   char *spdpMulticastAddressString;
   char *defaultMulticastAddressString;
-  char *assumeMulticastCapable;
   int64_t spdp_interval;
   int64_t spdp_response_delay_max;
   int64_t lease_duration;
@@ -358,8 +382,8 @@ struct ddsi_config
   uint32_t max_participants;
   int64_t writer_linger_duration;
   int multicast_ttl;
-  struct ddsi_config_maybe_uint32 socket_min_rcvbuf_size;
-  uint32_t socket_min_sndbuf_size;
+  struct ddsi_config_socket_buf_size socket_rcvbuf_size;
+  struct ddsi_config_socket_buf_size socket_sndbuf_size;
   int64_t ack_delay;
   int64_t nack_delay;
   int64_t preemptive_ack_delay;
@@ -404,10 +428,7 @@ struct ddsi_config
   int enable_shm;
   char *shm_locator;
   char *iceoryx_service;
-  enum ddsi_shm_loglevel shm_log_lvl;
-  uint32_t sub_queue_capacity;
-  uint32_t sub_history_request;
-  uint32_t pub_history_capacity;
+  enum ddsi_shm_loglevel shm_log_lvl;  
 #endif
 
 #if defined (__cplusplus)
