@@ -19,7 +19,7 @@
 #include "dds/ddsrt/md5.h"
 #include "dds/ddsrt/mh3.h"
 #include "dds/ddsi/q_bswap.h"
-#include "dds/ddsi/q_config.h"
+#include "dds/ddsi/ddsi_config_impl.h"
 #include "dds/ddsi/q_freelist.h"
 #include "dds/ddsi/ddsi_tkmap.h"
 #include "dds/ddsi/ddsi_cdrstream.h"
@@ -88,7 +88,7 @@ static struct ddsi_serdata_pserop *serdata_pserop_new (const struct ddsi_sertype
 
 static struct ddsi_serdata *serdata_pserop_fix (const struct ddsi_sertype_pserop *tp, struct ddsi_serdata_pserop *d)
 {
-  const bool needs_bswap = (d->identifier != tp->native_encoding_identifier);
+  const bool needs_bswap = !CDR_ENC_IS_NATIVE (d->identifier);
   const enum pserop *ops = (d->c.kind == SDK_DATA) ? tp->ops : tp->ops_key;
   d->c.hash = tp->c.serdata_basehash;
   if (ops != NULL)
@@ -113,6 +113,8 @@ static struct ddsi_serdata *serdata_pserop_from_ser (const struct ddsi_sertype *
 {
   const struct ddsi_sertype_pserop *tp = (const struct ddsi_sertype_pserop *)tpcmn;
   struct ddsi_serdata_pserop *d = serdata_pserop_new (tp, kind, size, NN_RMSG_PAYLOADOFF (fragchain->rmsg, NN_RDATA_PAYLOAD_OFF (fragchain)));
+  if (d == NULL)
+    return NULL;
   uint32_t off = 4; /* must skip the CDR header */
   assert (fragchain->min == 0);
   assert (fragchain->maxp1 >= off); /* CDR header must be in first fragment */
@@ -139,6 +141,8 @@ static struct ddsi_serdata *serdata_pserop_from_ser_iov (const struct ddsi_serty
   const struct ddsi_sertype_pserop *tp = (const struct ddsi_sertype_pserop *)tpcmn;
   assert (niov >= 1);
   struct ddsi_serdata_pserop *d = serdata_pserop_new (tp, kind, size, iov[0].iov_base);
+  if (d == NULL)
+    return NULL;
   const uint16_t *hdrsrc = (uint16_t *) iov[0].iov_base;
   d->identifier = hdrsrc[0];
   d->options = hdrsrc[1];
@@ -169,11 +173,11 @@ static bool serdata_pserop_to_sample (const struct ddsi_serdata *serdata_common,
     memcpy (sample, d->sample, 16);
   else
   {
-    dds_return_t x;
-    x = plist_deser_generic (sample, d->data, d->pos, d->identifier != tp->native_encoding_identifier, tp->ops);
+    const bool needs_bswap = !CDR_ENC_IS_NATIVE (d->identifier);
+    dds_return_t ret = plist_deser_generic (sample, d->data, d->pos, needs_bswap, tp->ops);
     plist_unalias_generic (sample, tp->ops);
-    assert (x >= 0);
-    (void) x;
+    assert (ret >= 0);
+    (void) ret;
   }
   return true; /* FIXME: can't conversion to sample fail? */
 }
@@ -201,9 +205,13 @@ static void serdata_pserop_to_ser_unref (struct ddsi_serdata *serdata_common, co
 static struct ddsi_serdata *serdata_pserop_from_sample (const struct ddsi_sertype *tpcmn, enum ddsi_serdata_kind kind, const void *sample)
 {
   const struct ddsi_sertype_pserop *tp = (const struct ddsi_sertype_pserop *)tpcmn;
-  const struct { uint16_t identifier, options; } header = { tp->native_encoding_identifier, 0 };
+  const struct { uint16_t identifier, options; } header = { ddsi_sertype_get_native_enc_identifier (CDR_ENC_VERSION_1, tp->encoding_format), 0 };
+  struct ddsi_serdata_pserop *d;
   if (kind == SDK_KEY && tp->ops_key == NULL)
-    return serdata_pserop_fix (tp, serdata_pserop_new (tp, kind, 0, &header));
+  {
+    if ((d = serdata_pserop_new (tp, kind, 0, &header)) == NULL)
+      return NULL;
+  }
   else
   {
     void *data;
@@ -211,7 +219,11 @@ static struct ddsi_serdata *serdata_pserop_from_sample (const struct ddsi_sertyp
     if (plist_ser_generic (&data, &size, sample, (kind == SDK_DATA) ? tp->ops : tp->ops_key) < 0)
       return NULL;
     const size_t size4 = (size + 3) & ~(size_t)3;
-    struct ddsi_serdata_pserop *d = serdata_pserop_new (tp, kind, size4, &header);
+    if ((d = serdata_pserop_new (tp, kind, size4, &header)) == NULL)
+    {
+      ddsrt_free (data);
+      return NULL;
+    }
     assert (tp->ops_key == NULL || (size >= 16 && tp->memsize >= 16));
     assert (d->data != NULL); // clang static analyzer
     memcpy (d->data, data, size);
@@ -219,8 +231,8 @@ static struct ddsi_serdata *serdata_pserop_from_sample (const struct ddsi_sertyp
     d->pos = (uint32_t) size;
     ddsrt_free (data); // FIXME: shouldn't allocate twice & copy
     // FIXME: and then this silly thing deserialises it immediately again -- perhaps it should be a bit lazier
-    return serdata_pserop_fix (tp, d);
   }
+  return serdata_pserop_fix (tp, d);
 }
 
 static struct ddsi_serdata *serdata_pserop_to_untyped (const struct ddsi_serdata *serdata_common)

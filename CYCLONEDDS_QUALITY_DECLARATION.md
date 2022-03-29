@@ -1,4 +1,4 @@
-This document is a declaration of software quality for the [Eclipse Cyclone DDS](https://github.com/eclipse-cyclonedds/cyclonedds) (hereafter simply "Cyclone DDS") project, based on the guidelines in [REP-2004](https://www.ros.org/reps/rep-2004.html). This quality declaration is therefore specific to use in [ROS 2](https://index.ros.org/doc/ros2/)-based systems.
+This document is a declaration of software quality for the [Eclipse Cyclone DDS](https://github.com/eclipse-cyclonedds/cyclonedds) (hereafter simply "Cyclone DDS") project, based on the guidelines in [REP-2004](https://www.ros.org/reps/rep-2004.html). This quality declaration is therefore specific to use in [ROS 2](https://docs.ros.org/en/rolling/)-based systems.
 
 # Cyclone DDS Quality Declaration
 
@@ -181,17 +181,19 @@ New changes are required to include tests coverage. Line coverage is approximate
 
 ### Performance [4.iv]
 
-While there are no automated, public tests or results, there is evidence in PRs that performance does get taken into account (see, e.g., https://github.com/eclipse-cyclonedds/cyclonedds#558).
+While there are no public automated tests or results, there is evidence in PRs that performance does get taken into account (see, e.g., https://github.com/eclipse-cyclonedds/cyclonedds#558).
 `ddsperf` is used to check for performance regressions regularly and before releases.
 Performance-sensitive PRs are tested for regressions using ddsperf before changes are accepted.
 [ddsperf](https://github.com/eclipse-cyclonedds/cyclonedds/tree/master/src/tools/ddsperf) is the tool to use for assessing Cyclone DDS performance.
 
-ros2 [nightly CI performance tests](http://build.ros2.org/job/Fci__nightly-performance_ubuntu_focal_amd64/) exist but is not reliable infrastructure.
+There is automated performance testing run nightly as part interoperability testing on internal servers.
+
+Open Robotics runs ros2 [nightly CI performance tests](http://build.ros2.org/job/Fci__nightly-performance_ubuntu_focal_amd64/) exist but is not yet reliable infrastructure. 
 We suggest and would like to assist Open Robotics to move all performance testing to dedicated hardware.
 
 ### Linters and Static Analysis [4.v]
 
-`rmw_cyclonedds` uses and passes all the ROS2 standard linters and static analysis tools for a C++ package as described in the [ROS 2 Developer Guide](https://index.ros.org/doc/ros2/Contributing/Developer-Guide/#linters-and-static-analysis).
+`rmw_cyclonedds` uses and passes all the ROS2 standard linters and static analysis tools for a C++ package as described in the [ROS 2 Developer Guide](https://docs.ros.org/en/rolling/Contributing/Developer-Guide.html#linters-and-static-analysis).
 Passing implies there are no linter/static errors when testing against CI of supported platforms.
 
 Cyclone DDS has automated [Synopsys Coverity static code analysis](https://www.synopsys.com/software-integrity/security-testing/static-analysis-sast.html) with public results that can be seen [here](https://scan.coverity.com/projects/eclipse-cyclonedds-cyclonedds).

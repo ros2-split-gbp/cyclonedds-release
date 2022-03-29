@@ -26,9 +26,9 @@
 #include "dds/ddsi/q_hbcontrol.h"
 #include "dds/ddsi/q_feature_check.h"
 #include "dds/ddsi/q_inverse_uint32_set.h"
+#include "dds/ddsi/ddsi_typelib.h"
 #include "dds/ddsi/ddsi_serdata_default.h"
 #include "dds/ddsi/ddsi_handshake.h"
-#include "dds/ddsi/ddsi_typeid.h"
 #include "dds/ddsi/ddsi_typelookup.h"
 #include "dds/ddsi/ddsi_tran.h"
 #include "dds/ddsi/ddsi_list_genptr.h"
@@ -197,6 +197,15 @@ struct nn_rsample_info;
 struct nn_rdata;
 struct ddsi_tkmap_instance;
 
+typedef struct ddsi_type_pair
+#ifdef DDS_HAS_TYPE_DISCOVERY
+{
+  struct ddsi_type *minimal;
+  struct ddsi_type *complete;
+}
+#endif
+ddsi_type_pair_t;
+
 struct entity_common {
   enum entity_kind kind;
   ddsi_guid_t guid;
@@ -233,6 +242,13 @@ struct avail_entityid_set {
   struct inverse_uint32_set x;
 };
 
+enum participant_state {
+  PARTICIPANT_STATE_INITIALIZING,
+  PARTICIPANT_STATE_OPERATIONAL,
+  PARTICIPANT_STATE_DELETE_STARTED,
+  PARTICIPANT_STATE_DELETING_BUILTINS
+};
+
 struct participant
 {
   struct entity_common e;
@@ -248,7 +264,7 @@ struct participant
   ddsrt_mutex_t refc_lock;
   int32_t user_refc; /* number of non-built-in endpoints in this participant [refc_lock] */
   int32_t builtin_refc; /* number of built-in endpoints in this participant [refc_lock] */
-  int builtins_deleted; /* whether deletion of built-in endpoints has been initiated [refc_lock] */
+  enum participant_state state; /* current state of this participant [refc_lock] */
   ddsrt_fibheap_t ldur_auto_wr; /* Heap that contains lease duration for writers with automatic liveliness in this participant */
   ddsrt_atomic_voidp_t minl_man; /* clone of min(leaseheap_man) */
   ddsrt_fibheap_t leaseheap_man; /* keeps leases for this participant's writers (with liveliness manual-by-participant) */
@@ -260,8 +276,8 @@ struct participant
 
 #ifdef DDS_HAS_TOPIC_DISCOVERY
 struct ddsi_topic_definition {
-  unsigned char key[16]; /* key for this topic definition (MD5 hash of the type_id and qos */
-  type_identifier_t type_id; /* type identifier for this topic */
+  unsigned char key[16]; /* key for this topic definition (MD5 hash of the type_id and qos) */
+  struct ddsi_type_pair *type_pair; /* has a ddsi_type object for the minimal and complete type, which contains the XTypes type identifiers */
   struct dds_qos *xqos; /* contains also the topic name and type name */
   uint32_t refc;
   struct ddsi_domaingv *gv;
@@ -278,7 +294,7 @@ struct endpoint_common {
   struct participant *pp;
   ddsi_guid_t group_guid;
 #ifdef DDS_HAS_TYPE_DISCOVERY
-  type_identifier_t type_id;
+  struct ddsi_type_pair *type_pair;
 #endif
 };
 
@@ -308,7 +324,7 @@ struct writer
   status_cb_t status_cb;
   void * status_cb_entity;
   ddsrt_cond_t throttle_cond; /* used to trigger a transmit thread blocked in throttle_writer() or wait_for_acks() */
-  seqno_t seq; /* last sequence number (transmitted seqs are 1 ... seq) */
+  seqno_t seq; /* last sequence number (transmitted seqs are 1 ... seq, 0 when nothing published yet) */
   seqno_t cs_seq; /* 1st seq in coherent set (or 0) */
   seq_xmit_t seq_xmit; /* last sequence number actually transmitted */
   seqno_t min_local_readers_reject_seq; /* mimum of local_readers->last_deliv_seq */
@@ -370,15 +386,15 @@ struct writer
 };
 
 DDS_INLINE_EXPORT inline seqno_t writer_read_seq_xmit (const struct writer *wr) {
-  return (seqno_t) ddsrt_atomic_ld64 (&wr->seq_xmit);
+  return ddsrt_atomic_ld64 (&wr->seq_xmit);
 }
 
 DDS_INLINE_EXPORT inline void writer_update_seq_xmit (struct writer *wr, seqno_t nv) {
   uint64_t ov;
   do {
     ov = ddsrt_atomic_ld64 (&wr->seq_xmit);
-    if ((uint64_t) nv <= ov) break;
-  } while (!ddsrt_atomic_cas64 (&wr->seq_xmit, ov, (uint64_t) nv));
+    if (nv <= ov) break;
+  } while (!ddsrt_atomic_cas64 (&wr->seq_xmit, ov, nv));
 }
 
 struct reader
@@ -489,7 +505,7 @@ struct proxy_endpoint_common
   nn_vendorid_t vendor; /* cached from proxypp->vendor */
   seqno_t seq; /* sequence number of most recent SEDP message */
 #ifdef DDS_HAS_TYPE_DISCOVERY
-  type_identifier_t type_id; /* type identifier for for type used by this proxy endpoint */
+  struct ddsi_type_pair *type_pair;
   const struct ddsi_sertype * type; /* sertype for data this endpoint reads/writes */
 #endif
 #ifdef DDS_HAS_SECURITY
@@ -714,6 +730,7 @@ dds_return_t new_participant (struct ddsi_guid *ppguid, struct ddsi_domaingv *gv
 dds_return_t delete_participant (struct ddsi_domaingv *gv, const struct ddsi_guid *ppguid);
 void update_participant_plist (struct participant *pp, const struct ddsi_plist *plist);
 uint64_t get_entity_instance_id (const struct ddsi_domaingv *gv, const struct ddsi_guid *guid);
+bool participant_builtin_writers_ready (struct participant *pp);
 
 /* Gets the interval for PMD messages, which is the minimal lease duration for writers
    with auto liveliness in this participant, or the participants lease duration if shorter */
@@ -798,7 +815,7 @@ dds_return_t delete_topic (struct ddsi_domaingv *gv, const struct ddsi_guid *gui
 int topic_definition_equal (const struct ddsi_topic_definition *tpd_a, const struct ddsi_topic_definition *tpd_b);
 uint32_t topic_definition_hash (const struct ddsi_topic_definition *tpd);
 dds_return_t lookup_topic_definition_by_name (struct ddsi_domaingv *gv, const char * topic_name, struct ddsi_topic_definition **tpd);
-void new_proxy_topic (struct proxy_participant *proxypp, seqno_t seq, const ddsi_guid_t *guid, const type_identifier_t *type_id, struct dds_qos *qos, ddsrt_wctime_t timestamp);
+void new_proxy_topic (struct proxy_participant *proxypp, seqno_t seq, const ddsi_guid_t *guid, const ddsi_typeid_t *type_id_minimal, const ddsi_typeid_t *type_id, struct dds_qos *qos, ddsrt_wctime_t timestamp);
 struct proxy_topic *lookup_proxy_topic (struct proxy_participant *proxypp, const ddsi_guid_t *guid);
 void update_proxy_topic (struct proxy_participant *proxypp, struct proxy_topic *proxytp, seqno_t seq, struct dds_qos *xqos, ddsrt_wctime_t timestamp);
 int delete_proxy_topic_locked (struct proxy_participant *proxypp, struct proxy_topic *proxytp, ddsrt_wctime_t timestamp);

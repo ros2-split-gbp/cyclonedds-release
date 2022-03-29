@@ -14,10 +14,10 @@
 #include <stddef.h>
 #include <winerror.h>
 
+#include "sockets_priv.h"
 #include "dds/ddsrt/log.h"
 #include "dds/ddsrt/misc.h"
 #include "dds/ddsrt/retcode.h"
-#include "dds/ddsrt/sockets_priv.h"
 #include "dds/ddsrt/time.h"
 
 #ifdef ddsrt_select
@@ -351,9 +351,10 @@ ddsrt_getsockopt(
       return DDS_RETCODE_NO_NETWORK;
     case WSAEFAULT:
     case WSAEINVAL:
-    case WSAENOPROTOOPT:
     case WSAENOTSOCK:
       return DDS_RETCODE_BAD_PARAMETER;
+    case WSAENOPROTOOPT:
+      return DDS_RETCODE_UNSUPPORTED;
     case WSAEINPROGRESS:
       return DDS_RETCODE_TRY_AGAIN;
     default:
@@ -397,9 +398,10 @@ ddsrt_setsockopt(
       return DDS_RETCODE_NO_NETWORK;
     case WSAEFAULT:
     case WSAEINVAL:
-    case WSAENOPROTOOPT:
     case WSAENOTSOCK:
       return DDS_RETCODE_BAD_PARAMETER;
+    case WSAENOPROTOOPT:
+      return DDS_RETCODE_UNSUPPORTED;
     case WSAEINPROGRESS:
       return DDS_RETCODE_IN_PROGRESS;
     default:
@@ -651,8 +653,7 @@ ddsrt_select(
   fd_set *readfds,
   fd_set *writefds,
   fd_set *errorfds,
-  dds_duration_t reltime,
-  int32_t *ready)
+  dds_duration_t reltime)
 {
   int err;
   int32_t n;
@@ -661,10 +662,8 @@ ddsrt_select(
   (void)nfds;
 
   tvp = ddsrt_duration_to_timeval_ceil(reltime, &tv);
-  if ((n = select(-1, readfds, writefds, errorfds, tvp)) != SOCKET_ERROR) {
-    *ready = n;
-    return (n == 0 ? DDS_RETCODE_TIMEOUT : DDS_RETCODE_OK);
-  }
+  if ((n = select(-1, readfds, writefds, errorfds, tvp)) != SOCKET_ERROR)
+    return (n == 0 ? DDS_RETCODE_TIMEOUT : n);
 
   err = WSAGetLastError();
   assert(err != WSANOTINITIALISED);

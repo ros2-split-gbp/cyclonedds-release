@@ -26,7 +26,7 @@
 #include "dds/ddsi/q_misc.h"
 #include "dds/ddsi/q_thread.h"
 #include "dds/ddsi/q_xevent.h"
-#include "dds/ddsi/q_config.h"
+#include "dds/ddsi/ddsi_config_impl.h"
 #include "dds/ddsi/ddsi_domaingv.h"
 #include "dds/ddsi/q_transmit.h"
 #include "dds/ddsi/q_entity.h"
@@ -185,11 +185,21 @@ struct nn_xmsg *writer_hbcontrol_create_heartbeat (struct writer *wr, const stru
     ETRACE (wr, "multicasting ");
   else
     ETRACE (wr, "unicasting to prd "PGUIDFMT" ", PGUID (*prd_guid));
-  ETRACE (wr, "(rel-prd %"PRId32" seq-eq-max %"PRId32" seq %"PRId64" maxseq %"PRId64")\n",
-          wr->num_reliable_readers,
-          ddsrt_avl_is_empty (&wr->readers) ? -1 : (int32_t) root_rdmatch (wr)->num_reliable_readers_where_seq_equals_max,
-          wr->seq,
-          ddsrt_avl_is_empty (&wr->readers) ? (seqno_t) -1 : root_rdmatch (wr)->max_seq);
+  if (ddsrt_avl_is_empty (&wr->readers))
+  {
+    ETRACE (wr, "(rel-prd %"PRId32" seq-eq-max [none] seq %"PRId64" maxseq %"PRId64")\n",
+            wr->num_reliable_readers,
+            wr->seq,
+            root_rdmatch (wr)->max_seq);
+  }
+  else
+  {
+    ETRACE (wr, "(rel-prd %"PRId32" seq-eq-max %"PRId32" seq %"PRIu64" maxseq %"PRIu64")\n",
+            wr->num_reliable_readers,
+            (int32_t) root_rdmatch (wr)->num_reliable_readers_where_seq_equals_max,
+            wr->seq,
+            root_rdmatch (wr)->max_seq);
+  }
 
   if (prd_guid == NULL)
   {
@@ -311,13 +321,24 @@ struct nn_xmsg *writer_hbcontrol_piggyback (struct writer *wr, const struct whc_
 
   if (msg)
   {
-    ETRACE (wr, "heartbeat(wr "PGUIDFMT"%s) piggybacked, resched in %g s (min-ack %"PRId64"%s, avail-seq %"PRId64", xmit %"PRId64")\n",
-            PGUID (wr->e.guid),
-            *hbansreq ? "" : " final",
-            (hbc->tsched.v == DDS_NEVER) ? INFINITY : (double) (hbc->tsched.v - tnow.v) / 1e9,
-            ddsrt_avl_is_empty (&wr->readers) ? -1 : root_rdmatch (wr)->min_seq,
-            ddsrt_avl_is_empty (&wr->readers) || root_rdmatch (wr)->all_have_replied_to_hb ? "" : "!",
-            whcst->max_seq, writer_read_seq_xmit(wr));
+    if (ddsrt_avl_is_empty (&wr->readers))
+    {
+      ETRACE (wr, "heartbeat(wr "PGUIDFMT"%s) piggybacked, resched in %g s (min-ack [none], avail-seq %"PRIu64", xmit %"PRIu64")\n",
+              PGUID (wr->e.guid),
+              *hbansreq ? "" : " final",
+              (hbc->tsched.v == DDS_NEVER) ? INFINITY : (double) (hbc->tsched.v - tnow.v) / 1e9,
+              whcst->max_seq, writer_read_seq_xmit(wr));
+    }
+    else
+    {
+      ETRACE (wr, "heartbeat(wr "PGUIDFMT"%s) piggybacked, resched in %g s (min-ack %"PRIu64"%s, avail-seq %"PRIu64", xmit %"PRIu64")\n",
+              PGUID (wr->e.guid),
+              *hbansreq ? "" : " final",
+              (hbc->tsched.v == DDS_NEVER) ? INFINITY : (double) (hbc->tsched.v - tnow.v) / 1e9,
+              root_rdmatch (wr)->min_seq,
+              root_rdmatch (wr)->all_have_replied_to_hb ? "" : "!",
+              whcst->max_seq, writer_read_seq_xmit(wr));
+    }
   }
 
   return msg;
@@ -336,11 +357,18 @@ struct nn_xmsg *writer_hbcontrol_p2p(struct writer *wr, const struct whc_state *
     return NULL;
 
   ETRACE (wr, "writer_hbcontrol_p2p: wr "PGUIDFMT" unicasting to prd "PGUIDFMT" ", PGUID (wr->e.guid), PGUID (prd->e.guid));
-  ETRACE (wr, "(rel-prd %d seq-eq-max %d seq %"PRId64" maxseq %"PRId64")\n",
-      wr->num_reliable_readers,
-      ddsrt_avl_is_empty (&wr->readers) ? -1 : (int32_t) root_rdmatch (wr)->num_reliable_readers_where_seq_equals_max,
-      wr->seq,
-      ddsrt_avl_is_empty (&wr->readers) ? (int64_t) -1 : root_rdmatch (wr)->max_seq);
+  if (ddsrt_avl_is_empty (&wr->readers))
+  {
+    ETRACE (wr, "(rel-prd %d seq-eq-max [none] seq %"PRIu64")\n", wr->num_reliable_readers, wr->seq);
+  }
+  else
+  {
+    ETRACE (wr, "(rel-prd %d seq-eq-max %d seq %"PRIu64" maxseq %"PRIu64")\n",
+            wr->num_reliable_readers,
+            (int32_t) root_rdmatch (wr)->num_reliable_readers_where_seq_equals_max,
+            wr->seq,
+            root_rdmatch (wr)->max_seq);
+  }
 
   /* set the destination explicitly to the unicast destination and the fourth
      param of add_Heartbeat needs to be the guid of the reader */
@@ -362,7 +390,7 @@ void add_Heartbeat (struct nn_xmsg *msg, struct writer *wr, const struct whc_sta
   struct ddsi_domaingv const * const gv = wr->e.gv;
   struct nn_xmsg_marker sm_marker;
   Heartbeat_t * hb;
-  seqno_t max = 0, min = 1;
+  seqno_t max, min;
 
   ASSERT_MUTEX_HELD (&wr->e.lock);
 
@@ -389,19 +417,15 @@ void add_Heartbeat (struct nn_xmsg *msg, struct writer *wr, const struct whc_sta
   hb->writerId = nn_hton_entityid (wr->e.guid.entityid);
   if (WHCST_ISEMPTY(whcst))
   {
-    /* Really don't have data.  Fake one at the current wr->seq.
-       We're not really allowed to generate heartbeats when the WHC is
-       empty, but it appears RTI sort-of needs them ...  Now we use
-       GAPs, and allocate a sequence number specially for that. */
     max = wr->seq;
     min = max + 1;
   }
   else
   {
-    seqno_t seq_xmit;
+    /* If data present in WHC, wr->seq > 0, but xmit_seq possibly still 0 */
     min = whcst->min_seq;
     max = wr->seq;
-    seq_xmit = writer_read_seq_xmit (wr);
+    const seqno_t seq_xmit = writer_read_seq_xmit (wr);
     assert (min <= max);
     /* Informing readers of samples that haven't even been transmitted makes little sense,
        but for transient-local data, we let the first heartbeat determine the time at which
@@ -415,7 +439,7 @@ void add_Heartbeat (struct nn_xmsg *msg, struct writer *wr, const struct whc_sta
         /* Advertise some but not all data */
         max = seq_xmit;
       } else {
-        /* if we can generate an empty heartbeat => do so. */
+        /* Advertise no data yet */
         max = min - 1;
       }
     }
@@ -647,7 +671,7 @@ dds_return_t create_fragment_message (struct writer *wr, seqno_t seq, const stru
   nn_xmsg_serdata (*pmsg, serdata, fragstart, fraglen, wr);
   nn_xmsg_submsg_setnext (*pmsg, sm_marker);
 #if 0
-  GVTRACE ("queue data%s "PGUIDFMT" #%lld/%u[%u..%u)\n",
+  GVTRACE ("queue data%s "PGUIDFMT" #%"PRId64"/%"PRIu32"[%"PRIu32"..%"PRIu32")\n",
            fragging ? "frag" : "", PGUID (wr->e.guid),
            seq, fragnum+1, fragstart, fragstart + fraglen);
 #endif
@@ -851,7 +875,7 @@ int enqueue_sample_wrlock_held (struct writer *wr, seqno_t seq, const struct dds
 {
   struct ddsi_domaingv const * const gv = wr->e.gv;
   uint32_t i, sz, nfrags;
-  int enqueued = 1;
+  enum qxev_msg_rexmit_result enqueued = QXEV_MSG_REXMIT_QUEUED;
 
   ASSERT_MUTEX_HELD (&wr->e.lock);
 
@@ -864,7 +888,7 @@ int enqueue_sample_wrlock_held (struct writer *wr, seqno_t seq, const struct dds
   }
   if (!isnew && nfrags > 1)
     nfrags = 1;
-  for (i = 0; i < nfrags && enqueued; i++)
+  for (i = 0; i < nfrags && enqueued != QXEV_MSG_REXMIT_DROPPED; i++)
   {
     struct nn_xmsg *fmsg = NULL;
     struct nn_xmsg *hmsg = NULL;
@@ -894,14 +918,20 @@ int enqueue_sample_wrlock_held (struct writer *wr, seqno_t seq, const struct dds
          HeartbeatFrags out, so never force them into the queue. */
       if(hmsg)
       {
-        if (enqueued > 1)
-          qxev_msg (wr->evq, hmsg);
-        else
-          nn_xmsg_free (hmsg);
+        switch (enqueued)
+        {
+          case QXEV_MSG_REXMIT_DROPPED:
+          case QXEV_MSG_REXMIT_MERGED:
+            nn_xmsg_free (hmsg);
+            break;
+          case QXEV_MSG_REXMIT_QUEUED:
+            qxev_msg (wr->evq, hmsg);
+            break;
+        }
       }
     }
   }
-  return enqueued ? 0 : -1;
+  return (enqueued != QXEV_MSG_REXMIT_DROPPED) ? 0 : -1;
 }
 
 static int insert_sample_in_whc (struct writer *wr, seqno_t seq, struct ddsi_plist *plist, struct ddsi_serdata *serdata, struct ddsi_tkmap_instance *tk)
@@ -920,9 +950,9 @@ static int insert_sample_in_whc (struct writer *wr, seqno_t seq, struct ddsi_pli
     tmp = sizeof (ppbuf) - 1;
     if (wr->e.gv->logconfig.c.mask & DDS_LC_CONTENT)
       ddsi_serdata_print (serdata, ppbuf, sizeof (ppbuf));
-    ETRACE (wr, "write_sample "PGUIDFMT" #%"PRId64, PGUID (wr->e.guid), seq);
+    ETRACE (wr, "write_sample "PGUIDFMT" #%"PRIu64, PGUID (wr->e.guid), seq);
     if (plist != 0 && (plist->present & PP_COHERENT_SET))
-      ETRACE (wr, " C#%"PRId64"", fromSN (plist->coherent_set_seqno));
+      ETRACE (wr, " C#%"PRIu64"", fromSN (plist->coherent_set_seqno));
     ETRACE (wr, ": ST%"PRIu32" %s/%s:%s%s\n", serdata->statusinfo, wr->xqos->topic_name, wr->type->type_name, ppbuf, tmp < (int) sizeof (ppbuf) ? "" : " (trunc)");
   }
 
@@ -956,7 +986,7 @@ static int insert_sample_in_whc (struct writer *wr, seqno_t seq, struct ddsi_pli
       uint32_t n = whc_remove_acked_messages (wr->whc, seq, &whcst, &deferred_free_list);
       (void)n;
       assert (n <= 1);
-      assert (whcst.min_seq == -1 && whcst.max_seq == -1);
+      assert (whcst.min_seq == 0 && whcst.max_seq == 0);
       whc_free_deferred_free_list (wr->whc, deferred_free_list);
     }
 #endif
@@ -970,7 +1000,7 @@ static int insert_sample_in_whc (struct writer *wr, seqno_t seq, struct ddsi_pli
     struct whc_state whcst;
     whc_get_state(wr->whc, &whcst);
     if (WHCST_ISEMPTY(&whcst))
-      assert (wr->c.pp->builtins_deleted);
+      assert (wr->c.pp->state >= PARTICIPANT_STATE_DELETING_BUILTINS);
   }
 #endif
   return res;

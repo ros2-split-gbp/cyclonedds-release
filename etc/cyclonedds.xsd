@@ -43,7 +43,7 @@ CycloneDDS configuration</xs:documentation>
   <xs:element name="Compatibility">
     <xs:annotation>
       <xs:documentation>
-&lt;p&gt;The Compatibility elements allows specifying various settings related to compatability with standards and with other DDSI implementations.&lt;/p&gt;</xs:documentation>
+&lt;p&gt;The Compatibility elements allows specifying various settings related to compatibility with standards and with other DDSI implementations.&lt;/p&gt;</xs:documentation>
     </xs:annotation>
     <xs:complexType>
       <xs:all>
@@ -112,7 +112,9 @@ CycloneDDS configuration</xs:documentation>
       <xs:all>
         <xs:element minOccurs="0" ref="config:DSGracePeriod"/>
         <xs:element minOccurs="0" ref="config:DefaultMulticastAddress"/>
+        <xs:element minOccurs="0" ref="config:EnableTopicDiscoveryEndpoints"/>
         <xs:element minOccurs="0" ref="config:ExternalDomainId"/>
+        <xs:element minOccurs="0" ref="config:LeaseDuration"/>
         <xs:element minOccurs="0" ref="config:MaxAutoParticipantIndex"/>
         <xs:element minOccurs="0" ref="config:ParticipantIndex"/>
         <xs:element minOccurs="0" ref="config:Peers"/>
@@ -138,11 +140,26 @@ CycloneDDS configuration</xs:documentation>
 &lt;p&gt;The default value is: "auto".&lt;/p&gt;</xs:documentation>
     </xs:annotation>
   </xs:element>
+  <xs:element name="EnableTopicDiscoveryEndpoints" type="xs:boolean">
+    <xs:annotation>
+      <xs:documentation>
+&lt;p&gt;This element controls whether the built-in endpoints for topic discovery are created and used to exchange topic discovery information.&lt;/p&gt;
+&lt;p&gt;The default value is: "false".&lt;/p&gt;</xs:documentation>
+    </xs:annotation>
+  </xs:element>
   <xs:element name="ExternalDomainId" type="xs:string">
     <xs:annotation>
       <xs:documentation>
 &lt;p&gt;An override for the domain id, to be used in discovery and for determining the port number mapping. This allows creating multiple domains in a single process while making them appear as a single domain on the network. The value "default" disables the override.&lt;/p&gt;
 &lt;p&gt;The default value is: "default".&lt;/p&gt;</xs:documentation>
+    </xs:annotation>
+  </xs:element>
+  <xs:element name="LeaseDuration" type="config:duration">
+    <xs:annotation>
+      <xs:documentation>
+&lt;p&gt;This setting controls the default participant lease duration.&lt;p&gt;
+&lt;p&gt;The unit must be specified explicitly. Recognised units: ns, us, ms, s, min, hr, day.&lt;/p&gt;
+&lt;p&gt;The default value is: "10 s".&lt;/p&gt;</xs:documentation>
     </xs:annotation>
   </xs:element>
   <xs:element name="MaxAutoParticipantIndex" type="xs:integer">
@@ -302,12 +319,11 @@ CycloneDDS configuration</xs:documentation>
         <xs:element minOccurs="0" ref="config:ExternalNetworkAddress"/>
         <xs:element minOccurs="0" ref="config:ExternalNetworkMask"/>
         <xs:element minOccurs="0" ref="config:FragmentSize"/>
+        <xs:element minOccurs="0" ref="config:Interfaces"/>
         <xs:element minOccurs="0" ref="config:MaxMessageSize"/>
         <xs:element minOccurs="0" ref="config:MaxRexmitMessageSize"/>
         <xs:element minOccurs="0" ref="config:MulticastRecvNetworkInterfaceAddresses"/>
         <xs:element minOccurs="0" ref="config:MulticastTimeToLive"/>
-        <xs:element minOccurs="0" ref="config:NetworkInterfaceAddress"/>
-        <xs:element minOccurs="0" ref="config:PreferMulticast"/>
         <xs:element minOccurs="0" ref="config:RedundantNetworking"/>
         <xs:element minOccurs="0" ref="config:Transport"/>
         <xs:element minOccurs="0" ref="config:UseIPv6"/>
@@ -370,6 +386,67 @@ CycloneDDS configuration</xs:documentation>
 &lt;p&gt;The default value is: "1344 B".&lt;/p&gt;</xs:documentation>
     </xs:annotation>
   </xs:element>
+  <xs:element name="Interfaces">
+    <xs:annotation>
+      <xs:documentation>
+&lt;p&gt;This element specifies the network interfaces for use by Cyclone DDS. Multiple interfaces can be specified with an assigned priority. The list in use will be sorted by priority. If interfaces have an equal priority the specification order will be preserved.&lt;/p&gt;</xs:documentation>
+    </xs:annotation>
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element minOccurs="0" maxOccurs="unbounded" ref="config:NetworkInterface"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="NetworkInterface">
+    <xs:annotation>
+      <xs:documentation>
+&lt;p&gt;This element defines a network interface. You can set autodetermine="true" to autoselect the interface CycloneDDS deems to be the highest quality. If autodetermine="false" (the default), you must specify the name and/or address attribute. If you specify both they must match the same interface.&lt;/p&gt;</xs:documentation>
+    </xs:annotation>
+    <xs:complexType>
+      <xs:attribute name="address">
+        <xs:annotation>
+          <xs:documentation>
+&lt;p&gt;This attribute specifies the address of the interface. With ipv4 allows  matching on network part if host part is set to zero. &lt;/p&gt;
+&lt;p&gt;The default value is: "".&lt;/p&gt;</xs:documentation>
+        </xs:annotation>
+      </xs:attribute>
+      <xs:attribute name="autodetermine">
+        <xs:annotation>
+          <xs:documentation>
+&lt;p&gt;If set to "true" an interface is automatically selected. Specifying a name or an address when automatic is set is considered an error.&lt;/p&gt;
+&lt;p&gt;The default value is: "false".&lt;/p&gt;</xs:documentation>
+        </xs:annotation>
+      </xs:attribute>
+      <xs:attribute name="multicast">
+        <xs:annotation>
+          <xs:documentation>
+&lt;p&gt;This attribute specifies the whether the interface should use multicast. On its default setting 'default' it will use the value as return by the operating system. If set to 'true' the interface will be assumed to be multicast capable even when the interface flags returned by the operating system state it is not (this provides a workaround for some platforms). If set to 'false' the interface will never be used for multicast.
+&lt;p&gt;The default value is: "default".&lt;/p&gt;</xs:documentation>
+        </xs:annotation>
+      </xs:attribute>
+      <xs:attribute name="name">
+        <xs:annotation>
+          <xs:documentation>
+&lt;p&gt;This attribute specifies the name of the interface. &lt;/p&gt;
+&lt;p&gt;The default value is: "".&lt;/p&gt;</xs:documentation>
+        </xs:annotation>
+      </xs:attribute>
+      <xs:attribute name="prefer_multicast" type="xs:boolean">
+        <xs:annotation>
+          <xs:documentation>
+&lt;p&gt;When false (default) Cyclone DDS uses unicast for data whenever there a single unicast suffices. Setting this to true makes it prefer multicasting data, falling back to unicast only when no multicast is available.&lt;/p&gt;
+&lt;p&gt;The default value is: "false".&lt;/p&gt;</xs:documentation>
+        </xs:annotation>
+      </xs:attribute>
+      <xs:attribute name="priority">
+        <xs:annotation>
+          <xs:documentation>
+&lt;p&gt;This attribute specifies the interface priority (decimal integer or &lt;i&gt;default&lt;/i&gt;). The default value for loopback interfaces is 2, for all other interfaces it is 0.&lt;/p&gt;
+&lt;p&gt;The default value is: "default".&lt;/p&gt;</xs:documentation>
+        </xs:annotation>
+      </xs:attribute>
+    </xs:complexType>
+  </xs:element>
   <xs:element name="MaxMessageSize" type="config:memsize">
     <xs:annotation>
       <xs:documentation>
@@ -395,7 +472,7 @@ CycloneDDS configuration</xs:documentation>
 &lt;ul&gt;
 &lt;li&gt;&lt;i&gt;all&lt;/i&gt;: listen for multicasts on all multicast-capable interfaces; or&lt;/li&gt;
 &lt;li&gt;&lt;i&gt;any&lt;/i&gt;: listen for multicasts on the operating system default interface; or&lt;/li&gt;
-&lt;li&gt;&lt;i&gt;preferred&lt;/i&gt;: listen for multicasts on the preferred interface (General/NetworkInterfaceAddress); or&lt;/li&gt;
+&lt;li&gt;&lt;i&gt;preferred&lt;/i&gt;: listen for multicasts on the preferred interface (General/Interface/NetworkInterface with highest priority); or&lt;/li&gt;
 &lt;li&gt;&lt;i&gt;none&lt;/i&gt;: does not listen for multicasts on any interface; or&lt;/li&gt;
 &lt;li&gt;a comma-separated list of network addresses: configures Cyclone DDS to listen for multicasts on all of the listed addresses.&lt;/li&gt;
 &lt;/ul&gt;
@@ -408,20 +485,6 @@ CycloneDDS configuration</xs:documentation>
       <xs:documentation>
 &lt;p&gt;This element specifies the time-to-live setting for outgoing multicast packets.&lt;/p&gt;
 &lt;p&gt;The default value is: "32".&lt;/p&gt;</xs:documentation>
-    </xs:annotation>
-  </xs:element>
-  <xs:element name="NetworkInterfaceAddress" type="xs:string">
-    <xs:annotation>
-      <xs:documentation>
-&lt;p&gt;This element specifies the preferred network interface for use by Cyclone DDS. The preferred network interface determines the IP address that Cyclone DDS advertises in the discovery protocol (but see also General/ExternalNetworkAddress), and is also the only interface over which multicasts are transmitted. The interface can be identified by its IP address, network interface name or network portion of the address. If the value "auto" is entered here, Cyclone DDS will select what it considers the most suitable interface.&lt;/p&gt;
-&lt;p&gt;The default value is: "auto".&lt;/p&gt;</xs:documentation>
-    </xs:annotation>
-  </xs:element>
-  <xs:element name="PreferMulticast" type="xs:boolean">
-    <xs:annotation>
-      <xs:documentation>
-&lt;p&gt;When false (default) Cyclone DDS uses unicast for data whenever there a single unicast suffices. Setting this to true makes it prefer multicasting data, falling back to unicast only when no multicast address is available.&lt;/p&gt;
-&lt;p&gt;The default value is: "false".&lt;/p&gt;</xs:documentation>
     </xs:annotation>
   </xs:element>
   <xs:element name="RedundantNetworking" type="xs:boolean">
@@ -471,7 +534,6 @@ CycloneDDS configuration</xs:documentation>
       <xs:all>
         <xs:element minOccurs="0" ref="config:AccelerateRexmitBlockSize"/>
         <xs:element minOccurs="0" ref="config:AckDelay"/>
-        <xs:element minOccurs="0" ref="config:AssumeMulticastCapable"/>
         <xs:element minOccurs="0" ref="config:AutoReschedNackDelay"/>
         <xs:element minOccurs="0" ref="config:BuiltinEndpointSet"/>
         <xs:element minOccurs="0" ref="config:BurstSize"/>
@@ -484,15 +546,12 @@ CycloneDDS configuration</xs:documentation>
         <xs:element minOccurs="0" ref="config:GenerateKeyhash"/>
         <xs:element minOccurs="0" ref="config:HeartbeatInterval"/>
         <xs:element minOccurs="0" ref="config:LateAckMode"/>
-        <xs:element minOccurs="0" ref="config:LeaseDuration"/>
         <xs:element minOccurs="0" ref="config:LivelinessMonitoring"/>
         <xs:element minOccurs="0" ref="config:MaxParticipants"/>
         <xs:element minOccurs="0" ref="config:MaxQueuedRexmitBytes"/>
         <xs:element minOccurs="0" ref="config:MaxQueuedRexmitMessages"/>
         <xs:element minOccurs="0" ref="config:MaxSampleSize"/>
         <xs:element minOccurs="0" ref="config:MeasureHbToAckLatency"/>
-        <xs:element minOccurs="0" ref="config:MinimumSocketReceiveBufferSize"/>
-        <xs:element minOccurs="0" ref="config:MinimumSocketSendBufferSize"/>
         <xs:element minOccurs="0" ref="config:MonitorPort"/>
         <xs:element minOccurs="0" ref="config:MultipleReceiveThreads"/>
         <xs:element minOccurs="0" ref="config:NackDelay"/>
@@ -506,6 +565,8 @@ CycloneDDS configuration</xs:documentation>
         <xs:element minOccurs="0" ref="config:SPDPResponseMaxDelay"/>
         <xs:element minOccurs="0" ref="config:ScheduleTimeRounding"/>
         <xs:element minOccurs="0" ref="config:SecondaryReorderMaxSamples"/>
+        <xs:element minOccurs="0" ref="config:SocketReceiveBufferSize"/>
+        <xs:element minOccurs="0" ref="config:SocketSendBufferSize"/>
         <xs:element minOccurs="0" ref="config:SquashParticipants"/>
         <xs:element minOccurs="0" ref="config:SynchronousDeliveryLatencyBound"/>
         <xs:element minOccurs="0" ref="config:SynchronousDeliveryPriorityThreshold"/>
@@ -531,13 +592,6 @@ CycloneDDS configuration</xs:documentation>
 &lt;p&gt;This setting controls the delay between sending identical acknowledgements.&lt;/p&gt;
 &lt;p&gt;The unit must be specified explicitly. Recognised units: ns, us, ms, s, min, hr, day.&lt;/p&gt;
 &lt;p&gt;The default value is: "10 ms".&lt;/p&gt;</xs:documentation>
-    </xs:annotation>
-  </xs:element>
-  <xs:element name="AssumeMulticastCapable" type="xs:string">
-    <xs:annotation>
-      <xs:documentation>
-&lt;p&gt;This element controls which network interfaces are assumed to be capable of multicasting even when the interface flags returned by the operating system state it is not (this provides a workaround for some platforms). It is a comma-separated lists of patterns (with ? and * wildcards) against which the interface names are matched.&lt;/p&gt;
-&lt;p&gt;The default value is: "".&lt;/p&gt;</xs:documentation>
     </xs:annotation>
   </xs:element>
   <xs:element name="AutoReschedNackDelay" type="config:duration_inf">
@@ -698,14 +752,6 @@ CycloneDDS configuration</xs:documentation>
 &lt;p&gt;The default value is: "false".&lt;/p&gt;</xs:documentation>
     </xs:annotation>
   </xs:element>
-  <xs:element name="LeaseDuration" type="config:duration">
-    <xs:annotation>
-      <xs:documentation>
-&lt;p&gt;This setting controls the default participant lease duration.&lt;p&gt;
-&lt;p&gt;The unit must be specified explicitly. Recognised units: ns, us, ms, s, min, hr, day.&lt;/p&gt;
-&lt;p&gt;The default value is: "10 s".&lt;/p&gt;</xs:documentation>
-    </xs:annotation>
-  </xs:element>
   <xs:element name="LivelinessMonitoring">
     <xs:annotation>
       <xs:documentation>
@@ -769,23 +815,6 @@ CycloneDDS configuration</xs:documentation>
       <xs:documentation>
 &lt;p&gt;This element enables heartbeat-to-ack latency among Cyclone DDS services by prepending timestamps to Heartbeat and AckNack messages and calculating round trip times. This is non-standard behaviour. The measured latencies are quite noisy and are currently not used anywhere.&lt;/p&gt;
 &lt;p&gt;The default value is: "false".&lt;/p&gt;</xs:documentation>
-    </xs:annotation>
-  </xs:element>
-  <xs:element name="MinimumSocketReceiveBufferSize" type="config:memsize">
-    <xs:annotation>
-      <xs:documentation>
-&lt;p&gt;This setting controls the minimum size of socket receive buffers. The operating system provides some size receive buffer upon creation of the socket, this option can be used to increase the size of the buffer beyond that initially provided by the operating system. If the buffer size cannot be increased to the specified size, an error is reported.&lt;/p&gt;
-&lt;p&gt;The default setting is the word "default", which means Cyclone DDS will attempt to increase the buffer size to 1MB, but will silently accept a smaller buffer should that attempt fail.&lt;/p&gt;
-&lt;p&gt;The unit must be specified explicitly. Recognised units: B (bytes), kB &amp; KiB (2&lt;sup&gt;10&lt;/sup&gt; bytes), MB &amp; MiB (2&lt;sup&gt;20&lt;/sup&gt; bytes), GB &amp; GiB (2&lt;sup&gt;30&lt;/sup&gt; bytes).&lt;/p&gt;
-&lt;p&gt;The default value is: "default".&lt;/p&gt;</xs:documentation>
-    </xs:annotation>
-  </xs:element>
-  <xs:element name="MinimumSocketSendBufferSize" type="config:memsize">
-    <xs:annotation>
-      <xs:documentation>
-&lt;p&gt;This setting controls the minimum size of socket send buffers. This setting can only increase the size of the send buffer, if the operating system by default creates a larger buffer, it is left unchanged.&lt;/p&gt;
-&lt;p&gt;The unit must be specified explicitly. Recognised units: B (bytes), kB &amp; KiB (2&lt;sup&gt;10&lt;/sup&gt; bytes), MB &amp; MiB (2&lt;sup&gt;20&lt;/sup&gt; bytes), GB &amp; GiB (2&lt;sup&gt;30&lt;/sup&gt; bytes).&lt;/p&gt;
-&lt;p&gt;The default value is: "64 KiB".&lt;/p&gt;</xs:documentation>
     </xs:annotation>
   </xs:element>
   <xs:element name="MonitorPort" type="xs:integer">
@@ -929,6 +958,56 @@ CycloneDDS configuration</xs:documentation>
 &lt;p&gt;This element sets the maximum size in samples of a secondary re-order administration. The secondary re-order administration is per reader in need of historical data.&lt;/p&gt;
 &lt;p&gt;The default value is: "128".&lt;/p&gt;</xs:documentation>
     </xs:annotation>
+  </xs:element>
+  <xs:element name="SocketReceiveBufferSize">
+    <xs:annotation>
+      <xs:documentation>
+&lt;p&gt;The settings in this element control the size of the socket receive buffers. The operating system provides some size receive buffer upon creation of the socket, this option can be used to increase the size of the buffer beyond that initially provided by the operating system. If the buffer size cannot be increased to the requested minimum size, an error is reported.&lt;/p&gt;
+&lt;p&gt;The default setting requests a buffer size of 1MiB but accepts whatever is available after that.&lt;/p&gt;</xs:documentation>
+    </xs:annotation>
+    <xs:complexType>
+      <xs:attribute name="max" type="config:memsize">
+        <xs:annotation>
+          <xs:documentation>
+&lt;p&gt;This sets the size of the socket receive buffer to request, with the special value of "default" indicating that it should try to satisfy the minimum buffer size. If both are at "default", it will request 1MiB and accept anything. If the maximum is set to less than the minimum, it is ignored.&lt;/p&gt;
+&lt;p&gt;The unit must be specified explicitly. Recognised units: B (bytes), kB &amp; KiB (2&lt;sup&gt;10&lt;/sup&gt; bytes), MB &amp; MiB (2&lt;sup&gt;20&lt;/sup&gt; bytes), GB &amp; GiB (2&lt;sup&gt;30&lt;/sup&gt; bytes).&lt;/p&gt;
+&lt;p&gt;The default value is: "default".&lt;/p&gt;</xs:documentation>
+        </xs:annotation>
+      </xs:attribute>
+      <xs:attribute name="min" type="config:memsize">
+        <xs:annotation>
+          <xs:documentation>
+&lt;p&gt;This sets the minimum acceptable socket receive buffer size, with the special value "default" indicating that whatever is available is acceptable.&lt;/p&gt;
+&lt;p&gt;The unit must be specified explicitly. Recognised units: B (bytes), kB &amp; KiB (2&lt;sup&gt;10&lt;/sup&gt; bytes), MB &amp; MiB (2&lt;sup&gt;20&lt;/sup&gt; bytes), GB &amp; GiB (2&lt;sup&gt;30&lt;/sup&gt; bytes).&lt;/p&gt;
+&lt;p&gt;The default value is: "default".&lt;/p&gt;</xs:documentation>
+        </xs:annotation>
+      </xs:attribute>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="SocketSendBufferSize">
+    <xs:annotation>
+      <xs:documentation>
+&lt;p&gt;The settings in this element control the size of the socket send buffers. The operating system provides some size send buffer upon creation of the socket, this option can be used to increase the size of the buffer beyond that initially provided by the operating system. If the buffer size cannot be increased to the requested minimum size, an error is reported.&lt;/p&gt;
+&lt;p&gt;The default setting requires a buffer of at least 64KiB.&lt;/p&gt;</xs:documentation>
+    </xs:annotation>
+    <xs:complexType>
+      <xs:attribute name="max" type="config:memsize">
+        <xs:annotation>
+          <xs:documentation>
+&lt;p&gt;This sets the size of the socket send buffer to request, with the special value of "default" indicating that it should try to satisfy the minimum buffer size. If both are at "default", it will use whatever is the system default. If the maximum is set to less than the minimum, it is ignored.&lt;/p&gt;
+&lt;p&gt;The unit must be specified explicitly. Recognised units: B (bytes), kB &amp; KiB (2&lt;sup&gt;10&lt;/sup&gt; bytes), MB &amp; MiB (2&lt;sup&gt;20&lt;/sup&gt; bytes), GB &amp; GiB (2&lt;sup&gt;30&lt;/sup&gt; bytes).&lt;/p&gt;
+&lt;p&gt;The default value is: "default".&lt;/p&gt;</xs:documentation>
+        </xs:annotation>
+      </xs:attribute>
+      <xs:attribute name="min" type="config:memsize">
+        <xs:annotation>
+          <xs:documentation>
+&lt;p&gt;This sets the minimum acceptable socket send buffer size, with the special value "default" indicating that whatever is available is acceptable.&lt;/p&gt;
+&lt;p&gt;The unit must be specified explicitly. Recognised units: B (bytes), kB &amp; KiB (2&lt;sup&gt;10&lt;/sup&gt; bytes), MB &amp; MiB (2&lt;sup&gt;20&lt;/sup&gt; bytes), GB &amp; GiB (2&lt;sup&gt;30&lt;/sup&gt; bytes).&lt;/p&gt;
+&lt;p&gt;The default value is: "64 KiB".&lt;/p&gt;</xs:documentation>
+        </xs:annotation>
+      </xs:attribute>
+    </xs:complexType>
   </xs:element>
   <xs:element name="SquashParticipants" type="xs:boolean">
     <xs:annotation>
@@ -1532,9 +1611,6 @@ MIIEpAIBAAKCAQEA3HIh...AOBaaqSV37XBUJg==&lt;br&gt;
         <xs:element minOccurs="0" ref="config:Locator"/>
         <xs:element minOccurs="0" ref="config:LogLevel"/>
         <xs:element minOccurs="0" ref="config:Prefix"/>
-        <xs:element minOccurs="0" ref="config:PubHistoryCapacity"/>
-        <xs:element minOccurs="0" ref="config:SubHistoryRequest"/>
-        <xs:element minOccurs="0" ref="config:SubQueueCapacity"/>
       </xs:all>
     </xs:complexType>
   </xs:element>
@@ -1576,27 +1652,6 @@ MIIEpAIBAAKCAQEA3HIh...AOBaaqSV37XBUJg==&lt;br&gt;
       <xs:documentation>
 &lt;p&gt;Override the Iceoryx service name used by Cyclone.&lt;/p&gt;
 &lt;p&gt;The default value is: "DDS_CYCLONE".&lt;/p&gt;</xs:documentation>
-    </xs:annotation>
-  </xs:element>
-  <xs:element name="PubHistoryCapacity" type="xs:integer">
-    <xs:annotation>
-      <xs:documentation>
-&lt;p&gt;The number of messages which will be stored on the publisher for late joining subscribers. Should be a value between 0 and 16 and be equal to or larger than SubHistoryRequest.&lt;/p&gt;
-&lt;p&gt;The default value is: "16".&lt;/p&gt;</xs:documentation>
-    </xs:annotation>
-  </xs:element>
-  <xs:element name="SubHistoryRequest" type="xs:integer">
-    <xs:annotation>
-      <xs:documentation>
-&lt;p&gt;The number of messages published before subscription which will be requested by a subscriber upon subscription. Should be a value between 0 and 16.&lt;/p&gt;
-&lt;p&gt;The default value is: "16".&lt;/p&gt;</xs:documentation>
-    </xs:annotation>
-  </xs:element>
-  <xs:element name="SubQueueCapacity" type="xs:integer">
-    <xs:annotation>
-      <xs:documentation>
-&lt;p&gt;Size of the history chunk queue, this is the amount of messages stored between taking from the iceoryx subscriber, exceeding this number will cause the oldest to be pushed off the queue. Should be a value between 1 and 256.&lt;/p&gt;
-&lt;p&gt;The default value is: "256".&lt;/p&gt;</xs:documentation>
     </xs:annotation>
   </xs:element>
   <xs:element name="Sizing">
@@ -1889,3 +1944,13 @@ MIIEpAIBAAKCAQEA3HIh...AOBaaqSV37XBUJg==&lt;br&gt;
     </xs:restriction>
   </xs:simpleType>
 </xs:schema>
+<!--- generated from ddsi_config.h[65e4d0ff87910896249e76fb2e80d209874d4f7d] -->
+<!--- generated from ddsi_cfgunits.h[1e595223d52f30511d2b844a979277227d15fd3e] -->
+<!--- generated from ddsi_cfgelems.h[1b576c58b8e860d90bb52a8f134dd0d4c4717ce8] -->
+<!--- generated from ddsi_config.c[cfa9bdfba7ced22441d4139e93049ca8ac705da4] -->
+<!--- generated from _confgen.h[4c987ae42ea0d7e691a88609b30aaf756260a8c4] -->
+<!--- generated from _confgen.c[d1f3a36646cebdcbe4788725beebad9f5ee90f94] -->
+<!--- generated from generate_rnc.c[9785c4c557a472db1c1685daa2b82c39202ed17a] -->
+<!--- generated from generate_md.c[c3f3a8c63374bad4dbfb792e3509d4a5ab0d03fd] -->
+<!--- generated from generate_xsd.c[47ff306dce0c19d2c18704ce674642f62cccf40f] -->
+<!--- generated from generate_defconfig.c[a92ac1bffb20880e2efbc215e17b1c8c32f4ee5e] -->

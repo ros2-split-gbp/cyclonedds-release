@@ -19,7 +19,7 @@
 #include "dds/ddsrt/md5.h"
 #include "dds/ddsrt/mh3.h"
 #include "dds/ddsi/q_bswap.h"
-#include "dds/ddsi/q_config.h"
+#include "dds/ddsi/ddsi_config_impl.h"
 #include "dds/ddsi/q_freelist.h"
 #include "dds/ddsi/ddsi_tkmap.h"
 #include "dds/ddsi/ddsi_cdrstream.h"
@@ -213,7 +213,7 @@ static void serdata_plist_to_ser_unref (struct ddsi_serdata *serdata_common, con
 static struct ddsi_serdata *serdata_plist_from_sample (const struct ddsi_sertype *tpcmn, enum ddsi_serdata_kind kind, const void *sample)
 {
   const struct ddsi_sertype_plist *tp = (const struct ddsi_sertype_plist *)tpcmn;
-  const struct { uint16_t identifier, options; } header = { tp->native_encoding_identifier, 0 };
+  const struct { uint16_t identifier, options; } header = { ddsi_sertype_get_native_enc_identifier (CDR_ENC_VERSION_1, tp->encoding_format), 0 };
 
   // FIXME: key must not require byteswapping (GUIDs are ok)
   // FIXME: rework plist stuff so it doesn't need an nn_xmsg

@@ -33,7 +33,7 @@
 #include "dds/ddsi/q_rtps.h"
 #include "dds/ddsi/q_misc.h"
 
-#include "dds/ddsi/q_config.h"
+#include "dds/ddsi/ddsi_config_impl.h"
 #include "dds/ddsi/q_log.h"
 
 #include "dds/ddsi/ddsi_plist.h"
@@ -955,7 +955,7 @@ void nn_defrag_free (struct nn_defrag *defrag)
   s = ddsrt_avl_find_min (&defrag_sampletree_treedef, &defrag->sampletree);
   while (s)
   {
-    TRACE (defrag, "defrag_free(%p, sample %p seq %"PRId64")\n", (void *) defrag, (void *) s, s->u.defrag.seq);
+    TRACE (defrag, "defrag_free(%p, sample %p seq %"PRIu64")\n", (void *) defrag, (void *) s, s->u.defrag.seq);
     defrag_rsample_drop (defrag, s);
     s = ddsrt_avl_find_min (&defrag_sampletree_treedef, &defrag->sampletree);
   }
@@ -1321,7 +1321,7 @@ static int defrag_limit_samples (struct nn_defrag *defrag, seqno_t seq, seqno_t 
   {
     defrag->max_sample = ddsrt_avl_find_max (&defrag_sampletree_treedef, &defrag->sampletree);
     *max_seq = defrag->max_sample ? defrag->max_sample->u.defrag.seq : 0;
-    TRACE (defrag, "  updating max_sample: now %p %"PRId64"\n",
+    TRACE (defrag, "  updating max_sample: now %p %"PRIu64"\n",
            (void *) defrag->max_sample, defrag->max_sample ? defrag->max_sample->u.defrag.seq : 0);
   }
   return 1;
@@ -1367,7 +1367,7 @@ struct nn_rsample *nn_defrag_rsample (struct nn_defrag *defrag, struct nn_rdata 
      consistent. Max_sample must be consistent with tree */
   assert (defrag->max_sample == ddsrt_avl_find_max (&defrag_sampletree_treedef, &defrag->sampletree));
   max_seq = defrag->max_sample ? defrag->max_sample->u.defrag.seq : 0;
-  TRACE (defrag, "defrag_rsample(%p, %p [%"PRIu32"..%"PRIu32") msg %p, %p seq %"PRId64" size %"PRIu32") max_seq %p %"PRId64":\n",
+  TRACE (defrag, "defrag_rsample(%p, %p [%"PRIu32"..%"PRIu32") msg %p, %p seq %"PRIu64" size %"PRIu32") max_seq %p %"PRIu64":\n",
          (void *) defrag, (void *) rdata, rdata->min, rdata->maxp1, (void *) rdata->rmsg,
          (void *) sampleinfo, sampleinfo->seq, sampleinfo->size,
          (void *) defrag->max_sample, max_seq);
@@ -1427,7 +1427,7 @@ struct nn_rsample *nn_defrag_rsample (struct nn_defrag *defrag, struct nn_rdata 
     if (result == defrag->max_sample)
     {
       defrag->max_sample = ddsrt_avl_find_max (&defrag_sampletree_treedef, &defrag->sampletree);
-      TRACE (defrag, "  updating max_sample: now %p %"PRId64"\n",
+      TRACE (defrag, "  updating max_sample: now %p %"PRIu64"\n",
              (void *) defrag->max_sample, defrag->max_sample ? defrag->max_sample->u.defrag.seq : 0);
     }
     rsample_convert_defrag_to_reorder (result);
@@ -1767,16 +1767,16 @@ static int reorder_try_append_and_discard (struct nn_reorder *reorder, struct nn
   }
   else if (appendto->u.reorder.maxp1 < todiscard->u.reorder.min)
   {
-    TRACE (reorder, "  try_append_and_discard: fail: appendto = [%"PRId64",%"PRId64") @ %p, "
-           "todiscard = [%"PRId64",%"PRId64") @ %p - gap\n",
+    TRACE (reorder, "  try_append_and_discard: fail: appendto = [%"PRIu64",%"PRIu64") @ %p, "
+           "todiscard = [%"PRIu64",%"PRIu64") @ %p - gap\n",
            appendto->u.reorder.min, appendto->u.reorder.maxp1, (void *) appendto,
            todiscard->u.reorder.min, todiscard->u.reorder.maxp1, (void *) todiscard);
     return 0;
   }
   else
   {
-    TRACE (reorder, "  try_append_and_discard: success: appendto = [%"PRId64",%"PRId64") @ %p, "
-           "todiscard = [%"PRId64",%"PRId64") @ %p\n",
+    TRACE (reorder, "  try_append_and_discard: success: appendto = [%"PRIu64",%"PRIu64") @ %p, "
+           "todiscard = [%"PRIu64",%"PRIu64") @ %p\n",
            appendto->u.reorder.min, appendto->u.reorder.maxp1, (void *) appendto,
            todiscard->u.reorder.min, todiscard->u.reorder.maxp1, (void *) todiscard);
     assert (todiscard->u.reorder.min == appendto->u.reorder.maxp1);
@@ -1876,7 +1876,7 @@ static void delete_last_sample (struct nn_reorder *reorder)
        large!).  Can't be a singleton list, so might as well chop off
        one evaluation of the loop condition. */
     struct nn_rsample_chain_elem *e, *pe;
-    TRACE (reorder, "  delete_last_sample: scanning last interval [%"PRId64"..%"PRId64")\n", last->min, last->maxp1);
+    TRACE (reorder, "  delete_last_sample: scanning last interval [%"PRIu64"..%"PRIu64")\n", last->min, last->maxp1);
     assert (last->n_samples >= 1);
     assert (last->min + last->n_samples <= last->maxp1);
     e = last->sc.first;
@@ -1907,7 +1907,7 @@ nn_reorder_result_t nn_reorder_rsample (struct nn_rsample_chain *sc, struct nn_r
      refcount_adjust is incremented if the sample is not discarded. */
   struct nn_rsample_reorder *s = &rsampleiv->u.reorder;
 
-  TRACE (reorder, "reorder_sample(%p %c, %"PRId64" @ %p) expecting %"PRId64":\n",
+  TRACE (reorder, "reorder_sample(%p %c, %"PRIu64" @ %p) expecting %"PRIu64":\n",
          (void *) reorder, reorder_mode_as_char (reorder), rsampleiv->u.reorder.min,
          (void *) rsampleiv, reorder->next_seq);
 
@@ -1920,7 +1920,7 @@ nn_reorder_result_t nn_reorder_rsample (struct nn_rsample_chain *sc, struct nn_r
   {
     struct nn_rsample *min = ddsrt_avl_find_min (&reorder_sampleivtree_treedef, &reorder->sampleivtree);
     if (min)
-      TRACE (reorder, "  min = %"PRId64" @ %p\n", min->u.reorder.min, (void *) min);
+      TRACE (reorder, "  min = %"PRIu64" @ %p\n", min->u.reorder.min, (void *) min);
     assert (min == NULL || reorder->next_seq < min->u.reorder.min);
     assert ((reorder->max_sampleiv == NULL && min == NULL) ||
             (reorder->max_sampleiv != NULL && min != NULL));
@@ -1930,7 +1930,7 @@ nn_reorder_result_t nn_reorder_rsample (struct nn_rsample_chain *sc, struct nn_r
   assert (reorder->max_sampleiv == NULL || reorder->max_sampleiv == ddsrt_avl_find_max (&reorder_sampleivtree_treedef, &reorder->sampleivtree));
   assert (reorder->n_samples <= reorder->max_samples);
   if (reorder->max_sampleiv)
-    TRACE (reorder, "  max = [%"PRId64",%"PRId64") @ %p\n", reorder->max_sampleiv->u.reorder.min,
+    TRACE (reorder, "  max = [%"PRIu64",%"PRIu64") @ %p\n", reorder->max_sampleiv->u.reorder.min,
            reorder->max_sampleiv->u.reorder.maxp1, (void *) reorder->max_sampleiv);
 
   if (s->min == reorder->next_seq ||
@@ -1964,7 +1964,7 @@ nn_reorder_result_t nn_reorder_rsample (struct nn_rsample_chain *sc, struct nn_r
     reorder->next_seq = s->maxp1;
     *sc = rsampleiv->u.reorder.sc;
     (*refcount_adjust)++;
-    TRACE (reorder, "  return [%"PRId64",%"PRId64")\n", s->min, s->maxp1);
+    TRACE (reorder, "  return [%"PRIu64",%"PRIu64")\n", s->min, s->maxp1);
 
     /* Adjust reorder->n_samples, new sample is not counted yet */
     assert (s->maxp1 - s->min >= 1);
@@ -2071,7 +2071,7 @@ nn_reorder_result_t nn_reorder_rsample (struct nn_rsample_chain *sc, struct nn_r
 
     predeq = ddsrt_avl_lookup_pred_eq (&reorder_sampleivtree_treedef, &reorder->sampleivtree, &s->min);
     if (predeq)
-      TRACE (reorder, "  predeq = [%"PRId64",%"PRId64") @ %p\n",
+      TRACE (reorder, "  predeq = [%"PRIu64",%"PRIu64") @ %p\n",
              predeq->u.reorder.min, predeq->u.reorder.maxp1, (void *) predeq);
     else
       TRACE (reorder, "  predeq = null\n");
@@ -2085,7 +2085,7 @@ nn_reorder_result_t nn_reorder_rsample (struct nn_rsample_chain *sc, struct nn_r
 
     immsucc = ddsrt_avl_lookup (&reorder_sampleivtree_treedef, &reorder->sampleivtree, &s->maxp1);
     if (immsucc)
-      TRACE (reorder, "  immsucc = [%"PRId64",%"PRId64") @ %p\n",
+      TRACE (reorder, "  immsucc = [%"PRIu64",%"PRIu64") @ %p\n",
              immsucc->u.reorder.min, immsucc->u.reorder.maxp1, (void *) immsucc);
     else
       TRACE (reorder, "  immsucc = null\n");
@@ -2255,7 +2255,7 @@ nn_reorder_result_t nn_reorder_gap (struct nn_rsample_chain *sc, struct nn_reord
   struct nn_rsample *coalesced;
   int valuable;
 
-  TRACE (reorder, "reorder_gap(%p %c, [%"PRId64",%"PRId64") data %p) expecting %"PRId64":\n",
+  TRACE (reorder, "reorder_gap(%p %c, [%"PRIu64",%"PRIu64") data %p) expecting %"PRIu64":\n",
          (void *) reorder, reorder_mode_as_char (reorder),
          min, maxp1, (void *) rdata, reorder->next_seq);
 
@@ -2277,7 +2277,7 @@ nn_reorder_result_t nn_reorder_gap (struct nn_rsample_chain *sc, struct nn_reord
     TRACE (reorder, "  coalesced = null\n");
     if (min <= reorder->next_seq)
     {
-      TRACE (reorder, "  next expected: %"PRId64"\n", maxp1);
+      TRACE (reorder, "  next expected: %"PRIu64"\n", maxp1);
       reorder->next_seq = maxp1;
       res = NN_REORDER_ACCEPT;
     }
@@ -2311,7 +2311,7 @@ nn_reorder_result_t nn_reorder_gap (struct nn_rsample_chain *sc, struct nn_reord
   }
   else if (coalesced->u.reorder.min <= reorder->next_seq)
   {
-    TRACE (reorder, "  coalesced = [%"PRId64",%"PRId64") @ %p containing %"PRId32" samples\n",
+    TRACE (reorder, "  coalesced = [%"PRIu64",%"PRIu64") @ %p containing %"PRId32" samples\n",
            coalesced->u.reorder.min, coalesced->u.reorder.maxp1,
            (void *) coalesced, coalesced->u.reorder.n_samples);
     ddsrt_avl_delete (&reorder_sampleivtree_treedef, &reorder->sampleivtree, coalesced);
@@ -2319,7 +2319,7 @@ nn_reorder_result_t nn_reorder_gap (struct nn_rsample_chain *sc, struct nn_reord
       assert (min <= reorder->next_seq);
     reorder->next_seq = coalesced->u.reorder.maxp1;
     reorder->max_sampleiv = ddsrt_avl_find_max (&reorder_sampleivtree_treedef, &reorder->sampleivtree);
-    TRACE (reorder, "  next expected: %"PRId64"\n", reorder->next_seq);
+    TRACE (reorder, "  next expected: %"PRIu64"\n", reorder->next_seq);
     *sc = coalesced->u.reorder.sc;
 
     /* Adjust n_samples */
@@ -2330,7 +2330,7 @@ nn_reorder_result_t nn_reorder_gap (struct nn_rsample_chain *sc, struct nn_reord
   }
   else
   {
-    TRACE (reorder, "  coalesced = [%"PRId64",%"PRId64") @ %p - that is all\n",
+    TRACE (reorder, "  coalesced = [%"PRIu64",%"PRIu64") @ %p - that is all\n",
            coalesced->u.reorder.min, coalesced->u.reorder.maxp1, (void *) coalesced);
     reorder->max_sampleiv = ddsrt_avl_find_max (&reorder_sampleivtree_treedef, &reorder->sampleivtree);
     return valuable ? NN_REORDER_ACCEPT : NN_REORDER_REJECT;
@@ -2382,9 +2382,6 @@ int nn_reorder_wantsample (const struct nn_reorder *reorder, seqno_t seq)
 
 unsigned nn_reorder_nackmap (const struct nn_reorder *reorder, seqno_t base, seqno_t maxseq, struct nn_sequence_number_set_header *map, uint32_t *mapbits, uint32_t maxsz, int notail)
 {
-  struct nn_rsample *iv;
-  seqno_t i;
-
   /* reorder->next_seq-1 is the last one we delivered, so the last one
      we ack; maxseq is the latest sample we know exists.  Valid bitmap
      lengths are 1 .. 256, so maxsz must be within that range, except
@@ -2402,13 +2399,13 @@ unsigned nn_reorder_nackmap (const struct nn_reorder *reorder, seqno_t base, seq
 #else
   if (base > reorder->next_seq)
   {
-    DDS_CERROR (reorder->logcfg, "nn_reorder_nackmap: incorrect base sequence number supplied (%"PRId64" > %"PRId64")\n", base, reorder->next_seq);
+    DDS_CERROR (reorder->logcfg, "nn_reorder_nackmap: incorrect base sequence number supplied (%"PRIu64" > %"PRIu64")\n", base, reorder->next_seq);
     base = reorder->next_seq;
   }
 #endif
   if (maxseq + 1 < base)
   {
-    DDS_CERROR (reorder->logcfg, "nn_reorder_nackmap: incorrect max sequence number supplied (maxseq %"PRId64" base %"PRId64")\n", maxseq, base);
+    DDS_CERROR (reorder->logcfg, "nn_reorder_nackmap: incorrect max sequence number supplied (maxseq %"PRIu64" base %"PRIu64")\n", maxseq, base);
     maxseq = base - 1;
   }
 
@@ -2419,26 +2416,26 @@ unsigned nn_reorder_nackmap (const struct nn_reorder *reorder, seqno_t base, seq
     map->numbits = (uint32_t) (maxseq + 1 - base);
   nn_bitset_zero (map->numbits, mapbits);
 
-  if ((iv = ddsrt_avl_find_min (&reorder_sampleivtree_treedef, &reorder->sampleivtree)) != NULL)
-    assert (iv->u.reorder.min > base);
-  i = base;
+  struct nn_rsample *iv = ddsrt_avl_find_min (&reorder_sampleivtree_treedef, &reorder->sampleivtree);
+  assert (iv == NULL || iv->u.reorder.min > base);
+  seqno_t i = base;
   while (iv && i < base + map->numbits)
   {
     for (; i < base + map->numbits && i < iv->u.reorder.min; i++)
     {
-      unsigned x = (unsigned) (i - base);
+      uint32_t x = (uint32_t) (i - base);
       nn_bitset_set (map->numbits, mapbits, x);
     }
     i = iv->u.reorder.maxp1;
     iv = ddsrt_avl_find_succ (&reorder_sampleivtree_treedef, &reorder->sampleivtree, iv);
   }
   if (notail && i < base + map->numbits)
-    map->numbits = (unsigned) (i - base);
+    map->numbits = (uint32_t) (i - base);
   else
   {
     for (; i < base + map->numbits; i++)
     {
-      unsigned x = (unsigned) (i - base);
+      uint32_t x = (uint32_t) (i - base);
       nn_bitset_set (map->numbits, mapbits, x);
     }
   }
@@ -2466,6 +2463,7 @@ struct nn_dqueue {
   struct nn_rsample_chain sc;
 
   struct thread_state1 *ts;
+  struct ddsi_domaingv *gv;
   char *name;
   uint32_t max_samples;
   ddsrt_atomic_uint32_t nof_samples;
@@ -2607,8 +2605,6 @@ static uint32_t dqueue_thread (struct nn_dqueue *q)
 struct nn_dqueue *nn_dqueue_new (const char *name, const struct ddsi_domaingv *gv, uint32_t max_samples, nn_dqueue_handler_t handler, void *arg)
 {
   struct nn_dqueue *q;
-  char *thrname;
-  size_t thrnamesz;
 
   if ((q = ddsrt_malloc (sizeof (*q))) == NULL)
     goto fail_q;
@@ -2619,29 +2615,30 @@ struct nn_dqueue *nn_dqueue_new (const char *name, const struct ddsi_domaingv *g
   q->handler = handler;
   q->handler_arg = arg;
   q->sc.first = q->sc.last = NULL;
+  q->gv = (struct ddsi_domaingv *) gv;
+  q->ts = NULL;
 
   ddsrt_mutex_init (&q->lock);
   ddsrt_cond_init (&q->cond);
 
-  thrnamesz = 3 + strlen (name) + 1;
-  if ((thrname = ddsrt_malloc (thrnamesz)) == NULL)
-    goto fail_thrname;
-  (void) snprintf (thrname, thrnamesz, "dq.%s", name);
-  if (create_thread (&q->ts, gv, thrname, (uint32_t (*) (void *)) dqueue_thread, q) != DDS_RETCODE_OK)
-    goto fail_thread;
-  ddsrt_free (thrname);
   return q;
-
- fail_thread:
-  ddsrt_free (thrname);
- fail_thrname:
-  ddsrt_cond_destroy (&q->cond);
-  ddsrt_mutex_destroy (&q->lock);
-  ddsrt_free (q->name);
  fail_name:
   ddsrt_free (q);
  fail_q:
   return NULL;
+}
+
+bool nn_dqueue_start (struct nn_dqueue *q)
+{
+  char *thrname;
+  size_t thrnamesz;
+  thrnamesz = 3 + strlen (q->name) + 1;
+  if ((thrname = ddsrt_malloc (thrnamesz)) == NULL)
+    return false;
+  (void) snprintf (thrname, thrnamesz, "dq.%s", q->name);
+  dds_return_t ret = create_thread (&q->ts, q->gv, thrname, (uint32_t (*) (void *)) dqueue_thread, q);
+  ddsrt_free (thrname);
+  return ret == DDS_RETCODE_OK;
 }
 
 static int nn_dqueue_enqueue_locked (struct nn_dqueue *q, struct nn_rsample_chain *sc)
@@ -2770,6 +2767,29 @@ void nn_dqueue_wait_until_empty_if_full (struct nn_dqueue *q)
   }
 }
 
+static void dqueue_free_remaining_elements (struct nn_dqueue *q)
+{
+  assert (q->ts == NULL);
+  while (q->sc.first)
+  {
+    struct nn_rsample_chain_elem *e = q->sc.first;
+    q->sc.first = e->next;
+    switch (dqueue_elem_kind (e))
+    {
+      case DQEK_DATA:
+      case DQEK_GAP:
+        nn_fragchain_unref (e->fragchain);
+        break;
+      case DQEK_BUBBLE: {
+        struct nn_dqueue_bubble *b = (struct nn_dqueue_bubble *) e->sampleinfo;
+        if (b->kind != NN_DQBK_STOP)
+          ddsrt_free (b);
+        break;
+      }
+    }
+  }
+}
+
 void nn_dqueue_free (struct nn_dqueue *q)
 {
   /* There must not be any thread enqueueing things anymore at this
@@ -2777,12 +2797,19 @@ void nn_dqueue_free (struct nn_dqueue *q)
      malloced or freed, but instead lives on the stack for a little
      while.  It would be a shame to fail in free() due to a lack of
      heap space, would it not? */
-  struct nn_dqueue_bubble b;
-  b.kind = NN_DQBK_STOP;
-  nn_dqueue_enqueue_bubble (q, &b);
+  if (q->ts)
+  {
+    struct nn_dqueue_bubble b;
+    b.kind = NN_DQBK_STOP;
+    nn_dqueue_enqueue_bubble (q, &b);
 
-  join_thread (q->ts);
-  assert (q->sc.first == NULL);
+    join_thread (q->ts);
+    assert (q->sc.first == NULL);
+  }
+  else
+  {
+    dqueue_free_remaining_elements (q);
+  }
   ddsrt_cond_destroy (&q->cond);
   ddsrt_mutex_destroy (&q->lock);
   ddsrt_free (q->name);
