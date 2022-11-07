@@ -128,11 +128,11 @@ tracks:
     patches: null
     release_inc: '2'
     release_repo_url: https://github.com/ros2-gbp/cyclonedds-release.git
-    release_tag: 0.9.0b1
+    release_tag: :{version}
     ros_distro: humble
     vcs_type: git
     vcs_uri: https://github.com/eclipse-cyclonedds/cyclonedds.git
-    version: 0.9.0
+    version: :{auto}
   rolling:
     actions:
     - bloom-export-upstream :{vcs_local_uri} :{vcs_type} --tag :{release_tag} --display-uri
